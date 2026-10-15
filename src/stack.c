@@ -190,20 +190,74 @@ void stack_input(const u8 *frame, u32 length)
         ip_input(frame, length);
 }
 
-/* The generator. One frame is built and only the IP id and checksum change, so
- * the cost per datagram is the copy into the transmit slot. When the ring is full
- * it gives the processor up for a millisecond rather than spinning. */
+/* The generator: a pump driven by transmit completions.
+ *
+ * Sleeping a thread when the ring is full costs a whole scheduler quantum -- the
+ * first version did that and topped out at 2000 frames a second, 32 per ~16 ms.
+ * Instead the next frame is queued from the completion that freed a slot, at
+ * DISPATCH_LEVEL on the USB processor, so the ring never runs dry.
+ *
+ * One frame is built and only its sequence number, IP id and checksum change. The
+ * fill runs under a test-and-set flag rather than a spin lock: a completion that
+ * finished synchronously inside the queue call would re-enter on the same
+ * processor, and a spin lock would deadlock there. Whoever finds the flag taken
+ * leaves the work to the holder, which looks again after letting go. */
 static u8 blast_frame[ETH_FRAME_MAX];
+static volatile u32 blast_left;
+static volatile u32 blast_seq;
+static volatile u32 blast_filling;
+static u32 blast_length;
 
+static void blast_fill(void)
+{
+    u8 *ip = blast_frame + ETH_HLEN;
+    u8 *udp = ip + 20;
+
+    for (;;) {
+        if (__sync_lock_test_and_set(&blast_filling, 1))
+            return;
+        while (blast_left && net_tx_space()) {
+            wr32(udp + 8, blast_seq);           /* sequence number, for loss */
+            wr16(ip + 4, blast_seq);
+            wr16(ip + 10, 0);
+            wr16(ip + 10, ip_checksum(ip, 20, 0));
+            if (!net_tx(blast_frame, blast_length))
+                break;
+            blast_seq = blast_seq + 1;
+            blast_left = blast_left - 1;
+            stack_stats.blast_sent = blast_seq;
+        }
+        __sync_lock_release(&blast_filling);
+        if (!blast_left || !net_tx_space() || !net_link_up())
+            break;
+    }
+    if (!blast_left || !net_link_up()) {
+        net_tx_idle = 0;
+        stack_stats.blast_busy = 0;
+    }
+}
+
+/* Start sending `count` datagrams of `payload` bytes to the last peer on `port`
+ * and return at once; progress is in stack_stats. A count of 0 stops a run. */
 u32 stack_blast(u32 count, u32 payload, u32 port)
 {
     u8 *ip = blast_frame + ETH_HLEN;
     u8 *udp = ip + 20;
-    u32 sent = 0, i, total;
+    u32 i, total;
+
+    blast_left = 0;
+    net_tx_idle = 0;
+    mem_sync();
+    if (!count) {
+        stack_stats.blast_busy = 0;
+        return stack_stats.blast_sent;
+    }
+    while (blast_filling)                       /* let a fill in flight finish */
+        usb_sleep(1);
 
     if (payload > ETH_FRAME_MAX - ETH_HLEN - 28)
         payload = ETH_FRAME_MAX - ETH_HLEN - 28;
-    if (!stack_stats.peer_ip)
+    if (!stack_stats.peer_ip || !net_link_up())
         return 0;
     total = 20 + 8 + payload;
 
@@ -224,20 +278,14 @@ u32 stack_blast(u32 count, u32 payload, u32 port)
     wr16(udp + 6, 0);
     for (i = 0; i < payload; i++)
         udp[8 + i] = (u8)i;
+    blast_length = ETH_HLEN + total;
 
+    blast_seq = 0;
+    stack_stats.blast_sent = 0;
     stack_stats.blast_busy = 1;
-    while (sent < count && net_link_up()) {
-        wr32(udp + 8, sent);                    /* sequence number, for loss */
-        wr16(ip + 4, sent);
-        wr16(ip + 10, 0);
-        wr16(ip + 10, ip_checksum(ip, 20, 0));
-        if (net_tx(blast_frame, ETH_HLEN + total)) {
-            sent++;
-            stack_stats.blast_sent = sent;
-        } else {
-            usb_sleep(1);
-        }
-    }
-    stack_stats.blast_busy = 0;
-    return sent;
+    blast_left = count;
+    mem_sync();
+    net_tx_idle = blast_fill;
+    blast_fill();
+    return 0;
 }

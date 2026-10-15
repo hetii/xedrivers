@@ -23,9 +23,9 @@
 #include "usb.h"
 #include "cdc.h"
 
-#define RX_COUNT   16
+#define RX_COUNT   32
 #define RX_SIZE    2048         /* a multiple of 512, so a frame never babbles */
-#define TX_COUNT   32
+#define TX_COUNT   64
 #define TX_SIZE    2048
 #define CTRL_SIZE  512
 #define INTR_SIZE  64
@@ -37,6 +37,7 @@
 
 volatile NET_RX net_rx;
 volatile NET_LINK net_link_cb;
+volatile NET_TX_IDLE net_tx_idle;
 u8 net_mac[ETH_ALEN];
 volatile NET_STATS net_stats;
 
@@ -173,6 +174,13 @@ static void tx_complete(URB *urb, u32 status)
     net_stats.tx_inflight--;
     mem_sync();
     urb->Busy = 0;
+    if (net_tx_idle)
+        net_tx_idle();
+}
+
+u32 net_tx_space(void)
+{
+    return running && !tx_urb[tx_next].Busy;
 }
 
 u32 net_tx(const u8 *frame, u32 length)

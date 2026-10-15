@@ -56,7 +56,9 @@ typedef struct _KDPC {
 } KDPC;
 
 /* Read off KeRaiseIrqlToDpcLevel and KeInsertQueueDpc: IRQL is the byte at PCR+0x18,
- * the current hardware thread the byte at PCR+0x10C. */
+ * the current hardware thread the byte at PCR+0x10C. The host build of tests/ gets
+ * stand-ins: those translation units never reach the console's PCR. */
+#if defined(__powerpc__)
 static inline u32 ke_irql(void)
 {
     u32 v;
@@ -75,6 +77,11 @@ static inline void mem_sync(void)
 {
     __asm__ volatile("sync" ::: "memory");
 }
+#else
+static inline u32 ke_irql(void) { return 0; }
+static inline u32 ke_processor(void) { return 0; }
+static inline void mem_sync(void) { __sync_synchronize(); }
+#endif
 
 /* --- USB ----------------------------------------------------------------------
  * xerunner: usb-driver-object-f1@1 -- the 28-byte driver object. */

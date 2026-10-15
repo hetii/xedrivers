@@ -1,7 +1,8 @@
 # Building the RTL8156 driver plugin, and running the host tests.
 #
 #   make                 build build/xedrivers.xex
-#   make DEBUG=1 all     the same, with extra markers compiled in
+#   make MODE=xnet ADVERTISE=2500 IP=10.36.0.2
+#                        choose how it runs (see "Modes" below)
 #   make test            native unit tests of the pure parts (cdc, stack checksum)
 #   make lint            cppcheck / clang-tidy over src/, if installed
 #   make push            put the plugin on the Orange Pi's mass-storage image (Usb:)
@@ -16,6 +17,25 @@
 NAME     := xedrivers
 BASE     := 0x91C00000
 ORDINALS := 21256.0
+
+# Modes. MODE: who gets the frames -- standalone (the built-in responder on IP),
+# xnet (the console's own network) or drop. ADVERTISE: the fastest link the PHY
+# offers -- 2500, 1000, 100, or default (the card's firmware choice, 10/100 in
+# CDC-ECM). All three can also be changed on a running console: tests/xectl.py.
+MODE      ?= standalone
+ADVERTISE ?= 2500
+IP        ?= 10.36.0.2
+
+mode_standalone := 1
+mode_xnet       := 2
+mode_drop       := 0
+adv_2500        := 0x6F
+adv_1000        := 0x2F
+adv_100         := 0x0F
+adv_default     := 0
+MODE_VALUE := $(or $(mode_$(MODE)),$(error MODE must be standalone, xnet or drop))
+ADV_VALUE  := $(or $(adv_$(ADVERTISE)),$(error ADVERTISE must be 2500, 1000, 100 or default))
+IP_VALUE   := $(shell python3 -c "import ipaddress,sys; print(hex(int(ipaddress.IPv4Address('$(IP)'))))")
 
 SRC      := $(wildcard src/*.c)
 HEADERS  := $(wildcard src/*.h)
@@ -37,6 +57,7 @@ XERUNNER_HOME ?= $(abspath ../xerunner)
 XERUNNER      ?= $(firstword $(wildcard $(XERUNNER_HOME)/.venv/bin/xerunner) xerunner)
 
 XEX := $(BUILD)/$(NAME).xex
+FLAGS_LINE := DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE)
 
 .PHONY: all clean test lint kit push deploy
 
@@ -46,8 +67,7 @@ all: $(XEX)
 # rather than handing back the binary it was meant to replace.
 $(BUILD)/flags: FORCE
 	@mkdir -p $(BUILD)
-	@echo "DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS)" | cmp -s - $@ \
-	    || echo "DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS)" > $@
+	@echo "$(FLAGS_LINE)" | cmp -s - $@ || echo "$(FLAGS_LINE)" > $@
 FORCE:
 
 $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile \
@@ -55,15 +75,18 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile \
 	@mkdir -p $(BUILD)
 	$(PYTHON) $(KIT)/plugin.py $(SRC) \
 	    --ordinals $(KIT)/ordinals-$(ORDINALS).txt --base $(BASE) \
-	    -I src -D XE_DEBUG=$(DEBUG) --name $(NAME).dll --into $(BUILD)
+	    -I src -D XE_DEBUG=$(DEBUG) -D XE_MODE=$(MODE_VALUE)u \
+	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
+	    --name $(NAME).dll --into $(BUILD)
 	@mv $(BUILD)/plugin.xex $@
 	@echo "  -> $@"
 
 # Native tests. cdc.c and stack.c are pure byte code; kernel.h's inline asm is not
 # reached by the test translation units, so they build with the host compiler.
-test: $(BUILD)/test_cdc $(BUILD)/test_stack
+test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl
 	@$(BUILD)/test_cdc
 	@$(BUILD)/test_stack
+	@$(BUILD)/test_rtl
 
 $(BUILD)/test_cdc: tests/test_cdc.c src/cdc.c tests/fixtures.h $(HEADERS)
 	@mkdir -p $(BUILD)
@@ -72,6 +95,10 @@ $(BUILD)/test_cdc: tests/test_cdc.c src/cdc.c tests/fixtures.h $(HEADERS)
 $(BUILD)/test_stack: tests/test_stack.c src/stack.c $(HEADERS)
 	@mkdir -p $(BUILD)
 	gcc -std=c99 -Wall -Wextra -O2 -Isrc -o $@ tests/test_stack.c src/stack.c
+
+$(BUILD)/test_rtl: tests/test_rtl.c src/rtl.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	gcc -std=c99 -Wall -Wextra -O2 -Isrc -o $@ tests/test_rtl.c src/rtl.c
 
 lint:
 	@command -v cppcheck >/dev/null && cppcheck --std=c99 --enable=warning,style \

@@ -12,8 +12,9 @@ extern volatile u32 stack_ip;           /* ours, host order; default 10.36.0.2 *
 
 void stack_input(const u8 *frame, u32 length);
 
-/* Thread-only. Send `count` UDP datagrams of `payload` bytes to the last peer that
- * spoke to us, on `port`. Returns how many were queued. */
+/* Thread-only. Start sending `count` UDP datagrams of `payload` bytes to the last
+ * peer that spoke to us, on `port`, and return; count 0 stops a run in progress.
+ * Progress: stack_stats.blast_sent / blast_busy. */
 u32  stack_blast(u32 count, u32 payload, u32 port);
 
 typedef struct {

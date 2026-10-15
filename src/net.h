@@ -19,6 +19,12 @@ extern volatile NET_RX net_rx;
 typedef void (*NET_LINK)(u32 up);
 extern volatile NET_LINK net_link_cb;
 
+/* Called at the end of every transmit completion, at DISPATCH_LEVEL on the USB
+ * processor, once a slot has been freed -- for a sender that wants to keep the ring
+ * full without a thread waiting on it (stack.c's generator). */
+typedef void (*NET_TX_IDLE)(void);
+extern volatile NET_TX_IDLE net_tx_idle;
+
 extern u8 net_mac[ETH_ALEN];        /* the card's own address, from its descriptor */
 
 /* Bring the attached card up. Thread-only. Returns 0 on success or the step that
@@ -28,6 +34,9 @@ void net_detached(void);
 
 /* Queue one frame. Any IRQL up to DISPATCH. Returns 1 if queued, 0 if dropped. */
 u32  net_tx(const u8 *frame, u32 length);
+
+/* Whether the next transmit slot is free: a hint for a sender deciding to try. */
+u32  net_tx_space(void);
 
 u32  net_link_up(void);
 u32  net_speed_mbps(void);
