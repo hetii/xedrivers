@@ -7,6 +7,12 @@
 
 volatile XNET_STATS xnet_stats;
 
+/* The interface id handed to the receive callback. The EMAC passes 1; CUsbEnet
+ * passes 8 (NicInterfaceUsbEnet) with that bit ORed into xam's flags word. Which one
+ * xnet insists on has not been settled on this console, so it can be changed while
+ * running (xectl.py cmd 13 <id>). */
+volatile u32 xnet_rx_iface = 0x08u;  /* NicInterfaceUsbEnet */
+
 /* xam's import thunks: the `lis r11,hi` of each `lis/addi/mtctr/bctr`, and the
  * kernel Nic function the untouched thunk must decode to. Found by searching the
  * live xam image for the thunk that branches to each kernel address. */
@@ -26,6 +32,7 @@ volatile XNET_STATS xnet_stats;
 #define USER_FILTER_OFF   0x24u
 #define USER_CTX_OFF      0x28u
 #define USER_RXCB_OFF     0x2Cu
+#define USER_LINKCB_OFF   0x34u
 #define USER_ORIG_FILTER_OFF 0x40u    /* OriginalAttachInfo.ReceiveFilterMask */
 #define XNET_STD_FILTER   0x1Au
 
@@ -62,23 +69,23 @@ static void thunk_set(u32 at, void *target)
     u32 hi = (a + 0x8000u) >> 16;
     u32 lo = a & 0xFFFFu;
 
-    *(volatile u32 *)(u64)at = 0x3D600000u | (hi & 0xFFFF);        /* lis r11,hi  */
-    *(volatile u32 *)(u64)(at + 4) = 0x396B0000u | lo;             /* addi r11,.. */
-    KeSweepIcacheRange((void *)(u64)at, 8);
+    *(volatile u32 *)(unsigned long)at = 0x3D600000u | (hi & 0xFFFF);        /* lis r11,hi  */
+    *(volatile u32 *)(unsigned long)(at + 4) = 0x396B0000u | lo;             /* addi r11,.. */
+    KeSweepIcacheRange((void *)(unsigned long)at, 8);
 }
 
 static void thunk_restore(u32 at, u32 lis, u32 addi)
 {
-    *(volatile u32 *)(u64)at = lis;
-    *(volatile u32 *)(u64)(at + 4) = addi;
-    KeSweepIcacheRange((void *)(u64)at, 8);
+    *(volatile u32 *)(unsigned long)at = lis;
+    *(volatile u32 *)(unsigned long)(at + 4) = addi;
+    KeSweepIcacheRange((void *)(unsigned long)at, 8);
 }
 
 /* The one title user already attached to the EMAC at boot: the first plausible
  * entry on g_NicEmac's list whose standard receive filter is set. */
 static void *find_title_user(void)
 {
-    LIST_ENTRY *head = (LIST_ENTRY *)(u64)G_NIC_EMAC;
+    LIST_ENTRY *head = (LIST_ENTRY *)(unsigned long)G_NIC_EMAC;
     LIST_ENTRY *link;
     u32 guard;
 
@@ -170,16 +177,43 @@ static void deliver(const u8 *frame, u32 length)
         return;
     }
     xnet_stats.rx_delivered++;
-    cb(ctx, (void *)frame, length, NIC_IFACE_USBENET, dest);
+    cb(ctx, (void *)frame, length, xnet_rx_iface, dest);
+}
+
+/* Tell the title's xnet that the link changed: it then asks NicGetLinkState again
+ * and, on a new link, starts over with DHCP. The EMAC makes this call from its DPC
+ * with its lock held, so it is made here at DISPATCH_LEVEL too. */
+static void notify_link(void)
+{
+    u8 *user = (u8 *)title_user;
+    void (*cb)(void *);
+    u32 old;
+
+    if (!user || !MmIsAddressValid(user))
+        return;
+    cb = *(void (**)(void *))(user + USER_LINKCB_OFF);
+    if (!cb)
+        return;
+    xnet_stats.link_notifies++;
+    old = ke_irql() < DISPATCH_LEVEL ? KeRaiseIrqlToDpcLevel() : 0xFFu;
+    cb(*(void **)(user + USER_CTX_OFF));
+    if (old != 0xFFu)
+        KfLowerIrql(old);
+}
+
+static void link_changed(u32 up)
+{
+    (void)up;
+    notify_link();
 }
 
 /* --- enable / disable -------------------------------------------------------- */
 
 u32 xnet_enable(void)
 {
-    volatile u32 *xmit = (volatile u32 *)(u64)THUNK_XMIT;
-    volatile u32 *link = (volatile u32 *)(u64)THUNK_LINK_STATE;
-    volatile u32 *flags = (volatile u32 *)(u64)IFACE_FLAGS;
+    volatile u32 *xmit = (volatile u32 *)(unsigned long)THUNK_XMIT;
+    volatile u32 *link = (volatile u32 *)(unsigned long)THUNK_LINK_STATE;
+    volatile u32 *flags = (volatile u32 *)(unsigned long)IFACE_FLAGS;
 
     if (xnet_stats.enabled)
         return XNET_OK;
@@ -211,8 +245,10 @@ u32 xnet_enable(void)
     xnet_stats.patched = 2;
 
     net_rx = deliver;
+    net_link_cb = link_changed;
     mem_sync();
     xnet_stats.enabled = 1;
+    notify_link();
     return XNET_OK;
 }
 
@@ -222,13 +258,15 @@ void xnet_disable(void)
         return;
 
     net_rx = 0;
+    net_link_cb = 0;
     mem_sync();
 
     thunk_restore(THUNK_XMIT, saved_xmit_lis, saved_xmit_addi);
     thunk_restore(THUNK_LINK_STATE, saved_link_lis, saved_link_addi);
-    *(volatile u32 *)(u64)IFACE_FLAGS = saved_flags;
+    *(volatile u32 *)(unsigned long)IFACE_FLAGS = saved_flags;
 
     xnet_stats.patched = 0;
     xnet_stats.enabled = 0;
+    notify_link();                      /* back to the EMAC's link */
     title_user = 0;
 }

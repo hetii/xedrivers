@@ -39,6 +39,7 @@
 #define CMD_REG_WRITE  9u   /* [1] mcu, [2] address, [3] word */
 #define CMD_PHY_READ  10u   /* [1] OCP address -> [5] value, [7] status */
 #define CMD_PHY_WRITE 11u   /* [1] OCP address, [2] value */
+#define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
 
 typedef struct {
     u32 magic;              /* 'XEAI' once DllMain ran */
@@ -137,6 +138,9 @@ static u32 run(u32 what)
         return value;
     case CMD_PHY_WRITE:
         return rtl_phy_write(xe_cmd[1], xe_cmd[2]);
+    case CMD_XNET_IFACE:
+        xnet_rx_iface = xe_cmd[1];
+        return 0;
     default:
         return 0xFFFFFFFFu;
     }

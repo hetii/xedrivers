@@ -31,7 +31,8 @@ XERUNNER = os.environ.get(
     "XERUNNER", os.path.join(ROOT, "..", "xerunner", ".venv", "bin", "xerunner"))
 
 CMD = {"ping": 1, "reset": 2, "claim": 3, "blast": 4, "mode": 5, "restart": 6,
-       "advertise": 7, "reg_read": 8, "reg_write": 9, "phy_read": 10, "phy_write": 11}
+       "advertise": 7, "reg_read": 8, "reg_write": 9, "phy_read": 10, "phy_write": 11,
+       "xnet_iface": 13}
 MODES = {"drop": 0, "standalone": 1, "xnet": 2}
 ADVERT = {"2500": 0x6F, "1000": 0x2F, "100": 0x0F, "default": 0}
 MCU = {"pla": 0x0100, "usb": 0x0000}
@@ -52,7 +53,7 @@ STRUCTS = {
                     "peer_mac_lo", "blast_sent", "blast_busy", "not_ours"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
-                   "flags_before", "flags_after"],
+                   "flags_before", "flags_after", "link_notifies"],
 }
 
 
@@ -138,9 +139,11 @@ def status(sym):
         ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],
         ss["discard_bytes_hi"] << 32 | ss["discard_bytes"], ip(ss["peer_ip"]),
         ss["blast_sent"], ss["blast_busy"]))
-    print("xnet     enabled=%d user=%08x xmit usb/fallback=%d/%d rx=%d filtered=%d" % (
-        xs["enabled"], xs["user"], xs["xmit_usb"], xs["xmit_fallback"],
-        xs["rx_delivered"], xs["rx_filtered"]))
+    print("xnet     enabled=%d user=%08x xmit usb/fallback=%d/%d rx=%d filtered=%d "
+          "polls=%d notifies=%d flags %#x->%#x" % (
+              xs["enabled"], xs["user"], xs["xmit_usb"], xs["xmit_fallback"],
+              xs["rx_delivered"], xs["rx_filtered"], xs["link_polls"],
+              xs["link_notifies"], xs["flags_before"], xs["flags_after"]))
 
 
 def main(argv):
