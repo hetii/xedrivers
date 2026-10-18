@@ -109,27 +109,140 @@ static void *find_title_user(void)
 
 /* --- the hooks --------------------------------------------------------------- */
 
-/* xam -> NicXmit(user, queue, frame, length, cookie). Send over USB when this is
- * our user and the card has a link; otherwise the kernel's own EMAC path. */
+/* --- transmit with backpressure ----------------------------------------------
+ *
+ * A NIC tells its user a frame is sent when it is, and xnet does not reuse the
+ * buffer before. Completing every frame on the spot and dropping it when the USB
+ * ring was full lost ~0.3% of frames under load (1918 of 576638 in four parallel
+ * FTP downloads) and TCP spent the rest of the run in retransmission timeouts:
+ * one stream 157 Mbit/s, four streams 14 between them.
+ *
+ * So frames queue here, in order, with the buffer and cookie xnet gave us, and
+ * leave for the ring as slots free up; each is completed to xnet only once it has
+ * been copied into a transfer buffer. One drainer at a time, chosen by a
+ * test-and-set flag rather than a spin lock: completing a frame re-enters xnet,
+ * which may call NicXmit straight back into us, and a completion of our own
+ * transfer runs the drain from the USB processor. Whoever finds the flag taken
+ * leaves the work to its holder, who looks again after letting go. */
+
+#define XQ_SIZE 512
+
+typedef struct {
+    void *user;
+    void *frame;
+    u32   length;
+    void *cookie;
+} XQ_ENTRY;
+
+static XQ_ENTRY xq[XQ_SIZE];
+static u32 xq_head, xq_tail;
+static KSPIN_LOCK xq_lock;
+static volatile u32 xq_draining;
+
+static void xmit_done(void *user, void *cookie)
+{
+    u8 *u = (u8 *)user;
+    void (*done)(void *, void *) = *(void (**)(void *, void *))(u + 0x30);
+
+    /* AttachInfo.XmitCompleteCallback at +0x30, its context at +0x28. */
+    if (done)
+        done(*(void **)(u + USER_CTX_OFF), cookie);
+}
+
+static u32 xq_count(void)
+{
+    return (xq_tail + XQ_SIZE - xq_head) % XQ_SIZE;
+}
+
+static void xq_drain(void)
+{
+    XQ_ENTRY e;
+    u32 irql, sent;
+
+    for (;;) {
+        if (__sync_lock_test_and_set(&xq_draining, 1))
+            return;
+        for (;;) {
+            irql = KfAcquireSpinLock(&xq_lock);
+            if (xq_head == xq_tail || !net_tx_space()) {
+                KfReleaseSpinLock(&xq_lock, irql);
+                break;
+            }
+            e = xq[xq_head];
+            xq_head = (xq_head + 1) % XQ_SIZE;
+            KfReleaseSpinLock(&xq_lock, irql);
+
+            sent = net_tx((const u8 *)e.frame, e.length);
+            if (!sent && net_link_up()) {
+                /* The space hint raced a fill: put it back where it was. Only
+                 * the drainer takes from the head, so this cannot reorder. */
+                irql = KfAcquireSpinLock(&xq_lock);
+                xq_head = (xq_head + XQ_SIZE - 1) % XQ_SIZE;
+                xq[xq_head] = e;
+                KfReleaseSpinLock(&xq_lock, irql);
+                break;
+            }
+            if (!sent)
+                xnet_stats.xmit_dropped++;
+            xmit_done(e.user, e.cookie);
+        }
+        __sync_lock_release(&xq_draining);
+        if (xq_head == xq_tail || !net_tx_space())
+            break;
+    }
+}
+
+/* Everything still waiting, completed unsent: the link went away. */
+static void xq_flush(void)
+{
+    XQ_ENTRY e;
+    u32 irql;
+
+    for (;;) {
+        irql = KfAcquireSpinLock(&xq_lock);
+        if (xq_head == xq_tail) {
+            KfReleaseSpinLock(&xq_lock, irql);
+            return;
+        }
+        e = xq[xq_head];
+        xq_head = (xq_head + 1) % XQ_SIZE;
+        KfReleaseSpinLock(&xq_lock, irql);
+        xnet_stats.xmit_dropped++;
+        xmit_done(e.user, e.cookie);
+    }
+}
+
+/* xam -> NicXmit(user, queue, frame, length, cookie). Queue for the card when this
+ * is our user and the card has a link; otherwise the kernel's own EMAC path. */
 static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
                           void *cookie)
 {
-    if (user == title_user && net_link_up()) {
-        xnet_stats.xmit_usb++;
-        net_tx((const u8 *)frame, length);
-        /* xnet frees the frame once xmit "completes"; the kernel's NicXmit calls
-         * the user's XmitCompleteCallback for that, so we must too. Its slot is
-         * AttachInfo.XmitCompleteCallback at +0x30, context at +0x28. */
-        {
-            u8 *u = (u8 *)user;
-            void (*done)(void *, void *) = *(void (**)(void *, void *))(u + 0x30);
-            if (done)
-                done(*(void **)(u + USER_CTX_OFF), cookie);
-        }
+    u32 irql, depth;
+
+    if (user != title_user || !net_link_up()) {
+        xnet_stats.xmit_fallback++;
+        NicXmit(user, queue, frame, length, cookie);
         return;
     }
-    xnet_stats.xmit_fallback++;
-    NicXmit(user, queue, frame, length, cookie);
+
+    xnet_stats.xmit_usb++;
+    irql = KfAcquireSpinLock(&xq_lock);
+    if ((xq_tail + 1) % XQ_SIZE == xq_head) {
+        KfReleaseSpinLock(&xq_lock, irql);
+        xnet_stats.xmit_dropped++;
+        xmit_done(user, cookie);
+        return;
+    }
+    xq[xq_tail].user = user;
+    xq[xq_tail].frame = frame;
+    xq[xq_tail].length = length;
+    xq[xq_tail].cookie = cookie;
+    xq_tail = (xq_tail + 1) % XQ_SIZE;
+    depth = xq_count();
+    if (depth > xnet_stats.xq_high)
+        xnet_stats.xq_high = depth;
+    KfReleaseSpinLock(&xq_lock, irql);
+    xq_drain();
 }
 
 /* xam -> NicGetLinkState(deviceFlags). Report the card's link for the USB
@@ -203,7 +316,8 @@ static void notify_link(void)
 
 static void link_changed(u32 up)
 {
-    (void)up;
+    if (!up)
+        xq_flush();
     notify_link();
 }
 
@@ -246,6 +360,7 @@ u32 xnet_enable(void)
 
     net_rx = deliver;
     net_link_cb = link_changed;
+    net_tx_idle = xq_drain;
     mem_sync();
     xnet_stats.enabled = 1;
     notify_link();
@@ -259,7 +374,9 @@ void xnet_disable(void)
 
     net_rx = 0;
     net_link_cb = 0;
+    net_tx_idle = 0;
     mem_sync();
+    xq_flush();
 
     thunk_restore(THUNK_XMIT, saved_xmit_lis, saved_xmit_addi);
     thunk_restore(THUNK_LINK_STATE, saved_link_lis, saved_link_addi);

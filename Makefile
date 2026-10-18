@@ -22,7 +22,7 @@ ORDINALS := 21256.0
 # xnet (the console's own network) or drop. ADVERTISE: the fastest link the PHY
 # offers -- 2500, 1000, 100, or default (the card's firmware choice, 10/100 in
 # CDC-ECM). All three can also be changed on a running console: tests/xectl.py.
-MODE      ?= standalone
+MODE      ?= xnet
 ADVERTISE ?= 2500
 IP        ?= 10.36.0.2
 RX_COUNT  ?= 32

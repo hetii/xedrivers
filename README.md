@@ -10,21 +10,33 @@ copied from xerunner.
 The card is switched into its CDC-ECM configuration, where its own firmware runs the
 MAC, and its PHY is then told over Realtek vendor requests to advertise up to
 2.5GBASE-T -- in ECM the firmware alone only offers 10/100. Frames move one per bulk
-transfer, 32 receive transfers always queued, 64 transmit slots.
+transfer, 32 receive transfers always queued, 64 transmit slots. In `xnet` mode (the
+default) the console's own network stack uses the card instead of its onboard port:
+DHCP, XBDM, FTP, titles.
 
-Measured between two RTL8156B cards cabled directly, both on USB 2.0 ports, the link
-negotiated at 2500 Mbit/s (`tests/speedtest.py`):
+## Measured
 
-| direction | rate | notes |
+Console card on a 1 Gbit/s home router, the PC on the same router at 1 Gbit/s; the
+card is on the console's USB 2.0 port (`tests/speedtest.py`, `tests/ramxfer.py`, curl).
+
+| what | RTL8156 (this driver) | onboard port (100M) |
 |---|---|---|
-| PC -> console | 242 Mbit/s | the USB 2.0 ceiling: more senders only add loss |
-| console -> PC | 188 Mbit/s | 15.5k frames/s, one frame per USB transfer |
-| ping | 0.27 ms | |
+| UDP PC -> console | 242 Mbit/s (the USB 2.0 ceiling) | |
+| UDP console -> PC | 188 Mbit/s | |
+| FTP download, 1 session | 19.6 MB/s = 157 Mbit/s | 11.4 MB/s |
+| FTP download, 2 / 4 sessions | 155 / 154 Mbit/s in total | |
+| FTP upload (to the hard disk) | 20.5 MB/s = 164 Mbit/s | 10.7 MB/s |
+| XBDM getmemex (console RAM) | 5 Mbit/s | 5 Mbit/s |
+| ping | 0.2 ms | |
+
+XBDM's memory read is limited by XBDM itself (the same on both ports). Several FTP
+sessions share what one gets: the limit is the path, not a single TCP stream.
+The link negotiates 2500 Mbit/s against another RTL8156 and 1000 against the router.
 
 ## Building
 
-    make                                   standalone, advertise 2500, 10.36.0.2
-    make MODE=xnet                         the console's own network uses the card
+    make                                   xnet, advertise 2500
+    make MODE=standalone IP=10.36.0.2      the built-in responder, for measuring
     make MODE=standalone ADVERTISE=1000 IP=192.168.50.2
     make test                              host unit tests
     make push                              put it on the Usb: medium (Orange Pi)
@@ -33,12 +45,13 @@ negotiated at 2500 Mbit/s (`tests/speedtest.py`):
 
 | `MODE` | frames go to |
 |---|---|
+| `xnet` (default) | the console's network stack, in place of the onboard EMAC |
 | `standalone` | a built-in responder on `IP`: ARP, ping, UDP echo (7), discard (9), and a UDP generator for throughput runs. The console's own network is untouched. |
-| `xnet` | the console's network stack, in place of the onboard EMAC |
 | `drop` | nowhere (bring the card up only) |
 
 `ADVERTISE` is the fastest link offered: `2500`, `1000`, `100`, or `default` (the
-card's firmware choice).
+card's firmware choice). `TRANSPORT` is `ecm` (default) or `ncm`; NCM receives but
+its transmit does not work on this card's firmware -- see `src/net.c`.
 
 Both can be changed on a running console, no rebuild or reboot:
 

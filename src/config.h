@@ -17,7 +17,7 @@
 #define XE_MODE_XNET       2u   /* the console's own network stack */
 
 #ifndef XE_MODE
-#define XE_MODE XE_MODE_STANDALONE
+#define XE_MODE XE_MODE_XNET
 #endif
 
 /* What the PHY advertises, as RTL_ADV_* bits (rtl.h); 0 leaves the card's own

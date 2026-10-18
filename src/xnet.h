@@ -48,6 +48,8 @@ typedef struct {
     u32 flags_before;
     u32 flags_after;
     u32 link_notifies;
+    u32 xmit_dropped;       /* completed to xnet unsent: queue full or link gone */
+    u32 xq_high;            /* the deepest the transmit queue has been */
 } XNET_STATS;
 
 extern volatile u32 xnet_rx_iface;
