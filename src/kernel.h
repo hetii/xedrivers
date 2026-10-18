@@ -83,6 +83,44 @@ static inline u32 ke_processor(void) { return 0; }
 static inline void mem_sync(void) { __sync_synchronize(); }
 #endif
 
+/* Frame copy into transfer buffers, a word at a time when source and destination
+ * share their alignment (Ethernet frames usually sit at 2 mod 4 on both sides, so
+ * two bytes go first). The byte loop this replaces cost about 60 us a frame and
+ * was what held transmit at 15.9k frames a second in ECM and NCM alike. */
+typedef u32 __attribute__((may_alias)) u32_alias;
+
+static inline void xe_copy(u8 *dst, const u8 *src, u32 n)
+{
+    if ((((unsigned long)dst ^ (unsigned long)src) & 3) == 0) {
+        u32_alias *d;
+        const u32_alias *s;
+
+        while (n && ((unsigned long)dst & 3)) {
+            *dst++ = *src++;
+            n--;
+        }
+        d = (u32_alias *)dst;
+        s = (const u32_alias *)src;
+        while (n >= 16) {
+            d[0] = s[0];
+            d[1] = s[1];
+            d[2] = s[2];
+            d[3] = s[3];
+            d += 4;
+            s += 4;
+            n -= 16;
+        }
+        while (n >= 4) {
+            *d++ = *s++;
+            n -= 4;
+        }
+        dst = (u8 *)d;
+        src = (const u8 *)s;
+    }
+    while (n--)
+        *dst++ = *src++;
+}
+
 /* --- USB ----------------------------------------------------------------------
  * xerunner: usb-driver-object-f1@1 -- the 28-byte driver object. */
 typedef struct _USBD_DRIVER_OBJECT {

@@ -15,7 +15,7 @@
 volatile u32 stack_ip = 0x0A240002u;           /* 10.36.0.2 */
 volatile STACK_STATS stack_stats;
 
-static u8 reply[ETH_FRAME_MAX];
+static u8 reply[ETH_FRAME_MAX] __attribute__((aligned(4)));
 static u8 peer_mac[ETH_ALEN];
 
 static u32 rd16(const u8 *p)
@@ -202,7 +202,7 @@ void stack_input(const u8 *frame, u32 length)
  * finished synchronously inside the queue call would re-enter on the same
  * processor, and a spin lock would deadlock there. Whoever finds the flag taken
  * leaves the work to the holder, which looks again after letting go. */
-static u8 blast_frame[ETH_FRAME_MAX];
+static u8 blast_frame[ETH_FRAME_MAX] __attribute__((aligned(4)));
 static volatile u32 blast_left;
 static volatile u32 blast_seq;
 static volatile u32 blast_filling;

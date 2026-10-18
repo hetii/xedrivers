@@ -317,7 +317,7 @@ static u32 align_up(u32 at, u32 a)
 
 int cdc_ncm_tx_add(NCM_TX *tx, const u8 *frame, u32 length)
 {
-    u32 at, i, tail;
+    u32 at, tail;
 
     if (tx->count >= tx->max_datagrams)
         return 0;
@@ -327,8 +327,7 @@ int cdc_ncm_tx_add(NCM_TX *tx, const u8 *frame, u32 length)
     tail = tx->ndp_end ? tx->alignment + 8 + 4 * (tx->count + 2) : 0;
     if (at + length + tail + 1 > tx->capacity)
         return 0;
-    for (i = 0; i < length; i++)
-        tx->buf[at + i] = frame[i];
+    xe_copy(tx->buf + at, frame, length);
     tx->entry[tx->count][0] = (u16)at;
     tx->entry[tx->count][1] = (u16)length;
     tx->used = at + length;

@@ -26,11 +26,19 @@ card is on the console's USB 2.0 port (`tests/speedtest.py`, `tests/ramxfer.py`,
 | FTP download, 1 session | 19.6 MB/s = 157 Mbit/s | 11.4 MB/s |
 | FTP download, 2 / 4 sessions | 155 / 154 Mbit/s in total | |
 | FTP upload (to the hard disk) | 20.5 MB/s = 164 Mbit/s | 10.7 MB/s |
+| XBDM getfile / sendfile | 21.1 / 23.5 MB/s | |
 | XBDM getmemex (console RAM) | 5 Mbit/s | 5 Mbit/s |
+| UDP out, by payload 64 / 512 / 1000 B | 81k / 32k / 19.7k frames/s | |
 | ping | 0.2 ms | |
 
 XBDM's memory read is limited by XBDM itself (the same on both ports). Several FTP
-sessions share what one gets: the limit is the path, not a single TCP stream.
+sessions share what one gets, and XBDM's own file transfer beats ftpdll over the
+same path, so above ~20 MB/s it is the server, not the driver: CUsbEnet's author
+reports 32 MB/s to a speed-test socket and 26-28 MB/s for SMB/FTP/NFS on a Trinity
+with his own FTP server and tuned buffers. Outgoing, the console's USB costs about
+8 us a transfer plus 36 ns a byte (27 MB/s at most), in ECM and NCM alike; handing
+received frames up on another hardware thread (net_rx_cpu) changes nothing, and
+thread 4 is busy with the dashboard.
 The link negotiates 2500 Mbit/s against another RTL8156 and 1000 against the router.
 
 ## Building

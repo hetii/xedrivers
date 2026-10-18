@@ -215,8 +215,58 @@ static void deliver(const u8 *frame, u32 length, void *context)
         net_rx(frame, length);
 }
 
+/* Where received frames are handed up. Inline, they are handed up from the USB
+ * completion on the USB processor, and xnet's whole TCP receive runs there too,
+ * serialised with the USB stack itself. With net_rx_cpu = N+1 they go to a DPC on
+ * hardware thread N instead, and the request is resubmitted from there once its
+ * frames are delivered, so USB completions and TCP run side by side. Set at run
+ * time (xectl.py set net_rx_cpu 4); takes effect between batches. */
+volatile u32 net_rx_cpu = 0;
+
+static KDPC rx_dpc;
+static KSPIN_LOCK rx_lock;
+static URB *rx_head, *rx_tail;
+
+static void rx_process(URB *urb)
+{
+    if (ncm) {
+        net_stats.rx_ntbs++;
+        if (cdc_ncm_parse_ntb(rx_buf[urb->Tag], urb->Actual, deliver, 0) < 0)
+            net_stats.rx_ntb_errors++;
+    } else {
+        deliver(rx_buf[urb->Tag], urb->Actual, 0);
+    }
+}
+
+static void rx_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
+{
+    URB *list, *next;
+
+    (void)dpc;
+    (void)context;
+    (void)a1;
+    (void)a2;
+    KeAcquireSpinLockAtRaisedIrql(&rx_lock);
+    list = rx_head;
+    rx_head = rx_tail = 0;
+    KeReleaseSpinLockFromRaisedIrql(&rx_lock);
+
+    for (; list; list = next) {
+        next = list->Next;
+        list->Next = 0;
+        if (!running || !usb.active) {
+            list->Busy = 0;
+            continue;
+        }
+        rx_process(list);
+        rx_queue(list);
+    }
+}
+
 static void rx_complete(URB *urb, u32 status)
 {
+    u32 cpu;
+
     if (!running || !usb.active) {
         urb->Busy = 0;
         return;
@@ -224,13 +274,23 @@ static void rx_complete(URB *urb, u32 status)
 
     if (NT_SUCCESS(status)) {
         rx_consecutive_errors = 0;
-        if (ncm) {
-            net_stats.rx_ntbs++;
-            if (cdc_ncm_parse_ntb(rx_buf[urb->Tag], urb->Actual, deliver, 0) < 0)
-                net_stats.rx_ntb_errors++;
-        } else {
-            deliver(rx_buf[urb->Tag], urb->Actual, 0);
+        cpu = net_rx_cpu;
+        if (cpu) {
+            net_stats.rx_deferred++;
+            KeAcquireSpinLockAtRaisedIrql(&rx_lock);
+            urb->Next = 0;
+            if (rx_tail)
+                rx_tail->Next = urb;
+            else
+                rx_head = urb;
+            rx_tail = urb;
+            if (!rx_dpc.InsertedNumber)
+                rx_dpc.TargetNumber = (u8)cpu;
+            KeReleaseSpinLockFromRaisedIrql(&rx_lock);
+            KeInsertQueueDpc(&rx_dpc, 0, 0);
+            return;
         }
+        rx_process(urb);
     } else {
         net_stats.rx_errors++;
         net_stats.rx_last_error = status;
@@ -339,8 +399,8 @@ static u32 tx_ecm(const u8 *frame, u32 length)
     KfReleaseSpinLock(&tx_lock, irql);
 
     dst = tx_buf[i];
-    for (n = 0; n < length; n++)
-        dst[n] = frame[n];
+    xe_copy(dst, frame, length);
+    n = length;
     if (layout.out_max && (n % layout.out_max) == 0)
         dst[n++] = 0;
     tx_len[i] = n;
@@ -624,6 +684,9 @@ u32 net_start(void)
     status = control(0x21, 0x43, 0x000F, layout.comm_interface, 0, 0);
     if (!NT_SUCCESS(status))
         return fail(NET_STEP_FILTER, status);
+
+    KeInitializeDpc(&rx_dpc, rx_dpc_routine, 0);
+    rx_head = rx_tail = 0;
 
     tx_next = 0;
     tx_inflight = 0;

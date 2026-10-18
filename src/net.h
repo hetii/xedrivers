@@ -55,6 +55,10 @@ extern volatile u32 net_tx_eager;
 /* NCM: put the NDP after the datagrams rather than after the header. */
 extern volatile u32 net_ncm_ndp_end;
 
+/* 0: hand received frames up from the USB completion; N+1: from a DPC on hardware
+ * thread N, resubmitting from there. */
+extern volatile u32 net_rx_cpu;
+
 enum {
     NET_STEP_OK = 0,
     NET_STEP_DMA,
@@ -110,6 +114,7 @@ typedef struct {
     u32 crc_status;         /* SET_CRC_MODE off */
     u32 dgram_status;       /* SET_MAX_DATAGRAM_SIZE */
     u32 ntb_formats;
+    u32 rx_deferred;        /* receive batches handed to the net_rx_cpu DPC */
 } NET_STATS;
 
 extern volatile NET_STATS net_stats;
