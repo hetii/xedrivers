@@ -277,10 +277,16 @@ int cdc_ncm_parse_ntb(const u8 *ntb, u32 length, NCM_DATAGRAM each, void *contex
     return (int)count;
 }
 
+/* Where the next datagram may start. wNdpOutPayloadRemainder is about the
+ * datagram's PAYLOAD -- what follows its 14-byte Ethernet header -- not about the
+ * frame's first byte (NCM 1.0, 3.3.1; Linux cdc_ncm_setup subtracts the header the
+ * same way). Read as the frame's own offset, it puts every IP header off its
+ * alignment, and the RTL8156B then accepts each NTB and transmits nothing --
+ * found by comparing a usbmon capture of cdc_ncm with ours. */
 static u32 place(const NCM_TX *tx, u32 at)
 {
     u32 d = tx->divisor ? tx->divisor : 4u;
-    u32 r = tx->remainder % d;
+    u32 r = (tx->remainder + d * 16u - 14u) % d;
 
     while (at % d != r)
         at++;

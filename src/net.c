@@ -16,20 +16,22 @@
  * own completion, and one interrupt IN request carries link notifications.
  *
  * Two transports, and why ECM is the default. In ECM a transfer is a frame; in NCM
- * it is a transfer block (NTB) of up to 16 KB holding many frames. The hope was
- * that fewer, larger transfers would lift throughput. Measured on this console:
- *   - receive is at the USB 2.0 ceiling either way: ECM 242 Mbit/s, NCM 250, with
- *     32 or 64 receive requests alike -- the same ~31 MB/s the twin card manages
- *     on the PC's own USB 2.0 port;
- *   - NCM transmit does not work on this card's firmware (rtl8156b-2 class): every
- *     NTB is accepted by the bulk endpoint and nothing reaches the wire, though
- *     Linux cdc_ncm transmits fine on the same card. Built byte-for-byte as Linux
- *     builds them (tests/ncm_inject.c against the twin card, an Orange Pi watching
- *     the wire), with the NDP first or last, padded or not, every filter, the
- *     altsetting toggle and every optional request, they still vanish. Finding the
- *     difference needs a USB capture of Linux, which this bench lacks.
- * So NCM stays selectable (TRANSPORT=ncm, xectl.py transport ncm) for whoever
- * picks that up, and ECM -- 188 Mbit/s out, 242 in -- is what ships.
+ * it is a transfer block (NTB) holding many. The hope was that fewer, larger
+ * transfers would lift throughput. Measured on this console, they do not: both
+ * reach the same ceilings, which are the console's USB, not the transfer count --
+ *   - receive 242 Mbit/s (ECM) / 250 (NCM), with 32 or 64 receive requests alike,
+ *     the ~31 MB/s the twin card also manages on the PC's own USB 2.0 port;
+ *   - transmit 188 (ECM) / 193 (NCM) Mbit/s, 15.9k frames a second whether each
+ *     frame is a transfer or ten share one (net_tx_eager 1: 12293 NTBs carried
+ *     122911 frames) -- about 24 MB/s out;
+ *   - FTP: ECM 19.6 MB/s down / 20.5 up; NCM 20.2 / 14.1 with 16 KB blocks (the
+ *     card holds received frames back to fill a block, and TCP slows) and
+ *     19.7 / 18.9 with 4 KB ones.
+ * NCM transmit once sent nothing at all: wNdpOutPayloadRemainder applies to the
+ * payload after the 14-byte Ethernet header (see place() in cdc.c), and frames
+ * placed by it as their own offset are accepted and dropped by the RTL8156B.
+ * Found by capturing Linux cdc_ncm with usbmon (tests/usbmon_dump.py).
+ * So NCM works and stays selectable (TRANSPORT=ncm, NTB_SIZE), and ECM ships.
  *
  * ECM: a transfer is one frame, ended by a short packet; a frame of exactly n*512
  * bytes gets one byte of padding instead of a zero-length packet (as Linux usbnet).

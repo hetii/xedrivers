@@ -145,9 +145,10 @@ static void test_ncm_roundtrip(void)
     CHECK(total % 512 != 0);
     CHECK(buf[0] == 'N' && buf[1] == 'C' && buf[2] == 'M' && buf[3] == 'H');
 
-    /* Every datagram sits at offset % 4 == 2, as the parameters asked. */
+    /* Remainder 2 is for the payload after the 14-byte Ethernet header, so every
+     * frame starts at offset % 4 == 0 -- where Linux cdc_ncm puts it (usbmon). */
     for (i = 0; i < 3; i++)
-        CHECK((buf[12 + 8 + 4 * i] | buf[12 + 8 + 4 * i + 1] << 8) % 4 == 2);
+        CHECK((buf[12 + 8 + 4 * i] | buf[12 + 8 + 4 * i + 1] << 8) % 4 == 0);
 
     seen_count = 0;
     CHECK(cdc_ncm_parse_ntb(buf, total, collect, 0) == 3);

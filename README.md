@@ -50,8 +50,9 @@ The link negotiates 2500 Mbit/s against another RTL8156 and 1000 against the rou
 | `drop` | nowhere (bring the card up only) |
 
 `ADVERTISE` is the fastest link offered: `2500`, `1000`, `100`, or `default` (the
-card's firmware choice). `TRANSPORT` is `ecm` (default) or `ncm`; NCM receives but
-its transmit does not work on this card's firmware -- see `src/net.c`.
+card's firmware choice). `TRANSPORT` is `ecm` (default) or `ncm`. Both work and both stop at the
+console's USB ceilings (~31 MB/s in, ~24 MB/s out); NCM is no faster and, with
+16 KB blocks, slower for FTP uploads -- the measurements are in `src/net.c`.
 
 Both can be changed on a running console, no rebuild or reboot:
 

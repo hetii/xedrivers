@@ -156,6 +156,13 @@ int main(int argc, char **argv)
             ntb[8] = (unsigned char)total;
             ntb[9] = (unsigned char)(total >> 8);
         }
+        if (getenv("XE_RAW")) {
+            /* Send a captured NTB as it is, to tell the bytes from the setup. */
+            FILE *raw_f = fopen(getenv("XE_RAW"), "rb");
+            total = raw_f ? fread(ntb, 1, sizeof(ntb), raw_f) : 0;
+            if (raw_f)
+                fclose(raw_f);
+        }
         b.ep = 0x02;
         b.len = total;
         b.timeout = 1000;
