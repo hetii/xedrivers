@@ -31,15 +31,36 @@ card is on the console's USB 2.0 port (`tests/speedtest.py`, `tests/ramxfer.py`,
 | UDP out, by payload 64 / 512 / 1000 B | 81k / 32k / 19.7k frames/s | |
 | ping | 0.2 ms | |
 
-XBDM's memory read is limited by XBDM itself (the same on both ports). Several FTP
-sessions share what one gets, and XBDM's own file transfer beats ftpdll over the
-same path, so above ~20 MB/s it is the server, not the driver: CUsbEnet's author
-reports 32 MB/s to a speed-test socket and 26-28 MB/s for SMB/FTP/NFS on a Trinity
-with his own FTP server and tuned buffers. Outgoing, the console's USB costs about
-8 us a transfer plus 36 ns a byte (27 MB/s at most), in ECM and NCM alike; handing
-received frames up on another hardware thread (net_rx_cpu) changes nothing, and
-thread 4 is busy with the dashboard.
-The link negotiates 2500 Mbit/s against another RTL8156 and 1000 against the router.
+XBDM's memory read is limited by XBDM itself (the same on both ports).
+
+## Where the limit is
+
+Sweeping the frame size while transmitting fits the console's outgoing USB path to
+10.9 us a transfer plus **36.9 ns a byte** (78 to 1486 byte frames, 6.4 to 23.3
+MB/s). The per-byte term dominates at any useful frame size, which is why carrying
+ten frames in one transfer (NCM) moved nothing: the ceiling is about 27 MB/s for an
+infinitely large frame and 23.3 MB/s at the Ethernet MTU. Inbound there is no such
+wall below the bus: 30 MB/s measured.
+
+Against those ceilings, both directions and three servers:
+
+| console -> PC | MB/s | of ceiling | PC -> console | MB/s | of ceiling |
+|---|---|---|---|---|---|
+| ceiling (model) | 23.3 | | ceiling (measured) | 30.0 | |
+| our UDP, no xnet | 23.8 | 100% | our UDP, no xnet | 30.0 | 100% |
+| XBDM, xnet + disk | 21.1 | 91% | XBDM, xnet + disk | 23.5 | 78% |
+| ftpdll, xnet + disk | 19.7 | 85% | ftpdll, xnet + disk | 20.5 | 68% |
+
+So the driver already runs at the hardware ceiling, xnet and TCP cost little, and
+what is left belongs to whatever serves the files: XBDM's own transfer beats ftpdll
+by 7% outbound and 15% inbound over the same card. Outbound there is at most 18%
+left to win; inbound, where the bus is not the wall, a better server has room to
+roughly 26-28 MB/s -- which is what CUsbEnet's author reports for SMB/FTP/NFS with
+his own server and tuned buffers, against 32 MB/s to a plain speed-test socket.
+
+A throughput server inside the plugin was tried and dropped: it would land between
+XBDM's figures and our UDP ones and confirm the ceiling without raising it. The
+measurement that would pay for itself is a file server, not another socket.
 
 ## Building
 
