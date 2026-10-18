@@ -47,4 +47,59 @@ typedef struct {
  * since a device may put two back to back in one transfer. */
 u32 cdc_parse_notification(const u8 *data, u32 length, CDC_NOTE *note);
 
+/* --- NCM (CDC NCM 1.0, NTB16 only) ------------------------------------------- */
+
+/* GET_NTB_PARAMETERS, 28 bytes. */
+typedef struct {
+    u16 formats;            /* bmNtbFormatsSupported: bit 0 NTB16, bit 1 NTB32 */
+    u32 in_max;             /* dwNtbInMaxSize: the largest NTB the device sends */
+    u16 in_divisor;
+    u16 in_remainder;
+    u16 in_alignment;
+    u32 out_max;            /* dwNtbOutMaxSize: the largest it accepts */
+    u16 out_divisor;        /* datagram offset % divisor == remainder */
+    u16 out_remainder;
+    u16 out_alignment;      /* NDP offset alignment */
+    u16 out_max_datagrams;  /* 0 = no limit */
+} NCM_PARAMS;
+
+int cdc_ncm_parse_params(const u8 *data, u32 length, NCM_PARAMS *out);
+
+/* Walk one received NTB16 and call `each` for every datagram in it, in order.
+ * Returns the number of datagrams, or -1 when the block is malformed (whatever was
+ * delivered before the fault stays delivered). */
+typedef void (*NCM_DATAGRAM)(const u8 *frame, u32 length, void *context);
+int cdc_ncm_parse_ntb(const u8 *ntb, u32 length, NCM_DATAGRAM each, void *context);
+
+/* Building one NTB16 to send. The NDP goes either right after the 12-byte header
+ * with room for `NCM_TX_MAX_DATAGRAMS` entries and the datagrams after it, or --
+ * `ndp_end` -- after the last datagram. Each datagram is placed at an offset the
+ * device's divisor/remainder allows. */
+#ifndef NCM_TX_MAX_DATAGRAMS
+#define NCM_TX_MAX_DATAGRAMS 32
+#endif
+
+typedef struct {
+    u8  *buf;
+    u32  capacity;          /* min(buffer, out_max) */
+    u32  ndp_end;           /* NDP after the datagrams (Linux's NDP_TO_END) */
+    u16  alignment;         /* wNdpOutAlignment */
+    u16  entry[NCM_TX_MAX_DATAGRAMS][2];
+    u32  used;              /* end of the last datagram */
+    u32  count;
+    u16  divisor;
+    u16  remainder;
+    u16  max_datagrams;
+    u16  sequence;
+} NCM_TX;
+
+void cdc_ncm_tx_begin(NCM_TX *tx, u8 *buf, u32 buf_size, const NCM_PARAMS *p,
+                      u16 sequence, u32 ndp_end);
+/* Append one frame; 0 if it does not fit (the NTB is then left as it was). */
+int  cdc_ncm_tx_add(NCM_TX *tx, const u8 *frame, u32 length);
+/* Write header and NDP; returns the bytes to send. A block that is a multiple of
+ * `max_packet` would need a zero-length packet to end it, so it grows by one
+ * unused byte instead (the header's wBlockLength includes it). */
+u32  cdc_ncm_tx_finish(NCM_TX *tx, u32 max_packet);
+
 #endif /* XE_CDC_H */

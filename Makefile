@@ -25,6 +25,15 @@ ORDINALS := 21256.0
 MODE      ?= standalone
 ADVERTISE ?= 2500
 IP        ?= 10.36.0.2
+RX_COUNT  ?= 32
+TX_COUNT  ?= 64
+NCM_RX_COUNT ?= 16
+NCM_TX_COUNT ?= 16
+NTB_SIZE  ?= 16384
+TRANSPORT ?= ecm
+transport_ecm := 0
+transport_ncm := 1
+TRANSPORT_VALUE := $(or $(transport_$(TRANSPORT)),$(error TRANSPORT must be ecm or ncm))
 
 mode_standalone := 1
 mode_xnet       := 2
@@ -48,7 +57,7 @@ NM       ?= powerpc-linux-gnu-nm
 
 # The console and the delivery medium; overridable from the environment.
 HOST     ?= 192.168.1.210
-PI       ?= root@192.168.1.111
+PI       ?= root@10.36.0.71
 PI_IMG   ?= /root/plugin-usb.img
 PI_MNT   ?= /mnt/img
 SLOT     ?= 3
@@ -57,7 +66,7 @@ XERUNNER_HOME ?= $(abspath ../xerunner)
 XERUNNER      ?= $(firstword $(wildcard $(XERUNNER_HOME)/.venv/bin/xerunner) xerunner)
 
 XEX := $(BUILD)/$(NAME).xex
-FLAGS_LINE := DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE)
+FLAGS_LINE := DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE)
 
 .PHONY: all clean test lint kit push deploy
 
@@ -77,6 +86,9 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile \
 	    --ordinals $(KIT)/ordinals-$(ORDINALS).txt --base $(BASE) \
 	    -I src -D XE_DEBUG=$(DEBUG) -D XE_MODE=$(MODE_VALUE)u \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
+	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) \
+	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
+	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u \
 	    --name $(NAME).dll --into $(BUILD)
 	@mv $(BUILD)/plugin.xex $@
 	@echo "  -> $@"

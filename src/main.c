@@ -56,7 +56,8 @@ typedef struct {
 } XE_STATE;
 
 volatile XE_STATE xe_state = { 0, XE_VERSION };
-volatile XE_CONFIG xe_config = { 0x58434647u, XE_MODE, XE_ADVERTISE, XE_IP };
+volatile XE_CONFIG xe_config = { 0x58434647u, XE_MODE, XE_ADVERTISE, XE_IP,
+                                   XE_TRANSPORT };
 
 /*   [0] request, cleared by the worker   [1..3] arguments
  *   [4] ack counter   [5] result   [6] the request answered   [7] status */

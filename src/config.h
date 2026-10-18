@@ -26,6 +26,16 @@
 #define XE_ADVERTISE 0x6Fu      /* 10/100/1000/2500 */
 #endif
 
+/* How frames cross USB: CDC ECM (one frame per transfer) or CDC NCM (many frames
+ * per transfer block). Changing it needs a new bring-up: xectl.py transport ncm
+ * writes it and resets the card. */
+#define XE_TRANSPORT_ECM 0u
+#define XE_TRANSPORT_NCM 1u
+
+#ifndef XE_TRANSPORT
+#define XE_TRANSPORT XE_TRANSPORT_ECM
+#endif
+
 #ifndef XE_IP
 #define XE_IP 0x0A240002u       /* 10.36.0.2 */
 #endif
@@ -35,6 +45,7 @@ typedef struct {
     u32 mode;                   /* XE_MODE_* the worker applies */
     u32 advertise;              /* RTL_ADV_* applied at every bring-up */
     u32 ip;                     /* standalone address, host order */
+    u32 transport;              /* XE_TRANSPORT_* used at the next bring-up */
 } XE_CONFIG;
 
 extern volatile XE_CONFIG xe_config;

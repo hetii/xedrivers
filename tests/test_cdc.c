@@ -98,8 +98,88 @@ static void test_notification(void)
     CHECK(n.kind == CDC_NOTE_SPEED && n.down_bps == 0x9505F200);
 }
 
+/* --- NCM ---------------------------------------------------------------- */
+
+static unsigned char seen[8][1600];
+static unsigned seen_len[8];
+static int seen_count;
+
+static void collect(const u8 *frame, u32 length, void *context)
+{
+    (void)context;
+    if (seen_count < 8) {
+        memcpy(seen[seen_count], frame, length);
+        seen_len[seen_count] = length;
+    }
+    seen_count++;
+}
+
+static void test_ncm_roundtrip(void)
+{
+    static unsigned char buf[16384];
+    unsigned char f[3][1514];
+    unsigned lens[3] = { 60, 1514, 333 };
+    NCM_PARAMS p = { 1, 16384, 4, 0, 4, 16384, 4, 2, 4, 0 };
+    NCM_TX tx;
+    unsigned i, j, total;
+
+    for (i = 0; i < 3; i++)
+        for (j = 0; j < lens[i]; j++)
+            f[i][j] = (unsigned char)(i * 7 + j);
+
+    /* NDP after the datagrams first, then the default layout below. */
+    cdc_ncm_tx_begin(&tx, buf, sizeof(buf), &p, 5, 1);
+    for (i = 0; i < 3; i++)
+        CHECK(cdc_ncm_tx_add(&tx, f[i], lens[i]));
+    total = cdc_ncm_tx_finish(&tx, 512);
+    seen_count = 0;
+    CHECK(cdc_ncm_parse_ntb(buf, total, collect, 0) == 3);
+    for (i = 0; i < 3; i++)
+        CHECK(seen_len[i] == lens[i] && memcmp(seen[i], f[i], lens[i]) == 0);
+    CHECK((buf[10] | buf[11] << 8) > 12);        /* wNdpIndex points past data */
+
+    cdc_ncm_tx_begin(&tx, buf, sizeof(buf), &p, 5, 0);
+    for (i = 0; i < 3; i++)
+        CHECK(cdc_ncm_tx_add(&tx, f[i], lens[i]));
+    total = cdc_ncm_tx_finish(&tx, 512);
+    CHECK(total % 512 != 0);
+    CHECK(buf[0] == 'N' && buf[1] == 'C' && buf[2] == 'M' && buf[3] == 'H');
+
+    /* Every datagram sits at offset % 4 == 2, as the parameters asked. */
+    for (i = 0; i < 3; i++)
+        CHECK((buf[12 + 8 + 4 * i] | buf[12 + 8 + 4 * i + 1] << 8) % 4 == 2);
+
+    seen_count = 0;
+    CHECK(cdc_ncm_parse_ntb(buf, total, collect, 0) == 3);
+    CHECK(seen_count == 3);
+    for (i = 0; i < 3; i++) {
+        CHECK(seen_len[i] == lens[i]);
+        CHECK(memcmp(seen[i], f[i], lens[i]) == 0);
+    }
+}
+
+static void test_ncm_limits(void)
+{
+    static unsigned char buf[2048];
+    unsigned char frame[1514] = { 0 };
+    NCM_PARAMS p = { 1, 2048, 4, 0, 4, 2048, 4, 0, 4, 2 };
+    NCM_TX tx;
+
+    cdc_ncm_tx_begin(&tx, buf, sizeof(buf), &p, 0, 0);
+    CHECK(cdc_ncm_tx_add(&tx, frame, 1514));
+    CHECK(!cdc_ncm_tx_add(&tx, frame, 1514));   /* does not fit */
+    CHECK(cdc_ncm_tx_add(&tx, frame, 60));
+    CHECK(!cdc_ncm_tx_add(&tx, frame, 60));     /* max datagrams 2 */
+
+    /* A corrupt block is refused, not walked. */
+    buf[0] = 'X';
+    CHECK(cdc_ncm_parse_ntb(buf, 2048, collect, 0) == -1);
+}
+
 int main(void)
 {
+    test_ncm_roundtrip();
+    test_ncm_limits();
     test_ecm();
     test_ncm();
     test_bad_input();

@@ -14,6 +14,7 @@ USB_DEV usb;
 u32 usb_control(const u8 setup[8], void *b, u32 l, u32 *a, u32 t)
 { (void)setup; (void)b; (void)l; (void)a; (void)t; return STATUS_UNSUCCESSFUL; }
 void *net_dma_alloc(u32 bytes) { (void)bytes; return 0; }
+void *net_reg_buffer(void) { return 0; }
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \

@@ -44,6 +44,17 @@ u32  net_speed_mbps(void);
 /* DMA memory from the block net_start allocates; never freed. */
 void *net_dma_alloc(u32 bytes);
 
+/* REG_SIZE bytes of DMA memory that stay put across bring-ups, for rtl.c's
+ * register transfers (the rings are carved again on each one). */
+void *net_reg_buffer(void);
+
+/* NCM: below this many blocks in flight a frame goes out at once; at or above
+ * it, frames are aggregated. Tunable at run time (xectl.py set net_tx_eager N). */
+extern volatile u32 net_tx_eager;
+
+/* NCM: put the NDP after the datagrams rather than after the header. */
+extern volatile u32 net_ncm_ndp_end;
+
 enum {
     NET_STEP_OK = 0,
     NET_STEP_DMA,
@@ -55,6 +66,7 @@ enum {
     NET_STEP_SET_INTERFACE,
     NET_STEP_ENDPOINTS,
     NET_STEP_FILTER,
+    NET_STEP_NTB_PARAMS,
 };
 
 typedef struct {
@@ -85,6 +97,19 @@ typedef struct {
     u32 ep_intr;
     u32 rx_bytes_hi;
     u32 tx_bytes_hi;
+    u32 transport;          /* 0 ECM, 1 NCM */
+    u32 rx_ntbs;
+    u32 rx_ntb_errors;
+    u32 tx_ntbs;
+    u32 ntb_in_max;
+    u32 ntb_out_max;
+    u32 ntb_out_align;      /* divisor << 16 | remainder */
+    u32 ntb_out_datagrams;
+    u32 ntb_input_status;
+    u32 ntb_format_status;  /* SET_NTB_FORMAT 16, or 0xFFFFFFFF when not sent */
+    u32 crc_status;         /* SET_CRC_MODE off */
+    u32 dgram_status;       /* SET_MAX_DATAGRAM_SIZE */
+    u32 ntb_formats;
 } NET_STATS;
 
 extern volatile NET_STATS net_stats;

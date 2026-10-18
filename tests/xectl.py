@@ -7,6 +7,9 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
 
     xectl.py status                     state, config, link, counters
     xectl.py mode standalone|xnet|drop  who gets the frames
+    xectl.py ip A.B.C.D                 standalone address (reselects standalone)
+    xectl.py transport ecm|ncm          USB transport; resets the card to apply
+    xectl.py set|get SYMBOL [VALUE]     any 32-bit global, e.g. net_tx_eager
     xectl.py advertise 2500|1000|100|default
     xectl.py phy 0xa400 [value]         read/write a PHY register (OCP address)
     xectl.py reg pla|usb 0xe610 [value] read/write a MAC register word
@@ -41,13 +44,16 @@ STRUCTS = {
     "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found",
                  "start_result", "start_count", "mode", "xnet_status",
                  "advertise_status", "chip_version"],
-    "xe_config": ["magic", "mode", "advertise", "ip"],
+    "xe_config": ["magic", "mode", "advertise", "ip", "transport"],
     "net_stats": ["step", "step_status", "ready", "link", "speed_mbps", "rx_frames",
                   "rx_bytes", "rx_errors", "rx_last_error", "rx_short", "tx_frames",
                   "tx_bytes", "tx_drops", "tx_errors", "tx_last_error", "tx_inflight",
                   "intr_events", "intr_errors", "last_notify0", "last_notify1",
                   "rx_stopped", "config_value", "data_interface", "ep_in", "ep_out",
-                  "ep_intr", "rx_bytes_hi", "tx_bytes_hi"],
+                  "ep_intr", "rx_bytes_hi", "tx_bytes_hi", "transport", "rx_ntbs",
+                  "rx_ntb_errors", "tx_ntbs", "ntb_in_max", "ntb_out_max",
+                  "ntb_out_align", "ntb_out_datagrams", "ntb_input_status",
+                  "ntb_format_status", "crc_status", "dgram_status", "ntb_formats"],
     "stack_stats": ["arp_replies", "icmp_replies", "udp_echo", "discard_frames",
                     "discard_bytes", "discard_bytes_hi", "peer_ip", "peer_mac_hi",
                     "peer_mac_lo", "blast_sent", "blast_busy", "not_ours"],
@@ -127,8 +133,18 @@ def status(sym):
     print("running  mode=%s start=%d/%#x adv_status=%#x claims=%d/%d" % (
         names.get(st["mode"], st["mode"]), st["start_count"], st["start_result"],
         st["advertise_status"], st["claim_found"], st["claim_attempts"]))
-    print("card     ready=%d link=%d speed=%dM mac=%s config=%d" % (
-        ns["ready"], ns["link"], ns["speed_mbps"], mac.hex(":"), ns["config_value"]))
+    print("card     ready=%d link=%d speed=%dM mac=%s config=%d transport=%s step=%d/%#x" % (
+        ns["ready"], ns["link"], ns["speed_mbps"], mac.hex(":"), ns["config_value"],
+        "ncm" if ns["transport"] else "ecm", ns["step"], ns["step_status"]))
+    if ns["transport"]:
+        print("ntb      in_max=%d out_max=%d align=%#x max_dg=%d formats=%#x rx=%d "
+              "rx_err=%d tx=%d" % (
+                  ns["ntb_in_max"], ns["ntb_out_max"], ns["ntb_out_align"],
+                  ns["ntb_out_datagrams"], ns["ntb_formats"], ns["rx_ntbs"],
+                  ns["rx_ntb_errors"], ns["tx_ntbs"]))
+        print("ncm req  set_input=%#x set_format=%#x crc_off=%#x max_dgram=%#x" % (
+            ns["ntb_input_status"], ns["ntb_format_status"], ns["crc_status"],
+            ns["dgram_status"]))
     print("rx       frames=%d bytes=%d errors=%d stopped=%d" % (
         ns["rx_frames"], ns["rx_bytes_hi"] << 32 | ns["rx_bytes"], ns["rx_errors"],
         ns["rx_stopped"]))
@@ -155,6 +171,23 @@ def main(argv):
     num = lambda s: int(s, 0)
     if what == "status":
         status(sym)
+    elif what == "transport":
+        # Read at bring-up only: write it, then reset the card so it re-enumerates.
+        value = {"ecm": 0, "ncm": 1}[rest[0]]
+        write(sym["xe_config"] + 16, struct.pack(">I", value))
+        print("reset %#x" % command(sym, CMD["reset"])[0])
+    elif what == "set":
+        # Any 32-bit global by name, e.g. `set net_tx_eager 4`.
+        write(sym[rest[0]], struct.pack(">I", num(rest[1])))
+        print("%s = %#x" % (rest[0], struct.unpack(">I", read(sym[rest[0]], 4))[0]))
+    elif what == "get":
+        print("%s = %#x" % (rest[0], struct.unpack(">I", read(sym[rest[0]], 4))[0]))
+    elif what == "ip":
+        # The standalone address lives in xe_config and is applied when the mode
+        # is (re)selected, so write it and select standalone again.
+        a, b, c, d = (int(x) for x in rest[0].split("."))
+        write(sym["xe_config"] + 12, struct.pack(">I", a << 24 | b << 16 | c << 8 | d))
+        print("result %#x status %#x" % command(sym, CMD["mode"], MODES["standalone"]))
     elif what == "mode":
         print("result %#x status %#x" % command(sym, CMD["mode"], MODES[rest[0]]))
     elif what == "advertise":
