@@ -9,6 +9,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py mode standalone|xnet|drop  who gets the frames
     xectl.py ip A.B.C.D                 standalone address (reselects standalone)
     xectl.py transport ecm|ncm          USB transport; resets the card to apply
+    xectl.py cmd 14                     start the TCP throughput server
     xectl.py set|get SYMBOL [VALUE]     any 32-bit global, e.g. net_tx_eager
     xectl.py advertise 2500|1000|100|default
     xectl.py phy 0xa400 [value]         read/write a PHY register (OCP address)
@@ -35,7 +36,7 @@ XERUNNER = os.environ.get(
 
 CMD = {"ping": 1, "reset": 2, "claim": 3, "blast": 4, "mode": 5, "restart": 6,
        "advertise": 7, "reg_read": 8, "reg_write": 9, "phy_read": 10, "phy_write": 11,
-       "xnet_iface": 13}
+       "xnet_iface": 13, "tcp_start": 14}
 MODES = {"drop": 0, "standalone": 1, "xnet": 2}
 ADVERT = {"2500": 0x6F, "1000": 0x2F, "100": 0x0F, "default": 0}
 MCU = {"pla": 0x0100, "usb": 0x0000}
@@ -58,6 +59,9 @@ STRUCTS = {
     "stack_stats": ["arp_replies", "icmp_replies", "udp_echo", "discard_frames",
                     "discard_bytes", "discard_bytes_hi", "peer_ip", "peer_mac_hi",
                     "peer_mac_lo", "blast_sent", "blast_busy", "not_ours"],
+    "tcp_stats": ["started", "step", "step_error", "accepts", "active", "refused",
+                  "sent_lo", "sent_hi", "recv_lo", "recv_hi", "send_errors",
+                  "recv_errors", "last_send_error", "last_recv_error"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
@@ -163,6 +167,17 @@ def status(sym):
               xs["rx_delivered"], xs["rx_filtered"], xs["link_polls"],
               xs["link_notifies"], xs["flags_before"], xs["flags_after"]))
     print("xnet tx  queued_high=%d dropped=%d" % (xs["xq_high"], xs["xmit_dropped"]))
+    try:
+        ts = read_struct(sym, "tcp_stats")
+    except KeyError:
+        return
+    print("tcp      started=%d step=%d/%#x accepts=%d active=%d refused=%d" % (
+        ts["started"], ts["step"], ts["step_error"], ts["accepts"], ts["active"],
+        ts["refused"]))
+    print("tcp i/o  sent=%d recv=%d send_err=%d/%#x recv_err=%d/%#x" % (
+        ts["sent_hi"] << 32 | ts["sent_lo"], ts["recv_hi"] << 32 | ts["recv_lo"],
+        ts["send_errors"], ts["last_send_error"], ts["recv_errors"],
+        ts["last_recv_error"]))
 
 
 def main(argv):

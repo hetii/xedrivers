@@ -79,11 +79,20 @@ $(BUILD)/flags: FORCE
 	@echo "$(FLAGS_LINE)" | cmp -s - $@ || echo "$(FLAGS_LINE)" > $@
 FORCE:
 
-$(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile \
-        $(KIT)/ordinals-$(ORDINALS).txt $(KIT)/plugin.py $(KIT)/write.py $(KIT)/kcall.S
+# xam's table beside the kernel's: the plugin's socket calls are imported, not
+# resolved at run time, so the packer needs both. Written by xerunner the same way
+# the kernel's was; committed, so a build needs neither xerunner nor its base.
+$(KIT)/ordinals-xam-$(ORDINALS).txt:
+	@cd $(XERUNNER_HOME) && $(XERUNNER) alfred ordinals --module xam.xex \
+	    -o $(abspath $@) $(ORDINALS)
+
+$(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile tools/build_plugin.py \
+        $(KIT)/ordinals-$(ORDINALS).txt $(KIT)/ordinals-xam-$(ORDINALS).txt \
+        $(KIT)/plugin.py $(KIT)/write.py $(KIT)/kcall.S
 	@mkdir -p $(BUILD)
-	$(PYTHON) $(KIT)/plugin.py $(SRC) \
-	    --ordinals $(KIT)/ordinals-$(ORDINALS).txt --base $(BASE) \
+	$(PYTHON) tools/build_plugin.py $(SRC) \
+	    --ordinals $(KIT)/ordinals-$(ORDINALS).txt \
+	    --xam $(KIT)/ordinals-xam-$(ORDINALS).txt --base $(BASE) \
 	    -I src -D XE_DEBUG=$(DEBUG) -D XE_MODE=$(MODE_VALUE)u \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) \
