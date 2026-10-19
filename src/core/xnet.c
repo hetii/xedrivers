@@ -245,16 +245,20 @@ static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
     xq_drain();
 }
 
-/* xam -> NicGetLinkState(deviceFlags). Report the card's link for the USB
- * interface; anything else is the kernel's answer. */
+/* xam -> NicGetLinkState(deviceFlags). The card's link while it has one; without
+ * it, the onboard EMAC's, so that unplugging the card (or its cable, or a phone
+ * ending its tethering) leaves the console on its own port rather than with no
+ * network at all. Transmit already falls back the same way (nic_xmit_hook) and the
+ * EMAC hands its frames to the title itself, so the link answer is all that was
+ * missing; every change of the card's link is notified (link_changed), and xnet
+ * asks again and runs DHCP on whichever port answers. */
 static u32 nic_link_state_hook(u32 device_flags)
 {
     xnet_stats.link_polls++;
-    if (device_flags & NIC_IFACE_USBENET) {
-        if (net_link_up())
-            return LINK_UP_VALUE;
-        return 0;
-    }
+    if ((device_flags & NIC_IFACE_USBENET) && net_link_up())
+        return LINK_UP_VALUE;
+    if (device_flags & NIC_IFACE_USBENET)
+        xnet_stats.link_fallback++;
     return NicGetLinkState(device_flags & ~NIC_IFACE_USBENET);
 }
 

@@ -74,7 +74,7 @@ STRUCTS = {
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
-                   "xq_high"],
+                   "xq_high", "link_fallback"],
 }
 
 
@@ -211,7 +211,8 @@ def status(sym):
               xs["enabled"], xs["user"], xs["xmit_usb"], xs["xmit_fallback"],
               xs["rx_delivered"], xs["rx_filtered"], xs["link_polls"],
               xs["link_notifies"], xs["flags_before"], xs["flags_after"]))
-    print("xnet tx  queued_high=%d dropped=%d" % (xs["xq_high"], xs["xmit_dropped"]))
+    print("xnet tx  queued_high=%d dropped=%d link_fallback=%d" % (
+        xs["xq_high"], xs["xmit_dropped"], xs["link_fallback"]))
     try:
         ts = read_struct(sym, "tcp_stats")
     except KeyError:
