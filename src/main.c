@@ -25,6 +25,7 @@
 #include "rtl.h"
 #include "stack.h"
 #include "xnet.h"
+#include "prof.h"
 #if XE_TCP
 #include "tcp.h"
 #endif
@@ -177,11 +178,13 @@ static void worker(void *parameter)
     u32 tick, what;
 
     (void)parameter;
+    prof_init();
     set_mode(xe_config.mode == XE_MODE_XNET ? XE_MODE_DROP : xe_config.mode);
     xe_config.mode = XE_MODE;
 
     for (tick = 0;; tick++) {
         xe_state.worker_ticks = tick;
+        PROF_STAMP();
 
         /* Ticks are 20 ms: the first claim one second in, then every five while
          * nothing has been offered, six tries in all. */

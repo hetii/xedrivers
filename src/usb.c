@@ -9,6 +9,7 @@
  */
 
 #include "usb.h"
+#include "prof.h"
 
 USB_DEV usb;
 volatile USB_STATS usb_stats;
@@ -44,7 +45,11 @@ static void submit_now(URB *urb)
         return;
     }
     mem_sync();                     /* buffer contents visible before the HC looks */
-    UsbdQueueAsyncTransfer(usb.device, urb);
+    {
+        PROF_START(t);
+        UsbdQueueAsyncTransfer(usb.device, urb);
+        PROF_END(submit, t, urb->Length);
+    }
 }
 
 static void submit_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)

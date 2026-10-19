@@ -16,6 +16,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py reg pla|usb 0xe610 [value] read/write a MAC register word
     xectl.py blast COUNT [PAYLOAD] [PORT]
     xectl.py cmd N [a1 a2 a3]           any raw command
+    xectl.py prof [SECONDS]             where a frame's time goes (PROF=1 builds)
 
 Environment: XE_HOST (default 192.168.1.210), XERUNNER (path to the CLI).
 """
@@ -41,7 +42,10 @@ MODES = {"drop": 0, "standalone": 1, "xnet": 2}
 ADVERT = {"2500": 0x6F, "1000": 0x2F, "100": 0x0F, "default": 0}
 MCU = {"pla": 0x0100, "usb": 0x0000}
 
+PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up']
+
 STRUCTS = {
+    "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls"],
     "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found",
                  "start_result", "start_count", "mode", "xnet_status",
                  "advertise_status", "chip_version"],
@@ -183,6 +187,31 @@ def status(sym):
                                                            ts["rcvbuf_result"]))
 
 
+def prof(sym, seconds):
+    """Two snapshots of net_prof, and what each stage cost between them."""
+    if "net_prof" not in sym:
+        print("this build has no profile; make PROF=1")
+        return
+    a = read_struct(sym, "net_prof")
+    time.sleep(seconds)
+    b = read_struct(sym, "net_prof")
+    freq = b["freq"] or 50000000
+    wall = ((b["stamp"] - a["stamp"]) & 0xFFFFFFFF) / freq
+    print("wall %.3f s (console clock, %d Hz)" % (wall, freq))
+    print("%-8s %9s %9s %10s %9s %7s" % ("stage", "calls/s", "us/call", "MB/s",
+                                         "ns/byte", "busy%"))
+    for one in PROF_SLOTS:
+        get = lambda d, f: d[one + "_" + f + "_hi"] << 32 | d[one + "_" + f + "_lo"]
+        ticks = get(b, "ticks") - get(a, "ticks")
+        moved = get(b, "bytes") - get(a, "bytes")
+        calls = (b[one + "_calls"] - a[one + "_calls"]) & 0xFFFFFFFF
+        spent = ticks / freq
+        print("%-8s %9.0f %9.2f %10.2f %9.2f %7.1f" % (
+            one, calls / wall, spent / calls * 1e6 if calls else 0,
+            moved / wall / 1e6, spent / moved * 1e9 if moved else 0,
+            100 * spent / wall))
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -234,6 +263,8 @@ def main(argv):
         port = num(rest[2]) if len(rest) > 2 else 5001
         print("sent %d" % command(sym, CMD["blast"], count, payload, port,
                                   wait=600)[0])
+    elif what == "prof":
+        prof(sym, float(rest[0]) if rest else 5.0)
     elif what == "cmd":
         print("result %#x status %#x" % command(sym, num(rest[0]),
                                                 *[num(x) for x in rest[1:]]))

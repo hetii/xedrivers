@@ -51,6 +51,7 @@
 #include "usb.h"
 #include "cdc.h"
 #include "config.h"
+#include "prof.h"
 
 /* Ring depths and the NTB size are build parameters (make RX_COUNT=... etc.). */
 #ifndef RX_COUNT
@@ -93,6 +94,18 @@ volatile u32 net_tx_eager = 2;
 volatile u32 net_ncm_ndp_end = 1;
 u8 net_mac[ETH_ALEN];
 volatile NET_STATS net_stats;
+#if XE_PROF
+volatile NET_PROF net_prof;
+
+/* Read off ordinal 131 on 17559; the frequency fits the low word. */
+extern u32 KeQueryPerformanceFrequency(void);
+
+void prof_init(void)
+{
+    net_prof.freq = KeQueryPerformanceFrequency();
+    net_prof.enabled = 1;
+}
+#endif
 
 static u8 *dma;
 static u32 dma_used;
@@ -211,8 +224,11 @@ static void deliver(const u8 *frame, u32 length, void *context)
      * arriving is as good a sign of link as any. */
     if (!net_stats.link && !link_down_seen)
         set_link(1);
-    if (net_rx)
+    if (net_rx) {
+        PROF_START(t);
         net_rx(frame, length);
+        PROF_END(rx_up, t, length);
+    }
 }
 
 /* Where received frames are handed up. Inline, they are handed up from the USB
@@ -263,7 +279,7 @@ static void rx_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
     }
 }
 
-static void rx_complete(URB *urb, u32 status)
+static void rx_complete_timed(URB *urb, u32 status)
 {
     u32 cpu;
 
@@ -301,6 +317,17 @@ static void rx_complete(URB *urb, u32 status)
         }
     }
     rx_queue(urb);
+}
+
+/* The count is read first: the request may be queued again before it returns. */
+static void rx_complete(URB *urb, u32 status)
+{
+    u32 actual = urb->Actual;
+    PROF_START(t);
+
+    rx_complete_timed(urb, status);
+    PROF_END(rx_done, t, actual);
+    (void)actual;
 }
 
 /* --- transmit ---------------------------------------------------------------- */
@@ -347,7 +374,8 @@ static u32 ntb_open_locked(void)
 
 static void tx_complete(URB *urb, u32 status)
 {
-    u32 irql, send = NONE, i = urb->Tag;
+    u32 irql, send = NONE, i = urb->Tag, length = urb->Length;
+    PROF_START(t);
 
     irql = KfAcquireSpinLock(&tx_lock);
     if (NT_SUCCESS(status)) {
@@ -367,6 +395,8 @@ static void tx_complete(URB *urb, u32 status)
     tx_send(send);
     if (net_tx_idle)
         net_tx_idle();
+    PROF_END(tx_done, t, length);
+    (void)length;
 }
 
 u32 net_tx_space(void)
@@ -399,7 +429,11 @@ static u32 tx_ecm(const u8 *frame, u32 length)
     KfReleaseSpinLock(&tx_lock, irql);
 
     dst = tx_buf[i];
-    xe_copy(dst, frame, length);
+    {
+        PROF_START(t);
+        xe_copy(dst, frame, length);
+        PROF_END(copy, t, length);
+    }
     n = length;
     if (layout.out_max && (n % layout.out_max) == 0)
         dst[n++] = 0;

@@ -58,6 +58,26 @@ left to win; inbound, where the bus is not the wall, a better server has room to
 roughly 26-28 MB/s -- which is what CUsbEnet's author reports for SMB/FTP/NFS with
 his own server and tuned buffers, against 32 MB/s to a plain speed-test socket.
 
+### Where a frame's time goes
+
+`make PROF=1` times each stage with the time base (`src/prof.h`) and
+`tests/xectl.py prof 5` reads it. During the TCP runs below, single stream:
+
+| stage | console -> PC (15.0k frames/s) | PC -> console (18.5k frames/s) |
+|---|---|---|
+| copy into the transfer buffer | 5.7 us a frame (3.8 ns/B), 8.6% of a thread | -- |
+| UsbdQueueAsyncTransfer | 0.8 us, 1.6% | 0.8 us, 2.1% |
+| transmit completion | 0.7 us, 1.1% | 0.7 us, 0.7% |
+| receive completion | (ACKs) 6.4% | 11.3 us, 21.0% |
+| of it xnet's receive (TCP) | 5.7% | 10.1 us, 18.7% |
+
+Outbound a frame leaves every 66.5 us, and of that the processor spends about 7 us
+on it; meanwhile 41 to 44 of the 64 transmit requests are queued at the host
+controller the whole time. The bus, not the processor, is what the frames wait
+for: copying less (or not at all) would free 8.6% of a thread and move nothing.
+Inbound, the USB thread is 21% busy, mostly in xnet's own TCP receive -- not the
+limit either.
+
 ### RAM to RAM, the plugin's own TCP server
 
 `src/tcp.c` serves two ports out of RAM on the console's own stack -- 5201 sends,

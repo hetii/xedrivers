@@ -4,6 +4,7 @@
 #   make MODE=xnet ADVERTISE=2500 IP=10.36.0.2
 #                        choose how it runs (see "Modes" below)
 #   make TCP=1           add the RAM-to-RAM TCP throughput server (src/tcp.c)
+#   make PROF=1          time each stage of a frame (src/prof.h, xectl.py prof)
 #   make test            native unit tests of the pure parts (cdc, stack checksum)
 #   make lint            cppcheck / clang-tidy over src/, if installed
 #   make push            put the plugin on the Orange Pi's mass-storage image (Usb:)
@@ -51,6 +52,9 @@ IP_VALUE   := $(shell python3 -c "import ipaddress,sys; print(hex(int(ipaddress.
 # without it the container names the kernel alone.
 TCP       ?= 0
 TCP_VALUE := $(if $(filter 0 1,$(TCP)),$(TCP),$(error TCP must be 0 or 1))
+# PROF=1 times each stage of a frame with the time base; a plain build has none of it.
+PROF       ?= 0
+PROF_VALUE := $(if $(filter 0 1,$(PROF)),$(PROF),$(error PROF must be 0 or 1))
 
 SRC      := $(filter-out $(if $(filter 1,$(TCP)),,src/tcp.c),$(wildcard src/*.c))
 HEADERS  := $(wildcard src/*.h)
@@ -72,7 +76,7 @@ XERUNNER_HOME ?= $(abspath ../xerunner)
 XERUNNER      ?= $(firstword $(wildcard $(XERUNNER_HOME)/.venv/bin/xerunner) xerunner)
 
 XEX := $(BUILD)/$(NAME).xex
-FLAGS_LINE := DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) TCP=$(TCP_VALUE)
+FLAGS_LINE := DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) TCP=$(TCP_VALUE) PROF=$(PROF_VALUE)
 
 .PHONY: all clean test lint kit push deploy
 
@@ -103,7 +107,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile tools/build_plugin.py \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
-	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u -D XE_TCP=$(TCP_VALUE) \
+	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u -D XE_TCP=$(TCP_VALUE) -D XE_PROF=$(PROF_VALUE) \
 	    --name $(NAME).dll --into $(BUILD)
 	@mv $(BUILD)/plugin.xex $@
 	@echo "  -> $@"
