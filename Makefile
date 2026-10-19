@@ -131,10 +131,11 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # Native tests. cdc.c and stack.c are pure byte code; kernel.h's inline asm is not
 # reached by the test translation units, so they build with the host compiler.
 # Each test sits beside the code it tests: tests/core/, tests/drivers/<driver>/.
-test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl
+test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis
 	@$(BUILD)/test_cdc
 	@$(BUILD)/test_stack
 	@$(BUILD)/test_rtl
+	@$(BUILD)/test_rndis
 
 HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core
 
@@ -151,6 +152,11 @@ $(BUILD)/test_rtl: tests/drivers/rtl8156/test_rtl.c src/drivers/rtl8156/rtl.c $(
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/drivers/rtl8156 -o $@ tests/drivers/rtl8156/test_rtl.c \
 	    src/drivers/rtl8156/rtl.c
+
+$(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -I src/drivers/rndis -o $@ tests/drivers/rndis/test_rndis.c \
+	    src/drivers/rndis/rndis.c
 
 lint:
 	@command -v cppcheck >/dev/null && cppcheck --std=c99 --enable=warning,style \

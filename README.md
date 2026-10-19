@@ -174,6 +174,11 @@ console's network until a power cycle; with FTP every value worked. It stays 0.
     make push                              put it on the Usb: medium (Orange Pi)
     make DRIVERS=cdc                       only the drivers named (default: all)
 
+A plugin whose image is larger than 0x10000 bytes is not loaded by this console --
+silently, at any base (seen with all three drivers in, 0x11000-0x12000; every
+image up to 0xF000 loads). Until that is understood, build the drivers a test
+needs, e.g. `make DRIVERS=rndis`.
+
 ## Drivers
 
 Everything that does not depend on the card is in `src/core/`: the USB driver
@@ -190,6 +195,14 @@ knows the product (VID:PID) wins over one that only knows the class.
 |---|---|---|
 | `cdc` | class: a CDC ECM or NCM interface in the current configuration | the frame transport, ECM or NCM (`cdc.c` parses, `cdc_net.c` runs it) |
 | `rtl8156` | `0bda:8156` | `cdc` plus the Realtek part: 2.5G advertisement, registers, PHY, chip version |
+| `rndis` | class: an RNDIS control interface (E0/01/03, 02/02/FF, EF/04/01) | Remote NDIS, the way Android phones tether (`rndis.c` the messages, `rndis_net.c` the driver) |
+
+`rndis` was first run on a Xiaomi phone tethering over USB (2717:ff80): INITIALIZE,
+MAC, filter and link state answered at the first try, the phone packs several
+received frames into one transfer (70 in 39), and in xnet mode the console took
+an address from the phone's DHCP and served FTP to a client on the phone. The
+phone enables tethering only once the console is up, which is fine: the kernel
+offers it to the plugin when it arrives.
 
 `cdc` alone does not take an RTL8156: the console's kernel offers a device in its
 first configuration, which on this card is Realtek's own protocol, so no CDC
