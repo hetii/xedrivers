@@ -77,6 +77,22 @@ processor 90% idle, what is left is the controller moving 512-byte packets at
 the rate it can fetch them: about 6.6 packets a microframe out (36.9 ns a byte),
 about 7.5 in, of the 13 USB 2.0 allows. That is the hardware.
 
+### The same card on a PC's USB 2.0
+
+The twin RTL8156B on the PC, behind a USB 2.0 hub (480 Mbit/s), cabled to the same
+1 Gbit/s router, iperf3 to the PC's own onboard NIC from a separate network
+namespace (2026-10-19):
+
+| configuration (Linux driver) | TCP out / in | UDP out / in |
+|---|---|---|
+| 1, Realtek's own (r8152) | 38.6 / 39.6 MB/s | -- |
+| 3, CDC ECM (cdc_ether) -- what the console runs | **36.7 / 38.7** | 37.7 / 40.2 |
+| 2, CDC NCM (cdc_ncm) | 34.2 / 32.3 | -- |
+
+So the card does 37-40 MB/s over USB 2.0 in exactly the mode the console uses,
+against the console's 23.3 out / 30 in. The card and the CDC transport are not the
+limit; the console's EHCI controller is (above).
+
 ### Where a frame's time goes
 
 `make PROF=1` times each stage with the time base (`src/core/prof.h`) and
