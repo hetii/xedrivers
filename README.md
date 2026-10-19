@@ -102,6 +102,33 @@ nothing: this is the path's ceiling, 94% of the 23.3 MB/s the USB allows outboun
 and 90% of the 30 MB/s inbound. That is the "thread scheduling" CUsbEnet's author
 named, and the gap to his 32 MB/s socket figure is now 5 MB/s, inbound.
 
+### Writing to the console: what holds FTP uploads
+
+Measured 2026-10-19, 256 MB from the PC's RAM to `Hdd1` with ftpdll
+(`tests/ftpbench.sh`), and the same path with no disk (`tests/tcpbench.py`):
+
+| transport | TCP, RAM to RAM: out / in | FTP to and from Hdd1: up / down |
+|---|---|---|
+| ECM (default) | 21.9 / **27.0** MB/s | **20.4-20.5** / 19.3 MB/s |
+| NCM, 4 KB blocks | 22.0 / 23.4 | 18.8 / 19.5 |
+| NCM, 8 KB blocks | 22.5 / 26.7 | 19.5 / 19.7 |
+| NCM, 16 KB blocks | 22.9 / 24.4 | -- |
+
+ECM stays the default: it is the fastest for writing to the console, which is
+what installing games is. The upload is not held by the network. A capture of
+one shows the console advertising a **zero TCP window for 23.8% of the
+transfer**, in 256 stalls of about 12 ms: ftpdll serves a transfer from one thread
+that receives, then writes to the disk, and receives nothing while it writes.
+20.4 / (1 - 0.238) = 26.8 MB/s, the RAM-to-RAM figure. Raising that thread's
+priority from 5 to anything up to 24 (`xectl.py cmd 15 <thread id> <prio>`) changes
+nothing, and neither does handing receive to another processor
+(`cdc_rx_cpu` 1, 2, 4, 6: 19.5-20.1 MB/s). A server that keeps receiving while it
+writes -- one thread on the socket, one on the file, a buffer between -- is what
+would reach the other 6 MB/s.
+
+`cdc_rx_cpu` 1 under the plugin's own TCP server at full rate once stopped the
+console's network until a power cycle; with FTP every value worked. It stays 0.
+
 ## Building
 
     make                                   xnet, advertise 2500

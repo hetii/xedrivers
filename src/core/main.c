@@ -43,6 +43,29 @@
  * any number the core does not know is handed to it. */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
 #define CMD_TCP_START 14u   /* start the throughput server (xnet mode, TCP=1 builds) */
+#define CMD_THREAD_PRIO 15u /* [1] thread id (xectl.py threads), [2] priority -> old */
+
+/* (thread id, &thread) -> NTSTATUS, a referenced KTHREAD; read off ordinals 267,
+ * 163 and 261 on 17559. KeSetPriorityThread is absolute and returns the old one. */
+extern u32 ObLookupThreadByThreadId(u32 id, void **thread);
+extern u32 KeSetPriorityThread(void *thread, u32 priority);
+extern void ObDereferenceObject(void *object);
+
+/* Another module's thread at another priority -- to measure what a file server's
+ * thread scheduling costs it (ftpdll serves a whole transfer from one thread at
+ * priority 5). */
+static u32 thread_priority(u32 id, u32 priority)
+{
+    void *thread = 0;
+    u32 status, old;
+
+    status = ObLookupThreadByThreadId(id, &thread);
+    if (!NT_SUCCESS(status) || !thread)
+        return status;
+    old = KeSetPriorityThread(thread, priority);
+    ObDereferenceObject(thread);
+    return old;
+}
 
 typedef struct {
     u32 magic;              /* 'XEAI' once DllMain ran */
@@ -120,6 +143,8 @@ static u32 run(u32 what)
     case CMD_XNET_IFACE:
         xnet_rx_iface = xe_cmd[1];
         return 0;
+    case CMD_THREAD_PRIO:
+        return thread_priority(xe_cmd[1], xe_cmd[2]);
 #if XE_TCP
     case CMD_TCP_START:
         return tcp_start();

@@ -154,7 +154,10 @@ static void deliver(const u8 *frame, u32 length, void *context)
  * serialised with the USB stack itself. With cdc_rx_cpu = N+1 they go to a DPC on
  * hardware thread N instead, and the request is resubmitted from there once its
  * frames are delivered, so USB completions and TCP run side by side. Set at run
- * time (xectl.py set cdc_rx_cpu 4); takes effect between batches. */
+ * time (xectl.py set cdc_rx_cpu 4); takes effect between batches. Gains nothing
+ * measurable for FTP (19.5-20.5 MB/s up on every thread), and 1 under the TCP
+ * server at full rate once stopped the console's network until a power cycle --
+ * keep it 0. */
 volatile u32 cdc_rx_cpu = 0;
 
 static KDPC rx_dpc;
