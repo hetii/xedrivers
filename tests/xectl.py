@@ -17,6 +17,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py blast COUNT [PAYLOAD] [PORT]
     xectl.py cmd N [a1 a2 a3]           any raw command
     xectl.py prof [SECONDS]             where a frame's time goes (PROF=1 builds)
+    xectl.py history [N]                the last N flight-recorder samples (200 ms)
 
 Environment: XE_HOST (default 192.168.1.210), XERUNNER (path to the CLI).
 """
@@ -255,6 +256,31 @@ def prof(sym, seconds):
             100 * spent / wall))
 
 
+def history(sym, last):
+    """The flight recorder, oldest first, as deltas per sample."""
+    names = ["tick", "rx_frames", "tx_frames", "tx_inflight", "tx_drops", "rx_errors",
+             "xmit_usb", "xmit_dropped"]
+    count = struct.unpack(">I", read(sym["xe_history_count"], 4))[0]
+    size = 512
+    raw = read(sym["xe_history"], size * 4 * len(names))
+    rows = [dict(zip(names, struct.unpack_from(">%dI" % len(names), raw,
+                                               i * 4 * len(names)))) for i in range(size)]
+    have = min(count, size)
+    order = [rows[(count - have + i) % size] for i in range(have)][-last:]
+    print("%8s %7s %7s %5s %6s %6s %7s %6s" % ("t(s)", "rx/smp", "tx/smp", "infl",
+                                              "drops", "rxerr", "xnet_tx", "xq_drop"))
+    prev = None
+    for r in order:
+        if prev:
+            print("%8.1f %7d %7d %5d %6d %6d %7d %6d" % (
+                r["tick"] * 0.02, r["rx_frames"] - prev["rx_frames"],
+                r["tx_frames"] - prev["tx_frames"], r["tx_inflight"],
+                r["tx_drops"] - prev["tx_drops"], r["rx_errors"] - prev["rx_errors"],
+                r["xmit_usb"] - prev["xmit_usb"],
+                r["xmit_dropped"] - prev["xmit_dropped"]))
+        prev = r
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -306,6 +332,8 @@ def main(argv):
         port = num(rest[2]) if len(rest) > 2 else 5001
         print("sent %d" % command(sym, CMD["blast"], count, payload, port,
                                   wait=600)[0])
+    elif what == "history":
+        history(sym, int(rest[0]) if rest else 512)
     elif what == "prof":
         prof(sym, float(rest[0]) if rest else 5.0)
     elif what == "cmd":

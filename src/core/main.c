@@ -124,6 +124,44 @@ volatile XE_CONFIG xe_config = { 0x58434647u, XE_MODE, XE_ADVERTISE, XE_IP,
  *   [4] ack counter   [5] result   [6] the request answered   [7] status */
 volatile u32 xe_cmd[8] = { 0 };
 
+/* A flight recorder: every HISTORY_EVERY worker ticks (200 ms) the counters that
+ * show whether frames still move each way, in a ring of HISTORY samples (about
+ * 100 s), so that a transfer that stalls on a link the PC cannot reach -- a
+ * phone's network -- can be read back afterwards over the onboard port
+ * (xectl.py history). */
+#define HISTORY       512
+#define HISTORY_EVERY 10
+
+typedef struct {
+    u32 tick;
+    u32 rx_frames;
+    u32 tx_frames;
+    u32 tx_inflight;
+    u32 tx_drops;
+    u32 rx_errors;
+    u32 xmit_usb;           /* frames xnet handed us */
+    u32 xmit_dropped;       /* frames xnet's queue gave up on */
+} XE_SAMPLE;
+
+volatile XE_SAMPLE xe_history[HISTORY];
+volatile u32 xe_history_count;          /* samples written, ever */
+
+static void record(u32 tick)
+{
+    volatile XE_SAMPLE *at = &xe_history[xe_history_count % HISTORY];
+
+    at->tick = tick;
+    at->rx_frames = net_stats.rx_frames;
+    at->tx_frames = net_stats.tx_frames;
+    at->tx_inflight = net_stats.tx_inflight;
+    at->tx_drops = net_stats.tx_drops;
+    at->rx_errors = net_stats.rx_errors;
+    at->xmit_usb = xnet_stats.xmit_usb;
+    at->xmit_dropped = xnet_stats.xmit_dropped;
+    mem_sync();
+    xe_history_count = xe_history_count + 1;
+}
+
 static u32 seen_generation;
 
 static void no_frames(const u8 *frame, u32 length)
@@ -216,6 +254,8 @@ static void worker(void *parameter)
     for (tick = 0;; tick++) {
         xe_state.worker_ticks = tick;
         PROF_STAMP();
+        if (tick % HISTORY_EVERY == 0)
+            record(tick);
 
         /* Ticks are 20 ms: the first claim one second in, then every five while
          * nothing has been offered, six tries in all. */

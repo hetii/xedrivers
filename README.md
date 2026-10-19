@@ -198,7 +198,11 @@ received frames into one transfer (70 in 39), and in xnet mode the console took
 an address from the phone's DHCP and served FTP to a client on the phone. The
 console sends to a phone at 24.5 MB/s with several frames packed into one
 transfer (21.2 one a transfer; tests/phoneblast.py, UDP to the phone's broadcast
-address, rate as the phone's USB side accepted it). The
+address, rate as the phone's USB side accepted it). Offered 16 KB transfers, the phone held received frames back to fill them, and an
+FTP upload from it crawled at 75-90 KB/s; offered 2048 bytes, as Linux
+rndis_host does (`rndis_rx_max`), it sends one frame a transfer and an 80 MB and a
+500 MB file went both ways quickly, 714k frames in and 642k out without an error.
+The
 phone enables tethering only once the console is up, which is fine: the kernel
 offers it to the plugin when it arrives.
 

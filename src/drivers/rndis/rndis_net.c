@@ -43,7 +43,7 @@
 #include "prof.h"
 
 #define RX_COUNT    16
-#define RX_SIZE     16384       /* what we tell the device it may send us at once */
+#define RX_SIZE     16384       /* each receive buffer; what we allow is rndis_rx_max */
 #define TX_COUNT    16
 #define TX_SIZE     24576       /* up to 15 wrapped frames, as a phone takes them */
 #define CTRL_SIZE   1088        /* a response of up to RNDIS_CONTROL_MAX */
@@ -96,6 +96,15 @@ volatile RNDIS_STATS rndis_stats;
  * 1 both mean "pack whenever anything is in flight".
  * Tunable at run time (xectl.py set rndis_tx_eager N). */
 volatile u32 rndis_tx_eager = 2;
+
+/* The largest transfer we tell the device it may send us (INITIALIZE's
+ * MaxTransferSize), read at every bring-up. 2048 is what Linux rndis_host asks for
+ * -- one frame a transfer -- and so what Android phones are tested against. Offered
+ * 16384, the Xiaomi packed received frames together and held each block until it
+ * filled or its own timer ran out: a TCP upload from the phone, whose window never
+ * filled a block, crawled at 75-90 KB/s in a steady rhythm, while downloads (small
+ * ACKs from the phone) were not hurt. Up to RX_SIZE. */
+volatile u32 rndis_rx_max = 2048;
 
 static RNDIS_LAYOUT layout;
 static void *ep_in;
@@ -471,7 +480,8 @@ static u32 rndis_start(void)
     }
 
     id = ++request_id;
-    status = transact(rndis_build_init(ctrl_buf, id, RX_SIZE), id, &reply);
+    status = transact(rndis_build_init(ctrl_buf, id, rndis_rx_max < RX_SIZE ?
+                                       rndis_rx_max : RX_SIZE), id, &reply);
     rndis_stats.init_status = status;
     if (!NT_SUCCESS(status))
         return fail(RNDIS_STEP_INIT, status);
