@@ -4,9 +4,9 @@
 
 #include <stdio.h>
 
-#include "../src/stack.h"
-#include "../src/net.h"
-#include "../src/usb.h"
+#include "stack.h"
+#include "net.h"
+#include "usb.h"
 
 /* stack.c links against the driver; the checksum test reaches none of it, so these
  * stand in for the symbols the linker still wants. */

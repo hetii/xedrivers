@@ -60,7 +60,7 @@ his own server and tuned buffers, against 32 MB/s to a plain speed-test socket.
 
 ### Where a frame's time goes
 
-`make PROF=1` times each stage with the time base (`src/prof.h`) and
+`make PROF=1` times each stage with the time base (`src/core/prof.h`) and
 `tests/xectl.py prof 5` reads it. During the TCP runs below, single stream:
 
 | stage | console -> PC (15.0k frames/s) | PC -> console (18.5k frames/s) |
@@ -80,7 +80,7 @@ limit either.
 
 ### RAM to RAM, the plugin's own TCP server
 
-`src/tcp.c` serves two ports out of RAM on the console's own stack -- 5201 sends,
+`src/bench/tcp/` serves two ports out of RAM on the console's own stack -- 5201 sends,
 5202 reads and discards, a thread a connection -- with xam's socket calls imported
 by ordinal (the kit packs xam as a second import library). It is built
 only with `make TCP=1` and started with `tests/xectl.py cmd 14`; a plain build has
@@ -110,6 +110,33 @@ named, and the gap to his 32 MB/s socket figure is now 5 MB/s, inbound.
     make TCP=1                             add the RAM-to-RAM TCP server
     make test                              host unit tests
     make push                              put it on the Usb: medium (Orange Pi)
+    make DRIVERS=cdc                       only the drivers named (default: all)
+
+## Drivers
+
+Everything that does not depend on the card is in `src/core/`: the USB driver
+object, the network device that xnet and the standalone stack see, the worker.
+Each card driver is a directory of its own under `src/drivers/`, and the core
+reaches it only through `src/core/driver.h`: one `XE_DRIVER` named
+`xe_driver_<directory>` with `match`, `start`, `detached`, `xmit`, `tx_space` and
+an optional `command`. The Makefile generates the table of drivers from the
+directories, so adding a card is adding a directory and removing one is deleting
+it. When the kernel offers a device every driver's `match` is asked; a driver that
+knows the product (VID:PID) wins over one that only knows the class.
+
+| driver | matches | what it is |
+|---|---|---|
+| `cdc` | class: a CDC ECM or NCM interface in the current configuration | the frame transport, ECM or NCM (`cdc.c` parses, `cdc_net.c` runs it) |
+| `rtl8156` | `0bda:8156` | `cdc` plus the Realtek part: 2.5G advertisement, registers, PHY, chip version |
+
+`cdc` alone does not take an RTL8156: the console's kernel offers a device in its
+first configuration, which on this card is Realtek's own protocol, so no CDC
+interface is ever shown to `match` (measured: `make DRIVERS=cdc` leaves the card
+unclaimed). It is for devices that are CDC from the start.
+
+A driver that builds on another includes its public header and names it in its
+directory's `depends` file; `make DRIVERS=rtl8156` alone then stops with "driver
+rtl8156 needs cdc". Tests sit beside the code: `tests/core/`, `tests/drivers/<d>/`.
 
 ## Modes
 
@@ -122,7 +149,7 @@ named, and the gap to his 32 MB/s socket figure is now 5 MB/s, inbound.
 `ADVERTISE` is the fastest link offered: `2500`, `1000`, `100`, or `default` (the
 card's firmware choice). `TRANSPORT` is `ecm` (default) or `ncm`. Both work and both stop at the
 console's USB ceilings (~31 MB/s in, ~24 MB/s out); NCM is no faster and, with
-16 KB blocks, slower for FTP uploads -- the measurements are in `src/net.c`.
+16 KB blocks, slower for FTP uploads -- the measurements are in `src/drivers/cdc/cdc_net.c`.
 
 Both can be changed on a running console, no rebuild or reboot:
 

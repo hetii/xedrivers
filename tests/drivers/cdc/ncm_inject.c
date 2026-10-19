@@ -1,4 +1,4 @@
-/* Send NTBs built by src/cdc.c through the host's RTL8156 in its NCM configuration,
+/* Send NTBs built by src/drivers/cdc/cdc.c through the host's RTL8156 in its NCM configuration,
  * over usbfs, so the transmit format can be tried against the real card firmware
  * without rebooting the console. A box on the far side of the cable (the Orange Pi)
  * watches for the test frames:
@@ -23,7 +23,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include "../src/cdc.h"
+#include "cdc.h"
 
 static int fd;
 

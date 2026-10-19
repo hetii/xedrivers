@@ -1,4 +1,4 @@
-/* One USB device, claimed by vendor/product, and transfers on it.
+/* One USB device, claimed for whichever driver matches it, and transfers on it.
  *
  * The kernel's USB stack expects UsbdQueueAsyncTransfer on hardware thread 2 at
  * DISPATCH_LEVEL (CUsbEnet: the checked kernel asserts it; the retail one merely
@@ -27,15 +27,17 @@ typedef struct {
 
 extern USB_DEV usb;
 
-/* Called from inside the kernel's AddDevice/RemoveDevice; must not block. */
+/* Who decides which devices are ours and hears of their arrival and removal --
+ * net.c, for every driver at once. `match` gets an interface descriptor (or 0 when
+ * only the device is known) and the device descriptor, returns nonzero to claim;
+ * `attached` and `detached` run inside AddDevice/RemoveDevice and must not block. */
 typedef struct {
-    u16   vendor;
-    u16   product;
+    u32  (*match)(const u8 *interface, const u8 *device);
     void (*attached)(void);
     void (*detached)(void);
-} USB_DRIVER;
+} USB_CLIENT;
 
-int   usb_register(const USB_DRIVER *driver);
+int   usb_register(const USB_CLIENT *client);
 void *usb_open(u32 type, u32 address, u32 max_packet, u32 interval);
 void  usb_submit(URB *urb);
 

@@ -1,9 +1,12 @@
-/* The RTL8156 as an Ethernet frame pipe, over CDC ECM or CDC NCM.
+/* The CDC Ethernet driver: an Ethernet frame pipe over CDC ECM or CDC NCM. Written
+ * for the RTL8156 (drivers/rtl8156 wraps it) and generic in what it parses: any
+ * device whose configuration describes an ECM or NCM function will do.
  *
  * Bring-up, all from the worker thread at PASSIVE_LEVEL, each control transfer
  * waited for:
  *   GET_DESCRIPTOR device, then every configuration -- pick the one for the
- *   transport xe_config asks for (cdc.c), ECM (3) or NCM (2) on this card
+ *   transport xe_config asks for (cdc.c), or the other if the device has only
+ *   that (ECM is configuration 3 on the RTL8156, NCM 2)
  *   GET_DESCRIPTOR string iMACAddress       the card's own address
  *   SET_CONFIGURATION                       the card's firmware takes over MAC/PHY
  *   NCM only, with the data interface at alt 0 as the spec requires:
@@ -22,7 +25,7 @@
  *   - receive 242 Mbit/s (ECM) / 250 (NCM), with 32 or 64 receive requests alike,
  *     the ~31 MB/s the twin card also manages on the PC's own USB 2.0 port;
  *   - transmit 188 (ECM) / 193 (NCM) Mbit/s, 15.9k frames a second whether each
- *     frame is a transfer or ten share one (net_tx_eager 1: 12293 NTBs carried
+ *     frame is a transfer or ten share one (cdc_tx_eager 1: 12293 NTBs carried
  *     122911 frames) -- about 24 MB/s out;
  *   - FTP: ECM 19.6 MB/s down / 20.5 up; NCM 20.2 / 14.1 with 16 KB blocks (the
  *     card holds received frames back to fill a block, and TCP slows) and
@@ -36,7 +39,7 @@
  * ECM: a transfer is one frame, ended by a short packet; a frame of exactly n*512
  * bytes gets one byte of padding instead of a zero-length packet (as Linux usbnet).
  *
- * NCM transmit aggregates adaptively: with fewer than `net_tx_eager` blocks in
+ * NCM transmit aggregates adaptively: with fewer than `cdc_tx_eager` blocks in
  * flight the open block goes out at once (latency); otherwise frames are added to
  * it and it goes when a block completes or it fills (throughput). Every submit is
  * made after the transmit lock is released: a transfer that completed
@@ -47,9 +50,10 @@
  * under that.
  */
 
+#include "cdc_net.h"
+#include "cdc.h"
 #include "net.h"
 #include "usb.h"
-#include "cdc.h"
 #include "config.h"
 #include "prof.h"
 
@@ -73,43 +77,21 @@
 #define FRAME_SIZE 2048         /* a multiple of 512, so a frame never babbles */
 #define CTRL_SIZE  512
 #define INTR_SIZE  64
-#define REG_SIZE   64
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define RX_SLOTS   MAX(RX_COUNT, NCM_RX_COUNT)
 #define TX_SLOTS   MAX(TX_COUNT, NCM_TX_COUNT)
 #define RX_AREA    MAX(RX_COUNT * FRAME_SIZE, NCM_RX_COUNT * NTB_SIZE)
 #define TX_AREA    MAX(TX_COUNT * FRAME_SIZE, NCM_TX_COUNT * NTB_SIZE)
-#define FIXED_AREA (CTRL_SIZE + INTR_SIZE + REG_SIZE + 3 * 2048)
-#define DMA_BYTES  (FIXED_AREA + RX_AREA + TX_AREA + 4096)
+#define DMA_BYTES  (RX_AREA + TX_AREA + 2 * 2048)  /* alignment slack */
 
 #define RX_ERROR_LIMIT   64     /* consecutive failures before the ring stops */
 #define INTR_ERROR_LIMIT 16
 #define NONE             0xFFFFFFFFu
 
-volatile NET_RX net_rx;
-volatile NET_LINK net_link_cb;
-volatile NET_TX_IDLE net_tx_idle;
-volatile u32 net_tx_eager = 2;
-volatile u32 net_ncm_ndp_end = 1;
-u8 net_mac[ETH_ALEN];
-volatile NET_STATS net_stats;
-#if XE_PROF
-volatile NET_PROF net_prof;
-
-/* Read off ordinal 131 on 17559; the frequency fits the low word. */
-extern u32 KeQueryPerformanceFrequency(void);
-
-void prof_init(void)
-{
-    net_prof.freq = KeQueryPerformanceFrequency();
-    net_prof.enabled = 1;
-}
-#endif
-
-static u8 *dma;
-static u32 dma_used;
-static u32 fixed_end;
+volatile u32 cdc_tx_eager = 2;
+volatile u32 cdc_ncm_ndp_end = 1;
+volatile CDC_STATS cdc_stats;
 
 static CDC_LAYOUT layout;
 static NCM_PARAMS ncm_params;
@@ -141,64 +123,14 @@ static u16 ntb_sequence;
 static URB intr_urb;
 static u8 *intr_buf;
 static u32 intr_consecutive_errors;
-static u32 link_down_seen;
 
 static u8 *ctrl_buf;
-static u8 *reg_buf;
 
 static volatile u32 running;
 
 static u16 le16(const u8 *p)
 {
     return (u16)(p[0] | (p[1] << 8));
-}
-
-/* Aligned to 2048, so a frame buffer never crosses a 4 KB page whatever the
- * allocator hands back; NTB buffers are larger and rely on the block being
- * physically contiguous, which MmAllocatePhysicalMemory gives. */
-void *net_dma_alloc(u32 bytes)
-{
-    u8 *block;
-
-    dma_used = (dma_used + 2047u) & ~2047u;
-    if (!dma || dma_used + bytes > DMA_BYTES)
-        return 0;
-    block = dma + dma_used;
-    dma_used += bytes;
-    return block;
-}
-
-void *net_reg_buffer(void)
-{
-    return reg_buf;
-}
-
-u32 net_link_up(void)
-{
-    return running && net_stats.link;
-}
-
-u32 net_speed_mbps(void)
-{
-    return net_stats.speed_mbps;
-}
-
-static void set_link(u32 up)
-{
-    if (net_stats.link == up)
-        return;
-    net_stats.link = up;
-    if (net_link_cb)
-        net_link_cb(up);
-}
-
-static void add64(volatile u32 *lo, volatile u32 *hi, u32 n)
-{
-    u32 before = *lo;
-
-    *lo = before + n;
-    if (*lo < before)
-        *hi = *hi + 1;
 }
 
 /* --- receive ----------------------------------------------------------------- */
@@ -214,30 +146,16 @@ static void rx_queue(URB *urb)
 static void deliver(const u8 *frame, u32 length, void *context)
 {
     (void)context;
-    if (length < ETH_HLEN || length > ETH_FRAME_MAX + 4) {
-        net_stats.rx_short++;
-        return;
-    }
-    net_stats.rx_frames++;
-    add64(&net_stats.rx_bytes, &net_stats.rx_bytes_hi, length);
-    /* A device that never sends NETWORK_CONNECTION still delivers frames; one
-     * arriving is as good a sign of link as any. */
-    if (!net_stats.link && !link_down_seen)
-        set_link(1);
-    if (net_rx) {
-        PROF_START(t);
-        net_rx(frame, length);
-        PROF_END(rx_up, t, length);
-    }
+    net_frame_in(frame, length);
 }
 
 /* Where received frames are handed up. Inline, they are handed up from the USB
  * completion on the USB processor, and xnet's whole TCP receive runs there too,
- * serialised with the USB stack itself. With net_rx_cpu = N+1 they go to a DPC on
+ * serialised with the USB stack itself. With cdc_rx_cpu = N+1 they go to a DPC on
  * hardware thread N instead, and the request is resubmitted from there once its
  * frames are delivered, so USB completions and TCP run side by side. Set at run
- * time (xectl.py set net_rx_cpu 4); takes effect between batches. */
-volatile u32 net_rx_cpu = 0;
+ * time (xectl.py set cdc_rx_cpu 4); takes effect between batches. */
+volatile u32 cdc_rx_cpu = 0;
 
 static KDPC rx_dpc;
 static KSPIN_LOCK rx_lock;
@@ -246,9 +164,9 @@ static URB *rx_head, *rx_tail;
 static void rx_process(URB *urb)
 {
     if (ncm) {
-        net_stats.rx_ntbs++;
+        cdc_stats.rx_ntbs++;
         if (cdc_ncm_parse_ntb(rx_buf[urb->Tag], urb->Actual, deliver, 0) < 0)
-            net_stats.rx_ntb_errors++;
+            cdc_stats.rx_ntb_errors++;
     } else {
         deliver(rx_buf[urb->Tag], urb->Actual, 0);
     }
@@ -290,9 +208,9 @@ static void rx_complete_timed(URB *urb, u32 status)
 
     if (NT_SUCCESS(status)) {
         rx_consecutive_errors = 0;
-        cpu = net_rx_cpu;
+        cpu = cdc_rx_cpu;
         if (cpu) {
-            net_stats.rx_deferred++;
+            cdc_stats.rx_deferred++;
             KeAcquireSpinLockAtRaisedIrql(&rx_lock);
             urb->Next = 0;
             if (rx_tail)
@@ -353,7 +271,7 @@ static u32 ntb_close_locked(void)
     tx_frames_in[i] = ntb.count;
     ntb_slot = NONE;
     tx_inflight++;
-    net_stats.tx_ntbs++;
+    cdc_stats.tx_ntbs++;
     return i;
 }
 
@@ -368,7 +286,7 @@ static u32 ntb_open_locked(void)
     tx_next = (i + 1) % tx_count;
     ntb_slot = i;
     cdc_ncm_tx_begin(&ntb, tx_buf[i], tx_size, &ncm_params, ntb_sequence++,
-                     net_ncm_ndp_end);
+                     cdc_ncm_ndp_end);
     return 1;
 }
 
@@ -380,7 +298,7 @@ static void tx_complete(URB *urb, u32 status)
     irql = KfAcquireSpinLock(&tx_lock);
     if (NT_SUCCESS(status)) {
         net_stats.tx_frames += tx_frames_in[i];
-        add64(&net_stats.tx_bytes, &net_stats.tx_bytes_hi, urb->Length);
+        net_add64(&net_stats.tx_bytes, &net_stats.tx_bytes_hi, urb->Length);
     } else {
         net_stats.tx_errors++;
         net_stats.tx_last_error = status;
@@ -388,18 +306,17 @@ static void tx_complete(URB *urb, u32 status)
     tx_inflight--;
     net_stats.tx_inflight = tx_inflight;
     urb->Busy = 0;
-    if (ncm && tx_inflight < net_tx_eager)
+    if (ncm && tx_inflight < cdc_tx_eager)
         send = ntb_close_locked();
     KfReleaseSpinLock(&tx_lock, irql);
 
     tx_send(send);
-    if (net_tx_idle)
-        net_tx_idle();
+    net_tx_done();
     PROF_END(tx_done, t, length);
     (void)length;
 }
 
-u32 net_tx_space(void)
+u32 cdc_tx_space(void)
 {
     if (!running)
         return 0;
@@ -456,7 +373,7 @@ static u32 tx_ncm(const u8 *frame, u32 length)
             goto out;
     }
     queued = 1;
-    if (tx_inflight < net_tx_eager)
+    if (tx_inflight < cdc_tx_eager)
         now = ntb_close_locked();
 out:
     net_stats.tx_inflight = tx_inflight;
@@ -469,9 +386,9 @@ out:
     return queued;
 }
 
-u32 net_tx(const u8 *frame, u32 length)
+u32 cdc_xmit(const u8 *frame, u32 length)
 {
-    if (!running || !usb.active || length < ETH_HLEN || length > ETH_FRAME_MAX) {
+    if (!running) {
         net_stats.tx_drops++;
         return 0;
     }
@@ -504,20 +421,18 @@ static void intr_complete(URB *urb, u32 status)
             used = cdc_parse_notification(intr_buf + at, urb->Actual - at, &note);
             if (!used)
                 break;
-            net_stats.intr_events++;
-            net_stats.last_notify[0] = (u32)intr_buf[at + 1] << 16 |
+            cdc_stats.intr_events++;
+            cdc_stats.last_notify[0] = (u32)intr_buf[at + 1] << 16 |
                                        le16(intr_buf + at + 2);
             if (note.kind == CDC_NOTE_LINK) {
-                if (!note.link_up)
-                    link_down_seen = 1;
-                set_link(note.link_up);
+                net_link_report(note.link_up);
             } else if (note.kind == CDC_NOTE_SPEED) {
-                net_stats.last_notify[1] = note.down_bps;
-                net_stats.speed_mbps = note.down_bps / 1000000u;
+                cdc_stats.last_notify[1] = note.down_bps;
+                net_speed_report(note.down_bps / 1000000u);
             }
         }
     } else {
-        net_stats.intr_errors++;
+        cdc_stats.intr_errors++;
         if (++intr_consecutive_errors > INTR_ERROR_LIMIT) {
             urb->Busy = 0;
             return;
@@ -528,8 +443,7 @@ static void intr_complete(URB *urb, u32 status)
 
 /* --- bring-up ---------------------------------------------------------------- */
 
-static u32 control(u8 type, u8 request, u16 value, u16 index, u16 length,
-                   u32 *actual)
+u32 cdc_control(u8 type, u8 request, u16 value, u16 index, u16 length, u32 *actual)
 {
     u8 setup[8];
 
@@ -544,6 +458,11 @@ static u32 control(u8 type, u8 request, u16 value, u16 index, u16 length,
     return usb_control(setup, ctrl_buf, length, actual, 1000);
 }
 
+u8 *cdc_ctrl_buffer(void)
+{
+    return ctrl_buf;
+}
+
 static u32 fail(u32 step, u32 status)
 {
     net_stats.step = step;
@@ -551,23 +470,24 @@ static u32 fail(u32 step, u32 status)
     return step;
 }
 
-/* The fixed part once; the rings are carved again on every bring-up, because ECM
- * and NCM want different counts and sizes out of the same block. */
-static u32 alloc_buffers(void)
+/* The control buffers once, from the core's scratch block. */
+static u32 alloc_control(void)
+{
+    if (!ctrl_buf) {
+        ctrl_buf = (u8 *)net_dma_scratch(CTRL_SIZE);
+        intr_buf = (u8 *)net_dma_scratch(INTR_SIZE);
+    }
+    return ctrl_buf && intr_buf;
+}
+
+/* The rings are carved again on every bring-up, because ECM and NCM want different
+ * counts and sizes out of the same block. */
+static u32 alloc_rings(void)
 {
     u32 i;
 
-    if (!dma) {
-        dma = (u8 *)MmAllocatePhysicalMemory(2, DMA_BYTES, 4);  /* as CUsbEnet */
-        if (!dma)
-            return 0;
-        dma_used = 0;
-        ctrl_buf = (u8 *)net_dma_alloc(CTRL_SIZE);
-        intr_buf = (u8 *)net_dma_alloc(INTR_SIZE);
-        reg_buf = (u8 *)net_dma_alloc(REG_SIZE);
-        fixed_end = dma_used;
-    }
-    dma_used = fixed_end;
+    if (!net_dma_begin(DMA_BYTES))
+        return 0;
 
     rx_count = ncm ? NCM_RX_COUNT : RX_COUNT;
     rx_size = ncm ? NTB_SIZE : FRAME_SIZE;
@@ -590,25 +510,25 @@ static u32 find_config(u32 subclass)
 {
     u32 index, actual, status, total, configs;
 
-    status = control(0x80, 0x06, 0x0100, 0, 18, &actual);
+    status = cdc_control(0x80, 0x06, 0x0100, 0, 18, &actual);
     if (!NT_SUCCESS(status) || actual < 18)
-        return fail(NET_STEP_DEVICE_DESC, status);
+        return fail(CDC_STEP_DEVICE_DESC, status);
     configs = ctrl_buf[17];
 
     for (index = 0; index < configs; index++) {
-        status = control(0x80, 0x06, (u16)(0x0200 | index), 0, 9, &actual);
+        status = cdc_control(0x80, 0x06, (u16)(0x0200 | index), 0, 9, &actual);
         if (!NT_SUCCESS(status) || actual < 9)
-            return fail(NET_STEP_CONFIG_DESC, status);
+            return fail(CDC_STEP_CONFIG_DESC, status);
         total = le16(ctrl_buf + 2);
         if (total > CTRL_SIZE)
             continue;
-        status = control(0x80, 0x06, (u16)(0x0200 | index), 0, (u16)total, &actual);
+        status = cdc_control(0x80, 0x06, (u16)(0x0200 | index), 0, (u16)total, &actual);
         if (!NT_SUCCESS(status))
-            return fail(NET_STEP_CONFIG_DESC, status);
+            return fail(CDC_STEP_CONFIG_DESC, status);
         if (cdc_parse_config(ctrl_buf, actual, &layout) && layout.subclass == subclass)
             return 0;
     }
-    return fail(NET_STEP_LAYOUT, configs);
+    return fail(CDC_STEP_LAYOUT, configs);
 }
 
 /* GET_NTB_PARAMETERS, then ask for input blocks no larger than our buffers. The
@@ -618,31 +538,31 @@ static u32 ncm_setup(void)
 {
     u32 status, actual, want = NTB_SIZE;
 
-    status = control(0xA1, 0x80, 0, layout.comm_interface, 28, &actual);
+    status = cdc_control(0xA1, 0x80, 0, layout.comm_interface, 28, &actual);
     if (!NT_SUCCESS(status) || !cdc_ncm_parse_params(ctrl_buf, actual, &ncm_params))
-        return fail(NET_STEP_NTB_PARAMS, status);
-    net_stats.ntb_in_max = ncm_params.in_max;
-    net_stats.ntb_out_max = ncm_params.out_max;
-    net_stats.ntb_out_align = (u32)ncm_params.out_divisor << 16 |
+        return fail(CDC_STEP_NTB_PARAMS, status);
+    cdc_stats.ntb_in_max = ncm_params.in_max;
+    cdc_stats.ntb_out_max = ncm_params.out_max;
+    cdc_stats.ntb_out_align = (u32)ncm_params.out_divisor << 16 |
                               ncm_params.out_remainder;
-    net_stats.ntb_out_datagrams = ncm_params.out_max_datagrams;
+    cdc_stats.ntb_out_datagrams = ncm_params.out_max_datagrams;
 
-    net_stats.ntb_formats = ncm_params.formats;
+    cdc_stats.ntb_formats = ncm_params.formats;
 
     /* What Linux cdc_ncm sends next, all while the data interface is at alt 0,
      * all optional in the spec and so recorded rather than required: NTB16 when
      * the device also does NTB32, no CRC appended, and the largest datagram
      * from the Ethernet functional descriptor. A device left expecting CRCs or
      * NTB32 accepts our NTB16/NCM0 blocks and transmits nothing. */
-    net_stats.ntb_format_status = 0xFFFFFFFFu;
+    cdc_stats.ntb_format_status = 0xFFFFFFFFu;
     if (ncm_params.formats & 2)
-        net_stats.ntb_format_status = control(0x21, 0x84, 0, layout.comm_interface,
+        cdc_stats.ntb_format_status = cdc_control(0x21, 0x84, 0, layout.comm_interface,
                                               0, 0);
-    net_stats.crc_status = control(0x21, 0x8A, 0, layout.comm_interface, 0, 0);
+    cdc_stats.crc_status = cdc_control(0x21, 0x8A, 0, layout.comm_interface, 0, 0);
     if (layout.max_segment) {
         ctrl_buf[0] = (u8)layout.max_segment;
         ctrl_buf[1] = (u8)(layout.max_segment >> 8);
-        net_stats.dgram_status = control(0x21, 0x88, 0, layout.comm_interface, 2, 0);
+        cdc_stats.dgram_status = cdc_control(0x21, 0x88, 0, layout.comm_interface, 2, 0);
     }
 
     if (ncm_params.in_max != want) {
@@ -650,74 +570,79 @@ static u32 ncm_setup(void)
         ctrl_buf[1] = (u8)(want >> 8);
         ctrl_buf[2] = (u8)(want >> 16);
         ctrl_buf[3] = (u8)(want >> 24);
-        status = control(0x21, 0x86, 0, layout.comm_interface, 4, 0);
-        net_stats.ntb_input_status = status;
+        status = cdc_control(0x21, 0x86, 0, layout.comm_interface, 4, 0);
+        cdc_stats.ntb_input_status = status;
         if (!NT_SUCCESS(status) && ncm_params.in_max > NTB_SIZE)
-            return fail(NET_STEP_NTB_PARAMS, status);
+            return fail(CDC_STEP_NTB_PARAMS, status);
     }
     return 0;
 }
 
-u32 net_start(void)
+u32 cdc_start(void)
 {
     u32 i, status, actual;
 
     running = 0;
-    net_stats.ready = 0;
-    net_stats.link = 0;
-    link_down_seen = 0;
     rx_consecutive_errors = 0;
     intr_consecutive_errors = 0;
     ep_in = ep_out = ep_intr = 0;
     ncm = xe_config.transport == XE_TRANSPORT_NCM;
-    net_stats.transport = ncm;
 
-    if (!alloc_buffers())
-        return fail(NET_STEP_DMA, 0);
+    if (!alloc_control())
+        return fail(CDC_STEP_DMA, 0);
 
-    if (find_config(ncm ? CDC_SUBCLASS_NCM : CDC_SUBCLASS_ECM))
-        return net_stats.step;
-    net_stats.config_value = layout.config_value;
-    net_stats.data_interface = layout.data_interface;
+    /* The transport asked for, else the other one: a device may have only one. */
+    if (find_config(ncm ? CDC_SUBCLASS_NCM : CDC_SUBCLASS_ECM)) {
+        if (net_stats.step != CDC_STEP_LAYOUT)
+            return net_stats.step;
+        ncm = !ncm;
+        if (find_config(ncm ? CDC_SUBCLASS_NCM : CDC_SUBCLASS_ECM))
+            return net_stats.step;
+    }
+    if (!alloc_rings())
+        return fail(CDC_STEP_DMA, 0);
+    cdc_stats.transport = ncm;
+    cdc_stats.config_value = layout.config_value;
+    cdc_stats.data_interface = layout.data_interface;
 
     if (layout.mac_string) {
-        status = control(0x80, 0x06, (u16)(0x0300 | layout.mac_string), 0x0409, 255,
+        status = cdc_control(0x80, 0x06, (u16)(0x0300 | layout.mac_string), 0x0409, 255,
                          &actual);
         if (!NT_SUCCESS(status) || !cdc_parse_mac(ctrl_buf, actual, net_mac))
-            return fail(NET_STEP_MAC, status);
+            return fail(CDC_STEP_MAC, status);
     }
 
-    status = control(0x00, 0x09, layout.config_value, 0, 0, 0);
+    status = cdc_control(0x00, 0x09, layout.config_value, 0, 0, 0);
     if (!NT_SUCCESS(status))
-        return fail(NET_STEP_SET_CONFIG, status);
+        return fail(CDC_STEP_SET_CONFIG, status);
 
     if (ncm) {
-        status = control(0x01, 0x0B, 0, layout.data_interface, 0, 0);
+        status = cdc_control(0x01, 0x0B, 0, layout.data_interface, 0, 0);
         if (!NT_SUCCESS(status))
-            return fail(NET_STEP_SET_INTERFACE, status);
+            return fail(CDC_STEP_SET_INTERFACE, status);
         if (ncm_setup())
             return net_stats.step;
     }
 
-    status = control(0x01, 0x0B, layout.data_alt, layout.data_interface, 0, 0);
+    status = cdc_control(0x01, 0x0B, layout.data_alt, layout.data_interface, 0, 0);
     if (!NT_SUCCESS(status))
-        return fail(NET_STEP_SET_INTERFACE, status);
+        return fail(CDC_STEP_SET_INTERFACE, status);
 
     ep_in = usb_open(USB_TYPE_BULK, layout.ep_in, layout.in_max, 0);
     ep_out = usb_open(USB_TYPE_BULK, layout.ep_out, layout.out_max, 0);
     if (layout.ep_intr)
         ep_intr = usb_open(USB_TYPE_INTERRUPT, layout.ep_intr, layout.intr_max,
                            layout.intr_interval);
-    net_stats.ep_in = (u32)(unsigned long)ep_in;
-    net_stats.ep_out = (u32)(unsigned long)ep_out;
-    net_stats.ep_intr = (u32)(unsigned long)ep_intr;
+    cdc_stats.ep_in = (u32)(unsigned long)ep_in;
+    cdc_stats.ep_out = (u32)(unsigned long)ep_out;
+    cdc_stats.ep_intr = (u32)(unsigned long)ep_intr;
     if (!ep_in || !ep_out)
-        return fail(NET_STEP_ENDPOINTS, usb_stats.last_open_status);
+        return fail(CDC_STEP_ENDPOINTS, usb_stats.last_open_status);
 
     /* PROMISCUOUS | ALL_MULTICAST | DIRECTED | BROADCAST */
-    status = control(0x21, 0x43, 0x000F, layout.comm_interface, 0, 0);
+    status = cdc_control(0x21, 0x43, 0x000F, layout.comm_interface, 0, 0);
     if (!NT_SUCCESS(status))
-        return fail(NET_STEP_FILTER, status);
+        return fail(CDC_STEP_FILTER, status);
 
     KeInitializeDpc(&rx_dpc, rx_dpc_routine, 0);
     rx_head = rx_tail = 0;
@@ -736,17 +661,33 @@ u32 net_start(void)
     if (ep_intr)
         intr_queue();
 
-    net_stats.step = NET_STEP_OK;
-    net_stats.ready = 1;
+    net_stats.step = CDC_STEP_OK;
     return 0;
 }
 
 /* From RemoveDevice, at DISPATCH_LEVEL: stop resubmitting; the close chain that
  * follows completes whatever is still queued. */
-void net_detached(void)
+void cdc_detached(void)
 {
     running = 0;
-    net_stats.ready = 0;
     mem_sync();
-    set_link(0);
 }
+
+/* --- the generic driver ------------------------------------------------------- */
+
+/* Any device that shows a CDC ECM or NCM communication interface in its current
+ * configuration. Devices whose CDC function is in another configuration (the
+ * RTL8156's is: its first one is Realtek's own) need a driver of their own that
+ * knows to look, as drivers/rtl8156 does. */
+static u32 cdc_match(const u8 *device, const u8 *interface)
+{
+    (void)device;
+    if (interface && interface[5] == 0x02 &&
+        (interface[6] == CDC_SUBCLASS_ECM || interface[6] == CDC_SUBCLASS_NCM))
+        return XE_MATCH_CLASS;
+    return XE_MATCH_NONE;
+}
+
+const XE_DRIVER xe_driver_cdc = {
+    "cdc", cdc_match, cdc_start, cdc_detached, cdc_xmit, cdc_tx_space, 0
+};

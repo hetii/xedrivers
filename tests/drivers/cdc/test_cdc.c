@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../src/cdc.h"
+#include "cdc.h"
 #include "fixtures.h"
 
 static int failures;

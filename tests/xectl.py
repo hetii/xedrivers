@@ -10,7 +10,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py ip A.B.C.D                 standalone address (reselects standalone)
     xectl.py transport ecm|ncm          USB transport; resets the card to apply
     xectl.py cmd 14                     start the TCP throughput server
-    xectl.py set|get SYMBOL [VALUE]     any 32-bit global, e.g. net_tx_eager
+    xectl.py set|get SYMBOL [VALUE]     any 32-bit global, e.g. cdc_tx_eager
     xectl.py advertise 2500|1000|100|default
     xectl.py phy 0xa400 [value]         read/write a PHY register (OCP address)
     xectl.py reg pla|usb 0xe610 [value] read/write a MAC register word
@@ -47,19 +47,19 @@ PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up']
 STRUCTS = {
     "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls"],
     "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found",
-                 "start_result", "start_count", "mode", "xnet_status",
-                 "advertise_status", "chip_version"],
+                 "start_result", "start_count", "mode", "xnet_status"],
     "xe_config": ["magic", "mode", "advertise", "ip", "transport"],
-    "net_stats": ["step", "step_status", "ready", "link", "speed_mbps", "rx_frames",
-                  "rx_bytes", "rx_errors", "rx_last_error", "rx_short", "tx_frames",
-                  "tx_bytes", "tx_drops", "tx_errors", "tx_last_error", "tx_inflight",
-                  "intr_events", "intr_errors", "last_notify0", "last_notify1",
-                  "rx_stopped", "config_value", "data_interface", "ep_in", "ep_out",
-                  "ep_intr", "rx_bytes_hi", "tx_bytes_hi", "transport", "rx_ntbs",
-                  "rx_ntb_errors", "tx_ntbs", "ntb_in_max", "ntb_out_max",
-                  "ntb_out_align", "ntb_out_datagrams", "ntb_input_status",
-                  "ntb_format_status", "crc_status", "dgram_status", "ntb_formats",
-                  "rx_deferred"],
+    "net_stats": ["driver", "step", "step_status", "ready", "link", "speed_mbps",
+                  "rx_frames", "rx_bytes", "rx_bytes_hi", "rx_errors", "rx_last_error",
+                  "rx_short", "rx_stopped", "tx_frames", "tx_bytes", "tx_bytes_hi",
+                  "tx_drops", "tx_errors", "tx_last_error", "tx_inflight"],
+    "cdc_stats": ["transport", "config_value", "data_interface", "ep_in", "ep_out",
+                  "ep_intr", "intr_events", "intr_errors", "last_notify0",
+                  "last_notify1", "rx_deferred", "rx_ntbs", "rx_ntb_errors", "tx_ntbs",
+                  "ntb_in_max", "ntb_out_max", "ntb_out_align", "ntb_out_datagrams",
+                  "ntb_formats", "ntb_input_status", "ntb_format_status", "crc_status",
+                  "dgram_status"],
+    "rtl_stats": ["chip_version", "advertise_status"],
     "stack_stats": ["arp_replies", "icmp_replies", "udp_echo", "discard_frames",
                     "discard_bytes", "discard_bytes_hi", "peer_ip", "peer_mac_hi",
                     "peer_mac_lo", "blast_sent", "blast_busy", "not_ours"],
@@ -129,6 +129,19 @@ def ip(v):
     return "%d.%d.%d.%d" % (v >> 24, (v >> 16) & 255, (v >> 8) & 255, v & 255)
 
 
+def driver_names(sym):
+    """net_stats.driver is an index into xe_drivers + 1; the names are the
+    xe_driver_<name> symbols in table order, which is the order of DRIVERS."""
+    table = sym.get("xe_drivers")
+    named = {addr: name[len("xe_driver_"):] for name, addr in sym.items()
+             if name.startswith("xe_driver_") and name != "xe_driver_count"}
+    if table is None:
+        return {}
+    count = struct.unpack(">I", read(sym["xe_driver_count"], 4))[0]
+    ptrs = struct.unpack(">%dI" % count, read(table, 4 * count))
+    return {i + 1: named.get(p, "%08x" % p) for i, p in enumerate(ptrs)}
+
+
 def status(sym):
     st = read_struct(sym, "xe_state")
     cf = read_struct(sym, "xe_config")
@@ -137,25 +150,36 @@ def status(sym):
     xs = read_struct(sym, "xnet_stats")
     mac = read(sym["net_mac"], 6)
     names = {v: k for k, v in MODES.items()}
-    print("plugin   magic=%08x version=%08x ticks=%d chip=%04x" % (
-        st["magic"], st["version"], st["worker_ticks"], st["chip_version"]))
+    drivers = driver_names(sym)
+    print("plugin   magic=%08x version=%08x ticks=%d driver=%s" % (
+        st["magic"], st["version"], st["worker_ticks"],
+        drivers.get(ns["driver"], ns["driver"])))
     print("config   mode=%s advertise=0x%02x ip=%s" % (
         names.get(cf["mode"], cf["mode"]), cf["advertise"], ip(cf["ip"])))
-    print("running  mode=%s start=%d/%#x adv_status=%#x claims=%d/%d" % (
+    print("running  mode=%s start=%d/%#x claims=%d/%d" % (
         names.get(st["mode"], st["mode"]), st["start_count"], st["start_result"],
-        st["advertise_status"], st["claim_found"], st["claim_attempts"]))
-    print("card     ready=%d link=%d speed=%dM mac=%s config=%d transport=%s step=%d/%#x" % (
-        ns["ready"], ns["link"], ns["speed_mbps"], mac.hex(":"), ns["config_value"],
-        "ncm" if ns["transport"] else "ecm", ns["step"], ns["step_status"]))
-    if ns["transport"]:
-        print("ntb      in_max=%d out_max=%d align=%#x max_dg=%d formats=%#x rx=%d "
-              "rx_err=%d tx=%d" % (
-                  ns["ntb_in_max"], ns["ntb_out_max"], ns["ntb_out_align"],
-                  ns["ntb_out_datagrams"], ns["ntb_formats"], ns["rx_ntbs"],
-                  ns["rx_ntb_errors"], ns["tx_ntbs"]))
-        print("ncm req  set_input=%#x set_format=%#x crc_off=%#x max_dgram=%#x" % (
-            ns["ntb_input_status"], ns["ntb_format_status"], ns["crc_status"],
-            ns["dgram_status"]))
+        st["claim_found"], st["claim_attempts"]))
+    print("card     ready=%d link=%d speed=%dM mac=%s step=%d/%#x" % (
+        ns["ready"], ns["link"], ns["speed_mbps"], mac.hex(":"), ns["step"],
+        ns["step_status"]))
+    if "cdc_stats" in sym:
+        cs = read_struct(sym, "cdc_stats")
+        print("cdc      config=%d transport=%s intr=%d/%d" % (
+            cs["config_value"], "ncm" if cs["transport"] else "ecm",
+            cs["intr_events"], cs["intr_errors"]))
+        if cs["transport"]:
+            print("ntb      in_max=%d out_max=%d align=%#x max_dg=%d formats=%#x rx=%d "
+                  "rx_err=%d tx=%d" % (
+                      cs["ntb_in_max"], cs["ntb_out_max"], cs["ntb_out_align"],
+                      cs["ntb_out_datagrams"], cs["ntb_formats"], cs["rx_ntbs"],
+                      cs["rx_ntb_errors"], cs["tx_ntbs"]))
+            print("ncm req  set_input=%#x set_format=%#x crc_off=%#x max_dgram=%#x" % (
+                cs["ntb_input_status"], cs["ntb_format_status"], cs["crc_status"],
+                cs["dgram_status"]))
+    if "rtl_stats" in sym:
+        rs = read_struct(sym, "rtl_stats")
+        print("rtl      chip=%04x adv_status=%#x" % (rs["chip_version"],
+                                                    rs["advertise_status"]))
     print("rx       frames=%d bytes=%d errors=%d stopped=%d" % (
         ns["rx_frames"], ns["rx_bytes_hi"] << 32 | ns["rx_bytes"], ns["rx_errors"],
         ns["rx_stopped"]))
@@ -227,7 +251,7 @@ def main(argv):
         write(sym["xe_config"] + 16, struct.pack(">I", value))
         print("reset %#x" % command(sym, CMD["reset"])[0])
     elif what == "set":
-        # Any 32-bit global by name, e.g. `set net_tx_eager 4`.
+        # Any 32-bit global by name, e.g. `set cdc_tx_eager 4`.
         write(sym[rest[0]], struct.pack(">I", num(rest[1])))
         print("%s = %#x" % (rest[0], struct.unpack(">I", read(sym[rest[0]], 4))[0]))
     elif what == "get":

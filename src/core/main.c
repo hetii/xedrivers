@@ -1,18 +1,20 @@
-/* xedrivers: a Realtek RTL8156 USB 2.5G Ethernet adapter as the Xbox 360's NIC.
+/* xedrivers: a USB Ethernet adapter as the Xbox 360's NIC -- whichever driver in
+ * src/drivers/ takes it (the Realtek RTL8156 USB 2.5G first among them).
  *
  * DllMain registers the USB driver object and starts the worker; nothing else, as
  * allocating from the pool there hangs the boot (xerunner: dllmain-pool-allocation@1).
  * The worker does everything that has to wait:
  *
  *   - the card was enumerated at boot, before this plugin existed, so the kernel
- *     will not offer it to us until it re-enumerates: find it on the root hubs and
+ *     will not offer it to us until it re-enumerates: find it on the hubs and
  *     reset it (xerunner: plugin-load-vs-enumeration@1)
- *   - on every AddDevice, bring it up (net.c) and apply xe_config
+ *   - on every AddDevice, bring it up with its driver (net.c) and apply xe_config
  *   - take orders from the debug channel
  *
  * The debug channel is one command word the worker polls, written from outside
  * with XBDM `setmem` (xerunner: plugin-debug-channel-f3@1); `xe_state`, `xe_config`,
- * `usb_stats`, `net_stats`, `stack_stats` and `xnet_stats` are read back the same
+ * `usb_stats`, `net_stats`, `stack_stats`, `xnet_stats` and each driver's own
+ * stats are read back the same
  * way. Their addresses come from the linked ELF (build/plugin.elf), fixed because
  * the image is linked at a fixed base with no relocations
  * (xerunner: plugin-debug-channel-f1@1). tests/xectl.py wraps all of it.
@@ -22,7 +24,6 @@
 #include "config.h"
 #include "usb.h"
 #include "net.h"
-#include "rtl.h"
 #include "stack.h"
 #include "xnet.h"
 #include "prof.h"
@@ -38,11 +39,8 @@
 #define CMD_BLAST      4u   /* [1] count, [2] payload bytes, [3] UDP port */
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_RESTART    6u   /* run the bring-up again */
-#define CMD_ADVERTISE  7u   /* [1] RTL_ADV_* bits; renegotiates now */
-#define CMD_REG_READ   8u   /* [1] mcu, [2] address -> [5] value, [7] status */
-#define CMD_REG_WRITE  9u   /* [1] mcu, [2] address, [3] word */
-#define CMD_PHY_READ  10u   /* [1] OCP address -> [5] value, [7] status */
-#define CMD_PHY_WRITE 11u   /* [1] OCP address, [2] value */
+/* 7..11 belong to the driver of the card (rtl8156: advertise, registers, PHY);
+ * any number the core does not know is handed to it. */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
 #define CMD_TCP_START 14u   /* start the throughput server (xnet mode, TCP=1 builds) */
 
@@ -56,8 +54,6 @@ typedef struct {
     u32 start_count;
     u32 mode;               /* the mode actually in force */
     u32 xnet_status;
-    u32 advertise_status;   /* of the last advertisement write */
-    u32 chip_version;       /* PLA_TCR0 >> 16, e.g. 0x7710 for an RTL8156B */
 } XE_STATE;
 
 volatile XE_STATE xe_state = { 0, XE_VERSION };
@@ -105,19 +101,8 @@ static u32 set_mode(u32 mode)
     return 0;
 }
 
-static u32 advertise(u32 bits)
-{
-    xe_config.advertise = bits;
-    if (!net_stats.ready)
-        return STATUS_UNSUCCESSFUL;
-    xe_state.advertise_status = bits ? rtl_set_advertise(bits) : STATUS_SUCCESS;
-    return xe_state.advertise_status;
-}
-
 static u32 run(u32 what)
 {
-    u32 value = 0;
-
     switch (what) {
     case CMD_PING:
         return 0x50494E47u;
@@ -132,18 +117,6 @@ static u32 run(u32 what)
     case CMD_RESTART:
         seen_generation = 0;
         return 0;
-    case CMD_ADVERTISE:
-        return advertise(xe_cmd[1]);
-    case CMD_REG_READ:
-        xe_cmd[7] = rtl_read_word(xe_cmd[1], xe_cmd[2], &value);
-        return value;
-    case CMD_REG_WRITE:
-        return rtl_write_word(xe_cmd[1], xe_cmd[2], xe_cmd[3]);
-    case CMD_PHY_READ:
-        xe_cmd[7] = rtl_phy_read(xe_cmd[1], &value);
-        return value;
-    case CMD_PHY_WRITE:
-        return rtl_phy_write(xe_cmd[1], xe_cmd[2]);
     case CMD_XNET_IFACE:
         xnet_rx_iface = xe_cmd[1];
         return 0;
@@ -152,24 +125,16 @@ static u32 run(u32 what)
         return tcp_start();
 #endif
     default:
-        return 0xFFFFFFFFu;
+        return net_command(what, xe_cmd) ? xe_cmd[5] : 0xFFFFFFFFu;
     }
 }
 
 static void bring_up(void)
 {
-    u32 tcr0 = 0;
-
     xe_state.start_count++;
-    rtl_forget_page();
     xe_state.start_result = net_start();
     if (xe_state.start_result)
         return;
-
-    if (NT_SUCCESS(rtl_read_dword(RTL_PLA, RTL_PLA_TCR0, &tcr0)))
-        xe_state.chip_version = tcr0 >> 16;
-    if (xe_config.advertise)
-        advertise(xe_config.advertise);
     set_mode(xe_config.mode);
 }
 
@@ -212,18 +177,6 @@ static void worker(void *parameter)
     }
 }
 
-static void attached(void)
-{
-    /* The worker notices the new generation and brings the card up. */
-}
-
-static void detached(void)
-{
-    net_detached();
-}
-
-static const USB_DRIVER rtl8156 = { 0x0BDA, 0x8156, attached, detached };
-
 int DllMain(void *instance, u32 reason, void *reserved)
 {
     void *thread = 0;
@@ -234,7 +187,7 @@ int DllMain(void *instance, u32 reason, void *reserved)
         return 1;
 
     xe_state.magic = 0x58454149u;               /* 'XEAI' */
-    usb_register(&rtl8156);
+    net_register();
     ExCreateThread(&thread, 0, 0, 0, (void *)worker, 0, 2);
     return 1;
 }

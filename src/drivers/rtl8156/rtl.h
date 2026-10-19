@@ -60,4 +60,12 @@ void rtl_advert_regs(u32 advertise, u32 *adv, u32 *ctrl1000, u32 *ctrl10g);
 
 void rtl_forget_page(void);     /* after a reset the window is the card's default */
 
+/* Read by tests/xectl.py. */
+typedef struct {
+    u32 chip_version;       /* PLA_TCR0 >> 16, e.g. 0x7710 for an RTL8156B */
+    u32 advertise_status;   /* of the last advertisement write */
+} RTL_STATS;
+
+extern volatile RTL_STATS rtl_stats;
+
 #endif /* XE_RTL_H */

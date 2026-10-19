@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TCP throughput against the plugin's own server (src/tcp.c), RAM to RAM.
+"""TCP throughput against the plugin's own server (src/bench/tcp/), RAM to RAM.
 
     tcpbench.py [--host H] [--seconds S] [--streams 1,2,4] [down|up|both]
 

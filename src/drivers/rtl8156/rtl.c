@@ -20,14 +20,17 @@
 #define ADVERTISE_1000HALF  0x0100u
 #define ADV2_5G             0x0080u
 
-static u8 *scratch;             /* net_reg_buffer(): DMA memory that stays put */
+#define REG_SIZE 64
+
+static u8 *scratch;             /* DMA memory from the core's scratch block */
 static u32 page = 0xFFFFFFFFu;  /* the OCP page last selected, or unknown */
 
 static u32 control(u8 type, u32 addr, u32 index, u32 *actual)
 {
     u8 setup[8];
 
-    scratch = (u8 *)net_reg_buffer();
+    if (!scratch)
+        scratch = (u8 *)net_dma_scratch(REG_SIZE);
     if (!scratch)
         return STATUS_UNSUCCESSFUL;
     setup[0] = type;
@@ -70,7 +73,8 @@ u32 rtl_write_word(u32 mcu, u32 addr, u32 value)
     u32 shift = addr & 2u;
     u32 v = (value & 0xFFFFu) << (shift * 8);
 
-    scratch = (u8 *)net_reg_buffer();
+    if (!scratch)
+        scratch = (u8 *)net_dma_scratch(REG_SIZE);
     if (!scratch)
         return STATUS_UNSUCCESSFUL;
     scratch[0] = (u8)v;

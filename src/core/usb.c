@@ -15,7 +15,7 @@ USB_DEV usb;
 volatile USB_STATS usb_stats;
 
 static USBD_DRIVER_OBJECT driver_object;
-static const USB_DRIVER *driver;
+static const USB_CLIENT *client;
 
 static URB close_urb;
 
@@ -210,17 +210,15 @@ static void close_complete(URB *urb, u32 status)
 
 static int ours(const u8 *descriptor)
 {
-    return descriptor && driver && le16(descriptor + 8) == driver->vendor &&
-           le16(descriptor + 10) == driver->product;
+    return descriptor && client && client->match(0, descriptor);
 }
 
 static u32 match(const u8 *interfaceDescriptor, const u8 *deviceDescriptor,
                  USBD_DRIVER_OBJECT *self)
 {
-    (void)interfaceDescriptor;
     (void)self;
     usb_stats.match_calls++;
-    return ours(deviceDescriptor) ? 1u : 0u;
+    return client && client->match(interfaceDescriptor, deviceDescriptor) ? 1u : 0u;
 }
 
 static int add_device(void *device)
@@ -244,12 +242,14 @@ static int add_device(void *device)
         return (int)STATUS_UNSUCCESSFUL;
     }
 
+    /* Before the generation moves: the worker brings the device up as soon as it
+     * sees it, and must find the driver already chosen. */
+    if (client->attached)
+        client->attached();
     usb.generation++;
     mem_sync();
     usb.active = 1;
     UsbdAddDeviceComplete(device, STATUS_SUCCESS);
-    if (driver->attached)
-        driver->attached();
     return 0;
 }
 
@@ -263,15 +263,15 @@ static int remove_device(void *device)
 
     usb.active = 0;
     mem_sync();
-    if (driver->detached)
-        driver->detached();
+    if (client->detached)
+        client->detached();
     close_complete(&close_urb, 0);
     return 0;
 }
 
-int usb_register(const USB_DRIVER *drv)
+int usb_register(const USB_CLIENT *who)
 {
-    driver = drv;
+    client = who;
     KeInitializeDpc(&submit_dpc, submit_dpc_routine, 0);
     submit_dpc.TargetNumber = USB_PROCESSOR + 1;
 
