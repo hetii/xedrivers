@@ -174,11 +174,6 @@ console's network until a power cycle; with FTP every value worked. It stays 0.
     make push                              put it on the Usb: medium (Orange Pi)
     make DRIVERS=cdc                       only the drivers named (default: all)
 
-A plugin whose image is larger than 0x10000 bytes is not loaded by this console --
-silently, at any base (seen with all three drivers in, 0x11000-0x12000; every
-image up to 0xF000 loads). Until that is understood, build the drivers a test
-needs, e.g. `make DRIVERS=rndis`.
-
 ## Drivers
 
 Everything that does not depend on the card is in `src/core/`: the USB driver
