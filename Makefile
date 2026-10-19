@@ -89,20 +89,16 @@ $(BUILD)/flags: FORCE
 	@echo "$(FLAGS_LINE)" | cmp -s - $@ || echo "$(FLAGS_LINE)" > $@
 FORCE:
 
-# xam's table beside the kernel's: the TCP server's socket calls are imported, not
-# resolved at run time, so the packer needs both (and uses xam's only with TCP=1). Written by xerunner the same way
-# the kernel's was; committed, so a build needs neither xerunner nor its base.
-$(KIT)/ordinals-xam-$(ORDINALS).txt:
-	@cd $(XERUNNER_HOME) && $(XERUNNER) alfred ordinals --module xam.xex \
-	    -o $(abspath $@) $(ORDINALS)
+# One ordinal table per module the plugin may import from, each naming its module
+# and identity in its header; the packer looks every import up in all of them and
+# gives a module a record only when something is imported from it (xam: TCP=1).
+TABLES := $(KIT)/ordinals-xboxkrnl-$(ORDINALS).txt $(KIT)/ordinals-xam-$(ORDINALS).txt
 
-$(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile tools/build_plugin.py \
-        $(KIT)/ordinals-$(ORDINALS).txt $(KIT)/ordinals-xam-$(ORDINALS).txt \
+$(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
         $(KIT)/plugin.py $(KIT)/write.py $(KIT)/kcall.S
 	@mkdir -p $(BUILD)
-	$(PYTHON) tools/build_plugin.py $(SRC) \
-	    --ordinals $(KIT)/ordinals-$(ORDINALS).txt \
-	    --xam $(KIT)/ordinals-xam-$(ORDINALS).txt --base $(BASE) \
+	$(PYTHON) $(KIT)/plugin.py $(SRC) $(addprefix --ordinals ,$(TABLES)) \
+	    --base $(BASE) \
 	    -I src -D XE_DEBUG=$(DEBUG) -D XE_MODE=$(MODE_VALUE)u \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) \
@@ -137,7 +133,7 @@ lint:
 
 kit:
 	@cd $(XERUNNER_HOME) && $(XERUNNER) alfred plugin-kit $(abspath $(KIT)) \
-	    --kernel $(ORDINALS)
+	    --kernel $(ORDINALS) --module xboxkrnl.exe --module xam.xex
 	@git diff --stat -- $(KIT)
 
 # Drop the gadget before writing the image -- an image edited while still served

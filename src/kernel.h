@@ -1,7 +1,8 @@
 /* The console kernel's types and the exports this driver calls.
  *
  * No ordinal appears here: kit/plugin.py reads the undefined symbols out of the
- * objects and resolves each against kit/ordinals-21256.0.txt, so a misspelt name
+ * objects and resolves each against kit/ordinals-xboxkrnl-21256.0.txt (and xam's
+ * table for the TCP server), so a misspelt name
  * fails the build instead of becoming a wrong ordinal. Every shape below was read
  * off the running 17559 kernel (dumped over XBDM) or taken from a claim in the
  * xerunner base; where it came from is noted at the declaration.

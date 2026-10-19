@@ -82,7 +82,7 @@ limit either.
 
 `src/tcp.c` serves two ports out of RAM on the console's own stack -- 5201 sends,
 5202 reads and discards, a thread a connection -- with xam's socket calls imported
-by ordinal (`tools/build_plugin.py` packs the second import library). It is built
+by ordinal (the kit packs xam as a second import library). It is built
 only with `make TCP=1` and started with `tests/xectl.py cmd 14`; a plain build has
 no xam imports at all, so the driver never depends on xam to load. Measured with
 `tests/tcpbench.py`, router at 1 Gbit/s:

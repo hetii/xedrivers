@@ -12,7 +12,8 @@
  * CUsbEnet's author measured his 32 MB/s to a "local speed test socket" with.
  *
  * The socket calls are xam's NetDll_* exports, imported by ordinal like every
- * kernel call: tools/build_plugin.py packs the second import library. Ordinals
+ * kernel call: kit/plugin.py packs the second import library from
+ * kit/ordinals-xam-21256.0.txt. Ordinals
  * from `xerunner alfred ordinals --module xam.xex`, identical at 20871 and 21256.
  */
 
