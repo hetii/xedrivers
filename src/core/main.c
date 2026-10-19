@@ -44,6 +44,8 @@
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
 #define CMD_TCP_START 14u   /* start the throughput server (xnet mode, TCP=1 builds) */
 #define CMD_THREAD_PRIO 15u /* [1] thread id (xectl.py threads), [2] priority -> old */
+#define CMD_PEEK      16u   /* [1] address, [2] 1 = little-endian (MMIO) -> word */
+#define CMD_POKE      17u   /* [1] address, [2] 1 = little-endian, [3] word */
 
 /* (thread id, &thread) -> NTSTATUS, a referenced KTHREAD; read off ordinals 267,
  * 163 and 261 on 17559. KeSetPriorityThread is absolute and returns the old one. */
@@ -54,6 +56,41 @@ extern void ObDereferenceObject(void *object);
 /* Another module's thread at another priority -- to measure what a file server's
  * thread scheduling costs it (ftpdll serves a whole transfer from one thread at
  * priority 5). */
+/* A word anywhere the kernel can reach, device registers included, which XBDM's
+ * getmem refuses (the EHCI controllers' registers at 0x7FEA3000 / 0x7FEA5000 are
+ * little-endian, hence the byte-reversed forms). */
+static u32 peek(u32 address, u32 little)
+{
+    u32 v;
+
+#if defined(__powerpc__)
+    if (little)
+        __asm__ volatile("lwbrx %0, 0, %1; eieio" : "=r"(v) : "r"(address) : "memory");
+    else
+        __asm__ volatile("lwz %0, 0(%1); eieio" : "=r"(v) : "b"(address) : "memory");
+#else
+    (void)address;
+    (void)little;
+    v = 0;
+#endif
+    return v;
+}
+
+static u32 poke(u32 address, u32 little, u32 value)
+{
+#if defined(__powerpc__)
+    if (little)
+        __asm__ volatile("stwbrx %0, 0, %1; eieio" :: "r"(value), "r"(address) : "memory");
+    else
+        __asm__ volatile("stw %0, 0(%1); eieio" :: "r"(value), "b"(address) : "memory");
+#else
+    (void)address;
+    (void)little;
+    (void)value;
+#endif
+    return 0;
+}
+
 static u32 thread_priority(u32 id, u32 priority)
 {
     void *thread = 0;
@@ -143,6 +180,10 @@ static u32 run(u32 what)
     case CMD_XNET_IFACE:
         xnet_rx_iface = xe_cmd[1];
         return 0;
+    case CMD_PEEK:
+        return peek(xe_cmd[1], xe_cmd[2]);
+    case CMD_POKE:
+        return poke(xe_cmd[1], xe_cmd[2], xe_cmd[3]);
     case CMD_THREAD_PRIO:
         return thread_priority(xe_cmd[1], xe_cmd[2]);
 #if XE_TCP

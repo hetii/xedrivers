@@ -58,6 +58,25 @@ left to win; inbound, where the bus is not the wall, a better server has room to
 roughly 26-28 MB/s -- which is what CUsbEnet's author reports for SMB/FTP/NFS with
 his own server and tuned buffers, against 32 MB/s to a plain speed-test socket.
 
+### The host controllers' own registers
+
+Read with the plugin (`xectl.py cmd 16 <address> 1`; XBDM's getmem refuses device
+registers) on both EHCI controllers, 0x7FEA3000 and 0x7FEA5000:
+
+| register | EHCI 0 | EHCI 1 | means |
+|---|---|---|---|
+| HCSPARAMS | 0x00101404 | 0x00101505 | 4 and 5 ports, one USB 1.1 companion each |
+| HCCPARAMS | 0x7070 | 0x7070 | **no asynchronous park mode** (bit 2 clear), 32-bit only |
+| USBCMD | 0x00010031 | 0x00010021 | running, async schedule on, **interrupt threshold 1 microframe** |
+
+So the two knobs an EHCI driver has for bulk throughput are already where they
+can go: park mode -- several back-to-back packets per pass over a queue head --
+is not implemented, and completions are already signalled every 125 us. With
+the transmit queue full throughout (41-44 of 64 requests waiting) and the
+processor 90% idle, what is left is the controller moving 512-byte packets at
+the rate it can fetch them: about 6.6 packets a microframe out (36.9 ns a byte),
+about 7.5 in, of the 13 USB 2.0 allows. That is the hardware.
+
 ### Where a frame's time goes
 
 `make PROF=1` times each stage with the time base (`src/core/prof.h`) and
