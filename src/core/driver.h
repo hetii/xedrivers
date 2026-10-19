@@ -7,7 +7,8 @@
  * deleting it: nothing outside it names the driver.
  *
  * A driver may build on another's public header -- rtl8156 is the CDC driver plus
- * what only a Realtek answers -- which makes that dependency explicit and one way.
+ * what only a Realtek answers -- and that include is the whole of the dependency:
+ * a build without the other driver stops there.
  *
  * The core owns one device at a time. When the kernel offers a device, every
  * driver's `match` is asked and the highest score takes it; the core then calls

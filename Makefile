@@ -63,9 +63,6 @@ BUILD    ?= build
 # xe_driver_<directory>; the table of them is generated, so nothing else names a
 # driver (src/core/driver.h).
 DRIVERS  ?= $(notdir $(patsubst %/,%,$(wildcard src/drivers/*/)))
-# A driver that builds on another names it in its directory's `depends` file.
-$(foreach d,$(DRIVERS),$(foreach x,$(strip $(file < src/drivers/$(d)/depends)),\
-    $(if $(filter $(x),$(DRIVERS)),,$(error driver $(d) needs $(x): add it to DRIVERS))))
 SRC_DIRS := src/core $(addprefix src/drivers/,$(DRIVERS)) \
             $(if $(filter 1,$(TCP)),src/bench/tcp)
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c

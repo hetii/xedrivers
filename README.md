@@ -161,9 +161,9 @@ first configuration, which on this card is Realtek's own protocol, so no CDC
 interface is ever shown to `match` (measured: `make DRIVERS=cdc` leaves the card
 unclaimed). It is for devices that are CDC from the start.
 
-A driver that builds on another includes its public header and names it in its
-directory's `depends` file; `make DRIVERS=rtl8156` alone then stops with "driver
-rtl8156 needs cdc". Tests sit beside the code: `tests/core/`, `tests/drivers/<d>/`.
+A driver that builds on another includes its public header, which is the whole of
+the dependency: `make DRIVERS=rtl8156` without `cdc` stops at that include. Tests
+sit beside the code: `tests/core/`, `tests/drivers/<d>/`.
 
 ## Modes
 
