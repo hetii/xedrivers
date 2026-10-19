@@ -62,7 +62,9 @@ his own server and tuned buffers, against 32 MB/s to a plain speed-test socket.
 
 `src/tcp.c` serves two ports out of RAM on the console's own stack -- 5201 sends,
 5202 reads and discards, a thread a connection -- with xam's socket calls imported
-by ordinal (`tools/build_plugin.py` packs the second import library). Measured with
+by ordinal (`tools/build_plugin.py` packs the second import library). It is built
+only with `make TCP=1` and started with `tests/xectl.py cmd 14`; a plain build has
+no xam imports at all, so the driver never depends on xam to load. Measured with
 `tests/tcpbench.py`, router at 1 Gbit/s:
 
 | | console -> PC | PC -> console |
@@ -85,6 +87,7 @@ named, and the gap to his 32 MB/s socket figure is now 5 MB/s, inbound.
     make                                   xnet, advertise 2500
     make MODE=standalone IP=10.36.0.2      the built-in responder, for measuring
     make MODE=standalone ADVERTISE=1000 IP=192.168.50.2
+    make TCP=1                             add the RAM-to-RAM TCP server
     make test                              host unit tests
     make push                              put it on the Usb: medium (Orange Pi)
 

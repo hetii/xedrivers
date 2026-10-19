@@ -86,11 +86,19 @@ def build(sources, into, kernel_table, xam_table, base, name, includes, defines)
     if unknown:
         raise ValueError("no ordinal in either table for: %s" % ", ".join(unknown))
 
-    # xam's imports first and as library 0, the kernel's as library 1: the order
-    # this console's own ftpdll.xex and xbdm.xex use. The address table, the thunks
-    # and each record's address list all follow this one order.
-    imports = [(one, xam_table[one], 0) for one in wanted if one in xam_table]
-    imports += [(one, kernel_table[one], 1) for one in wanted if one in kernel_table]
+    # xam's imports first, the kernel's after them: the order this console's own
+    # ftpdll.xex and xbdm.xex use. Only a module something is imported from gets a
+    # record, so a build without the TCP server names the kernel alone and does not
+    # depend on xam to load. The address table, the thunks and each record's address
+    # list all follow this one order.
+    libraries = []
+    imports = []
+    for module, table, identity in (("xam.xex", xam_table, XAM_ID),
+                                    ("xboxkrnl.exe", kernel_table, KERNEL_ID)):
+        mine = [one for one in wanted if one in table]
+        if mine:
+            imports += [(one, table[one], len(libraries)) for one in mine]
+            libraries.append((module, identity))
 
     kit._run([kit.TOOLS["gcc"], *flags, "-c", thunks(imports, into),
               "-o", os.path.join(into, "thunks.o")])
@@ -142,18 +150,20 @@ def build(sources, into, kernel_table, xam_table, base, name, includes, defines)
                            {3: (pdata_rva, len(pdata))})
     # One record a module, in the module tuple's order; each lists the slots and
     # thunks of its own imports.
-    per = {0: [], 1: []}
+    per = [[] for _ in libraries]
     for index, (one, _, library) in enumerate(imports):
         per[library] += [base + iat_rva + index * 4, held.get(one, 0)]
-    records = [write.library(0, per[0], XAM_ID, VERSION, LOWEST),
-               write.library(1, per[1], KERNEL_ID, VERSION, LOWEST)]
+    records = [write.library(index, per[index], identity, VERSION, LOWEST)
+               for index, (_, identity) in enumerate(libraries)]
     blob = write.build_xex(image, base, held["DllMain"], sections, records,
-                           modules=("xam.xex", "xboxkrnl.exe"), name=name)
+                           modules=tuple(module for module, _ in libraries),
+                           name=name)
     out = os.path.join(into, "plugin.xex")
     with open(out, "wb") as handle:
         handle.write(blob)
     return {"out": out, "elf": elf, "imports": imports,
-            "kernel": len(per[1]) // 2, "xam": len(per[0]) // 2,
+            "kernel": sum(1 for one in imports if one[0] in kernel_table),
+            "xam": sum(1 for one in imports if one[0] in xam_table),
             "image": len(image), "container": len(blob),
             "sections": [(one.name, one.rva, len(one.data)) for one in ordered]}
 

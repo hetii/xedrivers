@@ -3,6 +3,7 @@
 #   make                 build build/xedrivers.xex
 #   make MODE=xnet ADVERTISE=2500 IP=10.36.0.2
 #                        choose how it runs (see "Modes" below)
+#   make TCP=1           add the RAM-to-RAM TCP throughput server (src/tcp.c)
 #   make test            native unit tests of the pure parts (cdc, stack checksum)
 #   make lint            cppcheck / clang-tidy over src/, if installed
 #   make push            put the plugin on the Orange Pi's mass-storage image (Usb:)
@@ -46,7 +47,12 @@ MODE_VALUE := $(or $(mode_$(MODE)),$(error MODE must be standalone, xnet or drop
 ADV_VALUE  := $(or $(adv_$(ADVERTISE)),$(error ADVERTISE must be 2500, 1000, 100 or default))
 IP_VALUE   := $(shell python3 -c "import ipaddress,sys; print(hex(int(ipaddress.IPv4Address('$(IP)'))))")
 
-SRC      := $(wildcard src/*.c)
+# TCP=1 adds the throughput server, and with it the plugin's only imports from xam;
+# without it the container names the kernel alone.
+TCP       ?= 0
+TCP_VALUE := $(if $(filter 0 1,$(TCP)),$(TCP),$(error TCP must be 0 or 1))
+
+SRC      := $(filter-out $(if $(filter 1,$(TCP)),,src/tcp.c),$(wildcard src/*.c))
 HEADERS  := $(wildcard src/*.h)
 BUILD    ?= build
 DEBUG    ?= 0
@@ -66,7 +72,7 @@ XERUNNER_HOME ?= $(abspath ../xerunner)
 XERUNNER      ?= $(firstword $(wildcard $(XERUNNER_HOME)/.venv/bin/xerunner) xerunner)
 
 XEX := $(BUILD)/$(NAME).xex
-FLAGS_LINE := DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE)
+FLAGS_LINE := DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) TCP=$(TCP_VALUE)
 
 .PHONY: all clean test lint kit push deploy
 
@@ -79,8 +85,8 @@ $(BUILD)/flags: FORCE
 	@echo "$(FLAGS_LINE)" | cmp -s - $@ || echo "$(FLAGS_LINE)" > $@
 FORCE:
 
-# xam's table beside the kernel's: the plugin's socket calls are imported, not
-# resolved at run time, so the packer needs both. Written by xerunner the same way
+# xam's table beside the kernel's: the TCP server's socket calls are imported, not
+# resolved at run time, so the packer needs both (and uses xam's only with TCP=1). Written by xerunner the same way
 # the kernel's was; committed, so a build needs neither xerunner nor its base.
 $(KIT)/ordinals-xam-$(ORDINALS).txt:
 	@cd $(XERUNNER_HOME) && $(XERUNNER) alfred ordinals --module xam.xex \
@@ -97,7 +103,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile tools/build_plugin.py \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
-	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u \
+	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u -D XE_TCP=$(TCP_VALUE) \
 	    --name $(NAME).dll --into $(BUILD)
 	@mv $(BUILD)/plugin.xex $@
 	@echo "  -> $@"

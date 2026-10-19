@@ -40,6 +40,12 @@
 #define XE_IP 0x0A240002u       /* 10.36.0.2 */
 #endif
 
+/* The RAM-to-RAM TCP server (src/tcp.c), built only with `make TCP=1`: it is what
+ * makes the plugin import from xam, and the driver needs none of it. */
+#ifndef XE_TCP
+#define XE_TCP 0
+#endif
+
 typedef struct {
     u32 magic;                  /* 'XCFG' */
     u32 mode;                   /* XE_MODE_* the worker applies */

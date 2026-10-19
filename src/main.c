@@ -25,7 +25,9 @@
 #include "rtl.h"
 #include "stack.h"
 #include "xnet.h"
+#if XE_TCP
 #include "tcp.h"
+#endif
 
 #define XE_VERSION 0x00020000u
 
@@ -41,7 +43,7 @@
 #define CMD_PHY_READ  10u   /* [1] OCP address -> [5] value, [7] status */
 #define CMD_PHY_WRITE 11u   /* [1] OCP address, [2] value */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
-#define CMD_TCP_START 14u   /* start the throughput server (xnet mode only) */
+#define CMD_TCP_START 14u   /* start the throughput server (xnet mode, TCP=1 builds) */
 
 typedef struct {
     u32 magic;              /* 'XEAI' once DllMain ran */
@@ -144,8 +146,10 @@ static u32 run(u32 what)
     case CMD_XNET_IFACE:
         xnet_rx_iface = xe_cmd[1];
         return 0;
+#if XE_TCP
     case CMD_TCP_START:
         return tcp_start();
+#endif
     default:
         return 0xFFFFFFFFu;
     }
