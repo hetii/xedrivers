@@ -208,6 +208,16 @@ A driver that builds on another includes its public header, which is the whole o
 the dependency: `make DRIVERS=rtl8156` without `cdc` stops at that include. Tests
 sit beside the code: `tests/core/`, `tests/drivers/<d>/`.
 
+## When the card goes
+
+Unplug the card -- or its cable, or end a phone's tethering -- and the console goes
+on with its onboard port: without the card's link the link-state hook answers
+with the EMAC's, transmit takes the kernel's EMAC path, and the EMAC delivers to
+the title itself. Plug it back and it is offered to the plugin again, brought up,
+and xnet moves back once its link is up. Measured: the onboard port answered at
+once each time; back on the card 4 s after its PHY came up, and at once after a
+physical replug of the card.
+
 ## Modes
 
 | `MODE` | frames go to |

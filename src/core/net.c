@@ -182,6 +182,7 @@ void net_detached(void)
     mem_sync();
     if (drv)
         drv->detached();
+    net_stats.speed_mbps = 0;
     set_link(0);
 }
 
