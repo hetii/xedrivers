@@ -202,6 +202,22 @@ u32 rndis_wrap(u8 *buf, u32 buf_size, const u8 *frame, u32 length)
     return total;
 }
 
+u32 rndis_wrap_aligned(u8 *buf, u32 buf_size, const u8 *frame, u32 length,
+                       u32 align)
+{
+    u32 total = RNDIS_PACKET_HEADER + length, padded, i;
+
+    if (!align)
+        align = 1;
+    padded = (total + align - 1) & ~(align - 1);
+    if (padded > buf_size || !rndis_wrap(buf, buf_size, frame, length))
+        return 0;
+    for (i = total; i < padded; i++)
+        buf[i] = 0;
+    wr32(buf + 4, padded);
+    return padded;
+}
+
 int rndis_unwrap(const u8 *buf, u32 length, RNDIS_FRAME each, void *context)
 {
     u32 at = 0, frames = 0;

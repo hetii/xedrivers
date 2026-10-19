@@ -146,12 +146,34 @@ static void test_packets(void)
     CHECK(seen == 1);
 }
 
+static void test_aligned(void)
+{
+    u8 frame[61], buf[400];
+    u32 n, m, i;
+
+    for (i = 0; i < sizeof(frame); i++)
+        frame[i] = (u8)(i + 1);
+    memset(buf, 0xAA, sizeof(buf));
+    n = rndis_wrap_aligned(buf, sizeof(buf), frame, sizeof(frame), 16);
+    CHECK(n == 112);                    /* 44 + 61 = 105, up to 16 */
+    CHECK(get32(buf + 4) == 112 && get32(buf + 12) == 61);
+    CHECK(buf[105] == 0 && buf[111] == 0);
+    m = rndis_wrap_aligned(buf + n, sizeof(buf) - n, frame, sizeof(frame), 16);
+    CHECK(m == 112);
+    seen = seen_bytes = 0;
+    CHECK(rndis_unwrap(buf, n + m, count, 0) == 2);
+    CHECK(seen == 2 && seen_bytes == 122);
+    CHECK(rndis_wrap_aligned(buf, 110, frame, sizeof(frame), 16) == 0);
+    CHECK(rndis_wrap_aligned(buf, sizeof(buf), frame, sizeof(frame), 0) == 105);
+}
+
 int main(void)
 {
     test_config();
     test_build();
     test_replies();
     test_packets();
+    test_aligned();
     if (failures) {
         printf("%d check(s) failed\n", failures);
         return 1;

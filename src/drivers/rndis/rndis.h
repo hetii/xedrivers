@@ -91,6 +91,13 @@ int rndis_parse_reply(const u8 *buf, u32 length, RNDIS_REPLY *out);
  * `buf`. Returns the transfer length, 0 if it does not fit. */
 u32 rndis_wrap(u8 *buf, u32 buf_size, const u8 *frame, u32 length);
 
+/* The same, for packing several into one transfer: the message is padded with
+ * zeros to a multiple of `align` (a power of two, from the device's
+ * PacketAlignmentFactor) and its MessageLength says so, so the next one starts
+ * aligned. Returns the padded length, 0 if it does not fit. */
+u32 rndis_wrap_aligned(u8 *buf, u32 buf_size, const u8 *frame, u32 length,
+                       u32 align);
+
 /* Every frame in one bulk IN transfer; a device may pack several PACKET_MSGs into
  * one. Returns the number of frames, or -1 at the first malformed message (the
  * frames before it are delivered). */

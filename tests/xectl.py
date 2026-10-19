@@ -63,7 +63,8 @@ STRUCTS = {
     "rndis_stats": ["init_status", "max_packets", "max_transfer", "alignment",
                     "filter_status", "media_status", "link_speed", "control_polls",
                     "keepalives", "indications", "last_indication", "rx_transfers",
-                    "rx_bad", "intr_events", "intr_errors", "tx_too_big"],
+                    "rx_bad", "intr_events", "intr_errors", "tx_too_big",
+                    "tx_transfers"],
     "stack_stats": ["arp_replies", "icmp_replies", "udp_echo", "discard_frames",
                     "discard_bytes", "discard_bytes_hi", "peer_ip", "peer_mac_hi",
                     "peer_mac_lo", "blast_sent", "blast_busy", "not_ours"],
@@ -188,10 +189,11 @@ def status(sym):
                                  rs["filter_status"], rs["media_status"],
                                  rs["link_speed"]))
         print("rndis io rx_xfers=%d bad=%d polls=%d keepalive=%d indic=%d/%#x intr=%d/%d "
-              "too_big=%d" % (rs["rx_transfers"], rs["rx_bad"], rs["control_polls"],
-                              rs["keepalives"], rs["indications"],
-                              rs["last_indication"], rs["intr_events"],
-                              rs["intr_errors"], rs["tx_too_big"]))
+              "too_big=%d tx_xfers=%d" % (rs["rx_transfers"], rs["rx_bad"],
+                                          rs["control_polls"], rs["keepalives"],
+                                          rs["indications"], rs["last_indication"],
+                                          rs["intr_events"], rs["intr_errors"],
+                                          rs["tx_too_big"], rs["tx_transfers"]))
     if "rtl_stats" in sym:
         rs = read_struct(sym, "rtl_stats")
         print("rtl      chip=%04x adv_status=%#x" % (rs["chip_version"],

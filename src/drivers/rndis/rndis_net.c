@@ -16,10 +16,21 @@
  * as Linux rndis_host does when the notification has not been seen. A keepalive
  * the device asks in between is answered; an indication is recorded.
  *
- * Data: one frame a transfer out, wrapped in the 44-byte PACKET_MSG header, with a
- * byte of padding when the transfer would be a whole number of packets (the
- * device reads MessageLength, not the transfer length); in, as many PACKET_MSGs
- * as the device packed into one transfer. After bring-up the interrupt endpoint
+ * Data: out, frames wrapped in the 44-byte PACKET_MSG header and packed into one
+ * transfer up to the device's MaxPacketsPerTransfer and MaxTransferSize, each
+ * message padded to its PacketAlignmentFactor; with fewer than `rndis_tx_eager`
+ * transfers in flight the open one goes at once (latency), otherwise frames are
+ * added until it fills or a transfer completes (throughput) -- as the CDC driver's
+ * NCM does. A byte of padding when a transfer would be a whole number of packets
+ * (the device reads MessageLength, not the transfer length). In, as many
+ * PACKET_MSGs as the device packed into one transfer.
+ *
+ * Measured on the console to a Xiaomi phone (MaxPacketsPerTransfer 15, 23700
+ * bytes, alignment 16), UDP of 1472-byte payloads to the phone's broadcast
+ * address (tests/phoneblast.py): one frame a transfer 21.2 MB/s, 13588 frames/s;
+ * packed 24.5 MB/s, 15600 frames/s, about eleven a transfer, whatever
+ * rndis_tx_eager (1, 2, 4, 8). That is what the phone's USB side accepted; what
+ * it did with the frames after is not seen from here. After bring-up the interrupt endpoint
  * is drained and counted only: a link change the device indicates there is not
  * read (the control channel is thread-only), and a frame's arrival is what the
  * core takes as link up.
@@ -33,8 +44,8 @@
 
 #define RX_COUNT    16
 #define RX_SIZE     16384       /* what we tell the device it may send us at once */
-#define TX_COUNT    32
-#define TX_SIZE     2048        /* one wrapped frame, 44 + 1514 */
+#define TX_COUNT    16
+#define TX_SIZE     24576       /* up to 15 wrapped frames, as a phone takes them */
 #define CTRL_SIZE   1088        /* a response of up to RNDIS_CONTROL_MAX */
 #define INTR_SIZE   64
 #define DMA_BYTES   (RX_COUNT * RX_SIZE + TX_COUNT * TX_SIZE + 2 * 2048)
@@ -42,6 +53,7 @@
 #define RX_ERROR_LIMIT   64
 #define INTR_ERROR_LIMIT 16
 #define REPLY_POLLS      100    /* GET_ENCAPSULATED_RESPONSE tries, 5 ms apart */
+#define NONE             0xFFFFFFFFu
 
 enum {
     RNDIS_STEP_OK = 0,
@@ -74,9 +86,16 @@ typedef struct {
     u32 intr_events;
     u32 intr_errors;
     u32 tx_too_big;
+    u32 tx_transfers;
 } RNDIS_STATS;
 
 volatile RNDIS_STATS rndis_stats;
+
+/* Below this many transfers in flight a frame goes out at once; at or above it,
+ * frames are packed; an idle pipe always gets the open transfer at once, so 0 and
+ * 1 both mean "pack whenever anything is in flight".
+ * Tunable at run time (xectl.py set rndis_tx_eager N). */
+volatile u32 rndis_tx_eager = 2;
 
 static RNDIS_LAYOUT layout;
 static void *ep_in;
@@ -89,10 +108,18 @@ static u32 rx_consecutive_errors;
 
 static URB tx_urb[TX_COUNT];
 static u8 *tx_buf[TX_COUNT];
+static u32 tx_len[TX_COUNT];
+static u32 tx_frames_in[TX_COUNT];
 static u32 tx_next;
 static u32 tx_inflight;
 static u32 tx_limit;            /* the largest transfer the device accepts */
+static u32 tx_max_packets;      /* and the most messages in one */
+static u32 tx_align;            /* each message padded to this */
 static KSPIN_LOCK tx_lock;
+
+static u32 open_slot = NONE;    /* the transfer being filled */
+static u32 open_len;
+static u32 open_count;
 
 static URB intr_urb;
 static u8 *intr_buf;
@@ -155,14 +182,75 @@ static void rx_complete(URB *urb, u32 status)
 
 /* --- transmit ---------------------------------------------------------------- */
 
+static void tx_complete(URB *urb, u32 status);
+
+static void tx_send(u32 i)
+{
+    if (i == NONE)
+        return;
+    usb_prepare(&tx_urb[i], ep_out, tx_complete, tx_buf[i], tx_len[i], 0);
+    usb_submit(&tx_urb[i]);
+}
+
+/* Close the open transfer and return its slot for sending, or NONE. Lock held. */
+static u32 close_locked(void)
+{
+    u32 i = open_slot, n = open_len;
+
+    if (i == NONE || !open_count)
+        return NONE;
+    if (layout.out_max && (n % layout.out_max) == 0)
+        tx_buf[i][n++] = 0;
+    tx_len[i] = n;
+    tx_frames_in[i] = open_count;
+    open_slot = NONE;
+    tx_inflight++;
+    net_stats.tx_inflight = tx_inflight;
+    rndis_stats.tx_transfers++;
+    return i;
+}
+
+/* Take the next slot and start a transfer in it; 0 if the ring is full. Lock held. */
+static u32 open_locked(void)
+{
+    u32 i = tx_next;
+
+    if (tx_urb[i].Busy)
+        return 0;
+    tx_urb[i].Busy = 1;
+    tx_next = (i + 1) % TX_COUNT;
+    open_slot = i;
+    open_len = 0;
+    open_count = 0;
+    return 1;
+}
+
+/* Append one wrapped frame to the open transfer; 0 if it does not fit. Lock held. */
+static u32 add_locked(const u8 *frame, u32 length)
+{
+    u32 room = tx_limit < TX_SIZE - 1 ? tx_limit : TX_SIZE - 1, n;
+
+    if (open_count >= tx_max_packets || open_len >= room)
+        return 0;
+    PROF_START(t);
+    n = rndis_wrap_aligned(tx_buf[open_slot] + open_len, room - open_len, frame,
+                           length, tx_align);
+    PROF_END(copy, t, length);
+    if (!n)
+        return 0;
+    open_len += n;
+    open_count++;
+    return 1;
+}
+
 static void tx_complete(URB *urb, u32 status)
 {
-    u32 irql, length = urb->Length;
+    u32 irql, send = NONE, i = urb->Tag, length = urb->Length;
     PROF_START(t);
 
     irql = KfAcquireSpinLock(&tx_lock);
     if (NT_SUCCESS(status)) {
-        net_stats.tx_frames++;
+        net_stats.tx_frames += tx_frames_in[i];
         net_add64(&net_stats.tx_bytes, &net_stats.tx_bytes_hi, length);
     } else {
         net_stats.tx_errors++;
@@ -171,59 +259,62 @@ static void tx_complete(URB *urb, u32 status)
     tx_inflight--;
     net_stats.tx_inflight = tx_inflight;
     urb->Busy = 0;
+    if (!tx_inflight || tx_inflight < rndis_tx_eager)
+        send = close_locked();
     KfReleaseSpinLock(&tx_lock, irql);
 
+    tx_send(send);
     net_tx_done();
     PROF_END(tx_done, t, length);
     (void)length;
 }
 
+/* Room for one more full-size frame: in the open transfer, or a slot to open. */
 static u32 rndis_tx_space(void)
 {
-    return running && !tx_urb[tx_next].Busy;
+    u32 room = tx_limit < TX_SIZE - 1 ? tx_limit : TX_SIZE - 1;
+
+    if (!running)
+        return 0;
+    if (open_slot != NONE && open_count < tx_max_packets &&
+        open_len + RNDIS_PACKET_HEADER + 1518 + tx_align <= room)
+        return 1;
+    return !tx_urb[tx_next].Busy;
 }
 
+/* Every submit happens after the lock is released: a transfer that completed at
+ * once would re-enter tx_complete and deadlock on it. */
 static u32 rndis_xmit(const u8 *frame, u32 length)
 {
-    u32 irql, i, n;
+    u32 irql, full = NONE, now = NONE, queued = 0;
 
     if (!running) {
         net_stats.tx_drops++;
         return 0;
     }
-    /* Slots are taken in order and complete in order on one endpoint, so a busy
-     * next slot means the ring is full. */
     irql = KfAcquireSpinLock(&tx_lock);
-    i = tx_next;
-    if (tx_urb[i].Busy) {
-        KfReleaseSpinLock(&tx_lock, irql);
-        net_stats.tx_drops++;
-        return 0;
+    if (open_slot == NONE && !open_locked())
+        goto out;
+    if (!add_locked(frame, length)) {
+        if (!open_count) {                  /* does not fit even alone */
+            rndis_stats.tx_too_big++;
+            goto out;
+        }
+        full = close_locked();
+        if (!open_locked() || !add_locked(frame, length))
+            goto out;
     }
-    tx_urb[i].Busy = 1;
-    tx_next = (i + 1) % TX_COUNT;
-    tx_inflight++;
-    net_stats.tx_inflight = tx_inflight;
+    queued = 1;
+    if (!tx_inflight || tx_inflight < rndis_tx_eager)
+        now = close_locked();
+out:
     KfReleaseSpinLock(&tx_lock, irql);
 
-    {
-        PROF_START(t);
-        n = rndis_wrap(tx_buf[i], TX_SIZE - 1, frame, length);
-        PROF_END(copy, t, length);
-    }
-    if (!n || n > tx_limit) {
-        rndis_stats.tx_too_big++;
-        n = 0;
-    }
-    if (n && layout.out_max && (n % layout.out_max) == 0)
-        tx_buf[i][n++] = 0;
-    if (!n) {
-        tx_complete(&tx_urb[i], STATUS_UNSUCCESSFUL);
-        return 0;
-    }
-    usb_prepare(&tx_urb[i], ep_out, tx_complete, tx_buf[i], n, 0);
-    usb_submit(&tx_urb[i]);
-    return 1;
+    tx_send(full);
+    tx_send(now);
+    if (!queued)
+        net_stats.tx_drops++;
+    return queued;
 }
 
 /* --- the interrupt endpoint ------------------------------------------------- */
@@ -388,6 +479,8 @@ static u32 rndis_start(void)
     rndis_stats.max_transfer = reply.max_transfer;
     rndis_stats.alignment = reply.alignment;
     tx_limit = reply.max_transfer ? reply.max_transfer : TX_SIZE;
+    tx_max_packets = reply.max_packets ? reply.max_packets : 1;
+    tx_align = 1u << (reply.alignment < 6 ? reply.alignment : 6);
 
     status = query(OID_802_3_PERMANENT_ADDRESS, &reply);
     if (!NT_SUCCESS(status) || reply.info_length < 6)
@@ -425,6 +518,7 @@ static u32 rndis_start(void)
 
     tx_next = 0;
     tx_inflight = 0;
+    open_slot = NONE;
     running = 1;
     mem_sync();
     for (i = 0; i < RX_COUNT; i++)
