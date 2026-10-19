@@ -24,86 +24,20 @@
 #include "config.h"
 #include "usb.h"
 #include "net.h"
-#include "stack.h"
 #include "xnet.h"
-#include "prof.h"
-#if XE_TCP
-#include "tcp.h"
-#endif
+#include "bench.h"
 
 #define XE_VERSION 0x00020000u
 
 #define CMD_PING       1u   /* answers 'PING' */
 #define CMD_RESET      2u   /* UsbdResetDevice on the attached card */
 #define CMD_CLAIM      3u   /* find the card on the hubs and reset it */
-#define CMD_BLAST      4u   /* [1] count, [2] payload bytes, [3] UDP port */
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_RESTART    6u   /* run the bring-up again */
-/* 7..11 belong to the driver of the card (rtl8156: advertise, registers, PHY);
- * any number the core does not know is handed to it. */
+/* 4 and 14..17 belong to the bench (src/bench/bench.c, BENCH=1 builds), 7..11 to
+ * the driver of the card (rtl8156: advertise, registers, PHY); any number the core
+ * does not know is offered to the bench, then to the driver. */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
-#define CMD_TCP_START 14u   /* start the throughput server (xnet mode, TCP=1 builds) */
-#define CMD_THREAD_PRIO 15u /* [1] thread id (xectl.py threads), [2] priority -> old */
-#define CMD_PEEK      16u   /* [1] address, [2] 1 = little-endian (MMIO) -> word */
-#define CMD_POKE      17u   /* [1] address, [2] 1 = little-endian, [3] word */
-
-/* (thread id, &thread) -> NTSTATUS, a referenced KTHREAD; read off ordinals 267,
- * 163 and 261 on 17559. KeSetPriorityThread is absolute and returns the old one. */
-extern u32 ObLookupThreadByThreadId(u32 id, void **thread);
-extern u32 KeSetPriorityThread(void *thread, u32 priority);
-extern void ObDereferenceObject(void *object);
-
-/* Another module's thread at another priority -- to measure what a file server's
- * thread scheduling costs it (ftpdll serves a whole transfer from one thread at
- * priority 5). */
-/* A word anywhere the kernel can reach, device registers included, which XBDM's
- * getmem refuses (the EHCI controllers' registers at 0x7FEA3000 / 0x7FEA5000 are
- * little-endian, hence the byte-reversed forms). */
-static u32 peek(u32 address, u32 little)
-{
-    u32 v;
-
-#if defined(__powerpc__)
-    if (little)
-        __asm__ volatile("lwbrx %0, 0, %1; eieio" : "=r"(v) : "r"(address) : "memory");
-    else
-        __asm__ volatile("lwz %0, 0(%1); eieio" : "=r"(v) : "b"(address) : "memory");
-#else
-    (void)address;
-    (void)little;
-    v = 0;
-#endif
-    return v;
-}
-
-static u32 poke(u32 address, u32 little, u32 value)
-{
-#if defined(__powerpc__)
-    if (little)
-        __asm__ volatile("stwbrx %0, 0, %1; eieio" :: "r"(value), "r"(address) : "memory");
-    else
-        __asm__ volatile("stw %0, 0(%1); eieio" :: "r"(value), "b"(address) : "memory");
-#else
-    (void)address;
-    (void)little;
-    (void)value;
-#endif
-    return 0;
-}
-
-static u32 thread_priority(u32 id, u32 priority)
-{
-    void *thread = 0;
-    u32 status, old;
-
-    status = ObLookupThreadByThreadId(id, &thread);
-    if (!NT_SUCCESS(status) || !thread)
-        return status;
-    old = KeSetPriorityThread(thread, priority);
-    ObDereferenceObject(thread);
-    return old;
-}
-
 typedef struct {
     u32 magic;              /* 'XEAI' once DllMain ran */
     u32 version;
@@ -124,44 +58,6 @@ volatile XE_CONFIG xe_config = { 0x58434647u, XE_MODE, XE_ADVERTISE, XE_IP,
  *   [4] ack counter   [5] result   [6] the request answered   [7] status */
 volatile u32 xe_cmd[8] = { 0 };
 
-/* A flight recorder: every HISTORY_EVERY worker ticks (200 ms) the counters that
- * show whether frames still move each way, in a ring of HISTORY samples (about
- * 100 s), so that a transfer that stalls on a link the PC cannot reach -- a
- * phone's network -- can be read back afterwards over the onboard port
- * (xectl.py history). */
-#define HISTORY       512
-#define HISTORY_EVERY 10
-
-typedef struct {
-    u32 tick;
-    u32 rx_frames;
-    u32 tx_frames;
-    u32 tx_inflight;
-    u32 tx_drops;
-    u32 rx_errors;
-    u32 xmit_usb;           /* frames xnet handed us */
-    u32 xmit_dropped;       /* frames xnet's queue gave up on */
-} XE_SAMPLE;
-
-volatile XE_SAMPLE xe_history[HISTORY];
-volatile u32 xe_history_count;          /* samples written, ever */
-
-static void record(u32 tick)
-{
-    volatile XE_SAMPLE *at = &xe_history[xe_history_count % HISTORY];
-
-    at->tick = tick;
-    at->rx_frames = net_stats.rx_frames;
-    at->tx_frames = net_stats.tx_frames;
-    at->tx_inflight = net_stats.tx_inflight;
-    at->tx_drops = net_stats.tx_drops;
-    at->rx_errors = net_stats.rx_errors;
-    at->xmit_usb = xnet_stats.xmit_usb;
-    at->xmit_dropped = xnet_stats.xmit_dropped;
-    mem_sync();
-    xe_history_count = xe_history_count + 1;
-}
-
 static u32 seen_generation;
 
 static void no_frames(const u8 *frame, u32 length)
@@ -174,6 +70,8 @@ static void no_frames(const u8 *frame, u32 length)
  * is remembered in xe_config and applied by the next bring-up. */
 static u32 set_mode(u32 mode)
 {
+    NET_RX receiver;
+
     xe_config.mode = mode;
     if (mode == XE_MODE_XNET) {
         if (!net_stats.ready) {
@@ -193,9 +91,9 @@ static u32 set_mode(u32 mode)
 
     xnet_disable();
     net_link_cb = 0;
-    stack_ip = xe_config.ip;
-    net_rx = mode == XE_MODE_STANDALONE ? stack_input : no_frames;
-    xe_state.mode = mode == XE_MODE_STANDALONE ? XE_MODE_STANDALONE : XE_MODE_DROP;
+    receiver = bench_mode(mode);
+    net_rx = receiver ? receiver : no_frames;
+    xe_state.mode = receiver ? mode : XE_MODE_DROP;
     return 0;
 }
 
@@ -208,8 +106,6 @@ static u32 run(u32 what)
         return usb.active ? (u32)UsbdResetDevice(usb.device) : STATUS_UNSUCCESSFUL;
     case CMD_CLAIM:
         return usb_claim_present();
-    case CMD_BLAST:
-        return stack_blast(xe_cmd[1], xe_cmd[2], xe_cmd[3]);
     case CMD_MODE:
         return set_mode(xe_cmd[1]);
     case CMD_RESTART:
@@ -218,18 +114,10 @@ static u32 run(u32 what)
     case CMD_XNET_IFACE:
         xnet_rx_iface = xe_cmd[1];
         return 0;
-    case CMD_PEEK:
-        return peek(xe_cmd[1], xe_cmd[2]);
-    case CMD_POKE:
-        return poke(xe_cmd[1], xe_cmd[2], xe_cmd[3]);
-    case CMD_THREAD_PRIO:
-        return thread_priority(xe_cmd[1], xe_cmd[2]);
-#if XE_TCP
-    case CMD_TCP_START:
-        return tcp_start();
-#endif
     default:
-        return net_command(what, xe_cmd) ? xe_cmd[5] : 0xFFFFFFFFu;
+        if (bench_command(what, xe_cmd) || net_command(what, xe_cmd))
+            return xe_cmd[5];
+        return 0xFFFFFFFFu;
     }
 }
 
@@ -247,15 +135,13 @@ static void worker(void *parameter)
     u32 tick, what;
 
     (void)parameter;
-    prof_init();
+    bench_init();
     set_mode(xe_config.mode == XE_MODE_XNET ? XE_MODE_DROP : xe_config.mode);
     xe_config.mode = XE_MODE;
 
     for (tick = 0;; tick++) {
         xe_state.worker_ticks = tick;
-        PROF_STAMP();
-        if (tick % HISTORY_EVERY == 0)
-            record(tick);
+        bench_tick(tick);
 
         /* Ticks are 20 ms: the first claim one second in, then every five while
          * nothing has been offered, six tries in all. */

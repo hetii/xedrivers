@@ -3,8 +3,9 @@
 #   make                 build build/xedrivers.xex
 #   make MODE=xnet ADVERTISE=2500 IP=10.36.0.2
 #                        choose how it runs (see "Modes" below)
-#   make TCP=1           add the RAM-to-RAM TCP throughput server (src/tcp.c)
-#   make PROF=1          time each stage of a frame (src/prof.h, xectl.py prof)
+#   make RELEASE=1       the plugin for people: no src/bench/ (tuning tools) at all
+#   make TCP=1           add the RAM-to-RAM TCP throughput server (src/bench/tcp)
+#   make PROF=1          time each stage of a frame (src/core/prof.h, xectl.py prof)
 #   make test            native unit tests of the pure parts (cdc, stack checksum)
 #   make lint            cppcheck / clang-tidy over src/, if installed
 #   make push            put the plugin on the Orange Pi's mass-storage image (Usb:)
@@ -48,13 +49,24 @@ MODE_VALUE := $(or $(mode_$(MODE)),$(error MODE must be standalone, xnet or drop
 ADV_VALUE  := $(or $(adv_$(ADVERTISE)),$(error ADVERTISE must be 2500, 1000, 100 or default))
 IP_VALUE   := $(shell python3 -c "import ipaddress,sys; print(hex(int(ipaddress.IPv4Address('$(IP)'))))")
 
-# TCP=1 adds the throughput server, and with it the plugin's only imports from xam;
-# without it the container names the kernel alone.
+# BENCH=1 (the default while developing) builds src/bench/: the flight recorder,
+# the standalone responder and its UDP generator, the register and thread
+# commands. RELEASE=1 is the plugin for people, without any of it: BENCH=0, xnet.
+# TCP=1 adds the throughput server -- the plugin's only imports from xam -- and
+# PROF=1 the stage timers; both are bench tools and need BENCH=1.
+RELEASE   ?= 0
+BENCH     ?= $(if $(filter 1,$(RELEASE)),0,1)
 TCP       ?= 0
+PROF      ?= 0
+BENCH_VALUE := $(if $(filter 0 1,$(BENCH)),$(BENCH),$(error BENCH must be 0 or 1))
 TCP_VALUE := $(if $(filter 0 1,$(TCP)),$(TCP),$(error TCP must be 0 or 1))
-# PROF=1 times each stage of a frame with the time base; a plain build has none of it.
-PROF       ?= 0
 PROF_VALUE := $(if $(filter 0 1,$(PROF)),$(PROF),$(error PROF must be 0 or 1))
+$(if $(filter 1,$(RELEASE)),$(if $(filter 1,$(BENCH) $(TCP) $(PROF)),\
+    $(error RELEASE=1 builds no bench tools: drop BENCH, TCP and PROF)))
+$(if $(filter 0,$(BENCH)),$(if $(filter 1,$(TCP) $(PROF)),\
+    $(error TCP=1 and PROF=1 are bench tools: they need BENCH=1)))
+$(if $(filter 0,$(BENCH)),$(if $(filter standalone,$(MODE)),\
+    $(error MODE=standalone is the bench's responder: it needs BENCH=1)))
 
 BUILD    ?= build
 
@@ -64,6 +76,9 @@ BUILD    ?= build
 # driver (src/core/driver.h).
 DRIVERS  ?= $(notdir $(patsubst %/,%,$(wildcard src/drivers/*/)))
 SRC_DIRS := src/core $(addprefix src/drivers/,$(DRIVERS)) \
+            $(if $(filter 1,$(BENCH)),src/bench src/bench/history src/bench/stack \
+                                      src/bench/debug) \
+            $(if $(filter 1,$(PROF)),src/bench/prof) \
             $(if $(filter 1,$(TCP)),src/bench/tcp)
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h)
@@ -85,7 +100,7 @@ XERUNNER_HOME ?= $(abspath ../xerunner)
 XERUNNER      ?= $(firstword $(wildcard $(XERUNNER_HOME)/.venv/bin/xerunner) xerunner)
 
 XEX := $(BUILD)/$(NAME).xex
-FLAGS_LINE := DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) TCP=$(TCP_VALUE) PROF=$(PROF_VALUE)
+FLAGS_LINE := DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) BENCH=$(BENCH_VALUE) TCP=$(TCP_VALUE) PROF=$(PROF_VALUE)
 
 .PHONY: all clean test lint kit push deploy
 
@@ -123,14 +138,14 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
-	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u -D XE_TCP=$(TCP_VALUE) -D XE_PROF=$(PROF_VALUE) \
+	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u -D XE_BENCH=$(BENCH_VALUE) -D XE_TCP=$(TCP_VALUE) -D XE_PROF=$(PROF_VALUE) \
 	    --name $(NAME).dll --into $(BUILD)
 	@mv $(BUILD)/plugin.xex $@
 	@echo "  -> $@"
 
 # Native tests. cdc.c and stack.c are pure byte code; kernel.h's inline asm is not
 # reached by the test translation units, so they build with the host compiler.
-# Each test sits beside the code it tests: tests/core/, tests/drivers/<driver>/.
+# Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
 test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis
 	@$(BUILD)/test_cdc
 	@$(BUILD)/test_stack
@@ -144,9 +159,10 @@ $(BUILD)/test_cdc: tests/drivers/cdc/test_cdc.c src/drivers/cdc/cdc.c \
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/drivers/cdc -o $@ tests/drivers/cdc/test_cdc.c src/drivers/cdc/cdc.c
 
-$(BUILD)/test_stack: tests/core/test_stack.c src/core/stack.c $(HEADERS)
+$(BUILD)/test_stack: tests/bench/stack/test_stack.c src/bench/stack/stack.c $(HEADERS)
 	@mkdir -p $(BUILD)
-	$(HOST_CC) -o $@ tests/core/test_stack.c src/core/stack.c
+	$(HOST_CC) -I src/bench/stack -o $@ tests/bench/stack/test_stack.c \
+	    src/bench/stack/stack.c
 
 $(BUILD)/test_rtl: tests/drivers/rtl8156/test_rtl.c src/drivers/rtl8156/rtl.c $(HEADERS)
 	@mkdir -p $(BUILD)

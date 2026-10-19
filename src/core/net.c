@@ -17,18 +17,6 @@ u8 net_mac[ETH_ALEN];
 volatile NET_STATS net_stats;
 const XE_DRIVER *volatile xe_driver;
 
-#if XE_PROF
-volatile NET_PROF net_prof;
-
-/* Read off ordinal 131 on 17559; the frequency fits the low word. */
-extern u32 KeQueryPerformanceFrequency(void);
-
-void prof_init(void)
-{
-    net_prof.freq = KeQueryPerformanceFrequency();
-    net_prof.enabled = 1;
-}
-#endif
 
 static u32 link_down_seen;
 

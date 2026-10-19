@@ -166,13 +166,31 @@ console's network until a power cycle; with FTP every value worked. It stays 0.
 
 ## Building
 
-    make                                   xnet, advertise 2500
+    make RELEASE=1                         the plugin for people: no tuning tools
+    make                                   xnet, advertise 2500, with the bench
     make MODE=standalone IP=10.36.0.2      the built-in responder, for measuring
     make MODE=standalone ADVERTISE=1000 IP=192.168.50.2
     make TCP=1                             add the RAM-to-RAM TCP server
     make test                              host unit tests
     make push                              put it on the Usb: medium (Orange Pi)
     make DRIVERS=cdc                       only the drivers named (default: all)
+
+## The bench
+
+Everything that exists to measure and tune lives in `src/bench/` and is built only
+with `BENCH=1`, the default while developing; `make RELEASE=1` leaves all of it out
+(image 0x10000 against 0x17000, and none of its cycles):
+
+| `src/bench/` | what | used by |
+|---|---|---|
+| `history/` | flight recorder: frames, bytes, in-flight, drops every 200 ms, ~100 s | `xectl.py history` |
+| `stack/` | `MODE=standalone`: ARP/ICMP/UDP echo/discard and the UDP generator | `speedtest.py`, `phoneblast.py`, `xectl.py blast` |
+| `debug/` | commands 15-17: thread priority by id, read/write any word (MMIO too) | `xectl.py cmd 15/16/17` |
+| `prof/` | `PROF=1`: where the stage timers sum up (hooks in `src/core/prof.h`) | `xectl.py prof` |
+| `tcp/` | `TCP=1`: the RAM-to-RAM TCP server | `tcpbench.py` |
+
+The core reaches it only through `src/core/bench.h` -- an init, a tick, unknown
+commands and the standalone mode -- which without `BENCH` is empty inlines.
 
 ## Drivers
 

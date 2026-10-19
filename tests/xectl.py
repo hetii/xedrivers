@@ -152,7 +152,7 @@ def status(sym):
     st = read_struct(sym, "xe_state")
     cf = read_struct(sym, "xe_config")
     ns = read_struct(sym, "net_stats")
-    ss = read_struct(sym, "stack_stats")
+    ss = read_struct(sym, "stack_stats") if "stack_stats" in sym else None
     xs = read_struct(sym, "xnet_stats")
     mac = read(sym["net_mac"], 6)
     names = {v: k for k, v in MODES.items()}
@@ -205,10 +205,11 @@ def status(sym):
     print("tx       frames=%d bytes=%d drops=%d errors=%d" % (
         ns["tx_frames"], ns["tx_bytes_hi"] << 32 | ns["tx_bytes"], ns["tx_drops"],
         ns["tx_errors"]))
-    print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
-        ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],
-        ss["discard_bytes_hi"] << 32 | ss["discard_bytes"], ip(ss["peer_ip"]),
-        ss["blast_sent"], ss["blast_busy"]))
+    if ss:
+        print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
+            ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],
+            ss["discard_bytes_hi"] << 32 | ss["discard_bytes"], ip(ss["peer_ip"]),
+            ss["blast_sent"], ss["blast_busy"]))
     print("xnet     enabled=%d user=%08x xmit usb/fallback=%d/%d rx=%d filtered=%d "
           "polls=%d notifies=%d flags %#x->%#x" % (
               xs["enabled"], xs["user"], xs["xmit_usb"], xs["xmit_fallback"],
@@ -257,9 +258,12 @@ def prof(sym, seconds):
 
 
 def history(sym, last):
-    """The flight recorder, oldest first, as deltas per sample."""
+    """The flight recorder (BENCH=1 builds), oldest first, as rates per sample."""
+    if "xe_history" not in sym:
+        print("this build has no flight recorder; build with BENCH=1")
+        return
     names = ["tick", "rx_frames", "tx_frames", "tx_inflight", "tx_drops", "rx_errors",
-             "xmit_usb", "xmit_dropped"]
+             "xmit_usb", "xmit_dropped", "rx_bytes", "tx_bytes"]
     count = struct.unpack(">I", read(sym["xe_history_count"], 4))[0]
     size = 512
     raw = read(sym["xe_history"], size * 4 * len(names))
@@ -267,17 +271,17 @@ def history(sym, last):
                                                i * 4 * len(names)))) for i in range(size)]
     have = min(count, size)
     order = [rows[(count - have + i) % size] for i in range(have)][-last:]
-    print("%8s %7s %7s %5s %6s %6s %7s %6s" % ("t(s)", "rx/smp", "tx/smp", "infl",
-                                              "drops", "rxerr", "xnet_tx", "xq_drop"))
+    print("%8s %7s %7s %7s %7s %5s %6s %6s %6s" % (
+        "t(s)", "rx/s", "rxMB/s", "tx/s", "txMB/s", "infl", "drops", "rxerr", "xqdrop"))
     prev = None
     for r in order:
         if prev:
-            print("%8.1f %7d %7d %5d %6d %6d %7d %6d" % (
-                r["tick"] * 0.02, r["rx_frames"] - prev["rx_frames"],
-                r["tx_frames"] - prev["tx_frames"], r["tx_inflight"],
-                r["tx_drops"] - prev["tx_drops"], r["rx_errors"] - prev["rx_errors"],
-                r["xmit_usb"] - prev["xmit_usb"],
-                r["xmit_dropped"] - prev["xmit_dropped"]))
+            dt = (r["tick"] - prev["tick"]) * 0.02 or 0.2
+            d = lambda k: (r[k] - prev[k]) & 0xFFFFFFFF
+            print("%8.1f %7.0f %7.2f %7.0f %7.2f %5d %6d %6d %6d" % (
+                r["tick"] * 0.02, d("rx_frames") / dt, d("rx_bytes") / dt / 1e6,
+                d("tx_frames") / dt, d("tx_bytes") / dt / 1e6, r["tx_inflight"],
+                d("tx_drops"), d("rx_errors"), d("xmit_dropped")))
         prev = r
 
 
