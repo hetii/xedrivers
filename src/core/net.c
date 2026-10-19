@@ -170,6 +170,12 @@ u32 net_start(void)
         return step;
     mem_sync();
     net_stats.ready = 1;
+    /* A device may report its link during start (an RNDIS phone answers
+     * MEDIA_CONNECT_STATUS there): that notification came while the device was not
+     * yet ready, so whoever asked then was told there was no link. Tell them again
+     * now that the answer is true. */
+    if (net_stats.link && net_link_cb)
+        net_link_cb(1);
     return 0;
 }
 
