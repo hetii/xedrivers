@@ -61,7 +61,8 @@ STRUCTS = {
                     "peer_mac_lo", "blast_sent", "blast_busy", "not_ours"],
     "tcp_stats": ["started", "step", "step_error", "accepts", "active", "refused",
                   "sent_lo", "sent_hi", "recv_lo", "recv_hi", "send_errors",
-                  "recv_errors", "last_send_error", "last_recv_error"],
+                  "recv_errors", "last_send_error", "last_recv_error", "sndbuf_result",
+                  "rcvbuf_result"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
@@ -178,6 +179,8 @@ def status(sym):
         ts["sent_hi"] << 32 | ts["sent_lo"], ts["recv_hi"] << 32 | ts["recv_lo"],
         ts["send_errors"], ts["last_send_error"], ts["recv_errors"],
         ts["last_recv_error"]))
+    print("tcp opts sndbuf_result=%#x rcvbuf_result=%#x" % (ts["sndbuf_result"],
+                                                           ts["rcvbuf_result"]))
 
 
 def main(argv):

@@ -58,9 +58,27 @@ left to win; inbound, where the bus is not the wall, a better server has room to
 roughly 26-28 MB/s -- which is what CUsbEnet's author reports for SMB/FTP/NFS with
 his own server and tuned buffers, against 32 MB/s to a plain speed-test socket.
 
-A throughput server inside the plugin was tried and dropped: it would land between
-XBDM's figures and our UDP ones and confirm the ceiling without raising it. The
-measurement that would pay for itself is a file server, not another socket.
+### RAM to RAM, the plugin's own TCP server
+
+`src/tcp.c` serves two ports out of RAM on the console's own stack -- 5201 sends,
+5202 reads and discards, a thread a connection -- with xam's socket calls imported
+by ordinal (`tools/build_plugin.py` packs the second import library). Measured with
+`tests/tcpbench.py`, router at 1 Gbit/s:
+
+| | console -> PC | PC -> console |
+|---|---|---|
+| default thread priority | 4.5 MB/s | 2.5 MB/s |
+| **priority 20** | **21.9 MB/s** (175 Mbit/s) | **27.0 MB/s** (216 Mbit/s) |
+| 2 or 4 streams, priority 20 | 21.9 / 21.8 in total | 26.9 / 27.0 in total |
+
+At the default priority a capture showed the sending thread idle 78% of the time,
+in 13 ms gaps: it waits in `send()` for xnet to free buffer space and then for
+another thread's quantum. Priorities 18 and 24 are as bad as the default, every
+time -- most likely those of xnet's own threads -- while 19, 20, 22, 28 and 31 all
+give the same 22 / 27. With it set, buffer sizes, chunk size and Nagle change
+nothing: this is the path's ceiling, 94% of the 23.3 MB/s the USB allows outbound
+and 90% of the 30 MB/s inbound. That is the "thread scheduling" CUsbEnet's author
+named, and the gap to his 32 MB/s socket figure is now 5 MB/s, inbound.
 
 ## Building
 

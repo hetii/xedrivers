@@ -11,6 +11,25 @@
 
 extern void *ExAllocatePoolTypeWithTag(u32 bytes, u32 tag, u32 poolType);
 
+/* (thread, affinity mask, &previous): read off ordinal 151 on 17559. The current
+ * thread is the word at PCR+0x100, the first field of the KPRCB, which is where
+ * KeDelayExecutionThread itself loads it from. */
+extern u32 KeSetAffinityThread(void *thread, u32 affinity, u32 *previous);
+
+/* (thread, priority), absolute; returns the old one. Ordinal 163 on 17559. */
+extern u32 KeSetPriorityThread(void *thread, u32 priority);
+
+static inline void *current_thread(void)
+{
+    void *t;
+#if defined(__powerpc__)
+    __asm__ volatile("lwz %0, 0x100(13)" : "=r"(t));
+#else
+    t = 0;
+#endif
+    return t;
+}
+
 /* xam.xex, by ordinal: WSAStartup 1, socket 3, closesocket 4, setsockopt 7,
  * bind 11, listen 13, accept 14, recv 18, send 22, WSAGetLastError 27. */
 extern int NetDll_WSAStartup(u32 caller, u16 version, void *data);
@@ -33,18 +52,37 @@ extern int NetDll_WSAGetLastError(void);
 #define SOL_SOCKET      0xFFFF
 #define SO_SNDBUF       0x1001
 #define SO_RCVBUF       0x1002
+#define SO_SNDTIMEO     0x1005
+#define SO_RCVTIMEO     0x1006
 #define TCP_NODELAY_OPT 0x0001
+/* xnet drops connections to a socket it has not been told may be insecure.
+ * ftpdll's own helper sets these two, 0x5802 then 0x5801, to 1 on every socket and
+ * gives up if either fails (read off its code at 0x91806000); a SYN to a socket
+ * without them is dropped silently -- connect() times out, it is not refused. */
+#define SO_XNET_5802    0x5802
+#define SO_XNET_5801    0x5801
 #define INVALID_SOCKET  0xFFFFFFFFu
 
 #define PORT_SOURCE  5201
 #define PORT_SINK    5202
-#define SLOTS        4
+#define SLOTS        8
 #define SLOT_BYTES   0x10000u       /* the most one send or recv can carry */
 
 volatile u32 tcp_chunk = 0x8000;
-volatile u32 tcp_sndbuf = 0x40000;
-volatile u32 tcp_rcvbuf = 0x40000;
-volatile u32 tcp_nodelay = 1;
+/* Zero for everything by default: ftpdll sets none of these, only the two
+ * insecure-socket options, and that is the baseline to tune away from. */
+volatile u32 tcp_sndbuf = 0;
+volatile u32 tcp_rcvbuf = 0;
+volatile u32 tcp_timeout = 0;     /* ms for SO_SNDTIMEO/SO_RCVTIMEO, 0 = none */
+volatile u32 tcp_cpu = 0;         /* N+1 pins each connection to hardware thread N */
+/* A connection's thread waits in send() for xnet to free buffer space, and at the
+ * default priority it then waits again for a running thread's quantum: 190 gaps
+ * of 13 ms in a 3 s capture, 78% of the time idle. Measured: 18, 24 and anything
+ * up to 17 give 4.5 / 2.5 MB/s, every time; 19, 20, 22, 28 and 31 give 22 / 27.
+ * 18 and 24 are most likely xnet's own threads, whose quantum ours then shares.
+ * 20 is the best of them and stays below the real-time band. 0 leaves it alone. */
+volatile u32 tcp_prio = 20;
+volatile u32 tcp_nodelay = 0;
 volatile TCP_STATS tcp_stats;
 
 typedef struct {
@@ -92,6 +130,54 @@ static void add64(volatile u32 *lo, volatile u32 *hi, u32 n)
         *hi = *hi + 1;
 }
 
+static int mark_insecure(u32 socket)
+{
+    u32 one = 1;
+
+    if (NetDll_setsockopt(CALLER_SYSAPP, socket, SOL_SOCKET, SO_XNET_5802, &one,
+                          sizeof(one)) < 0)
+        return -1;
+    return NetDll_setsockopt(CALLER_SYSAPP, socket, SOL_SOCKET, SO_XNET_5801,
+                             &one, sizeof(one));
+}
+
+/* Buffers, Nagle and timeouts go on each accepted connection, read when it is
+ * accepted, so they can be swept while the server runs. The timeouts are what
+ * hand a slot back when a client vanishes without closing. */
+static void tune(u32 socket)
+{
+    u32 value;
+
+    if (tcp_rcvbuf) {
+        value = tcp_rcvbuf;
+        tcp_stats.rcvbuf_result = (u32)NetDll_setsockopt(CALLER_SYSAPP, socket,
+                                                         SOL_SOCKET, SO_RCVBUF,
+                                                         &value, sizeof(value));
+        if ((int)tcp_stats.rcvbuf_result < 0)
+            tcp_stats.rcvbuf_result = (u32)NetDll_WSAGetLastError();
+    }
+    if (tcp_sndbuf) {
+        value = tcp_sndbuf;
+        tcp_stats.sndbuf_result = (u32)NetDll_setsockopt(CALLER_SYSAPP, socket,
+                                                         SOL_SOCKET, SO_SNDBUF,
+                                                         &value, sizeof(value));
+        if ((int)tcp_stats.sndbuf_result < 0)
+            tcp_stats.sndbuf_result = (u32)NetDll_WSAGetLastError();
+    }
+    if (tcp_nodelay) {
+        value = 1;
+        NetDll_setsockopt(CALLER_SYSAPP, socket, IPPROTO_TCP, TCP_NODELAY_OPT,
+                          &value, sizeof(value));
+    }
+    if (tcp_timeout) {
+        value = tcp_timeout;
+        NetDll_setsockopt(CALLER_SYSAPP, socket, SOL_SOCKET, SO_SNDTIMEO, &value,
+                          sizeof(value));
+        NetDll_setsockopt(CALLER_SYSAPP, socket, SOL_SOCKET, SO_RCVTIMEO, &value,
+                          sizeof(value));
+    }
+}
+
 static u32 clamp_chunk(u32 want)
 {
     if (!want || want > SLOT_BYTES)
@@ -100,11 +186,23 @@ static u32 clamp_chunk(u32 want)
 }
 
 /* One connection, start to finish, on its own thread. */
+static void pin(void)
+{
+    u32 cpu = tcp_cpu, prio = tcp_prio, previous;
+
+    if (cpu && cpu <= 6)
+        KeSetAffinityThread(current_thread(), 1u << (cpu - 1), &previous);
+    if (prio && prio < 32)
+        KeSetPriorityThread(current_thread(), prio);
+}
+
 static void serve(void *parameter)
 {
     SLOT *slot = (SLOT *)parameter;
     u32 chunk = clamp_chunk(tcp_chunk);
     int moved;
+
+    pin();
 
     for (;;) {
         if (slot->sink) {
@@ -160,22 +258,9 @@ static u32 listener(u32 port, u32 *out)
 
     if (socket == INVALID_SOCKET)
         return fail(TCP_ERR_SOCKET);
-
-    if (tcp_rcvbuf) {
-        u32 value = tcp_rcvbuf;
-        NetDll_setsockopt(CALLER_SYSAPP, socket, SOL_SOCKET, SO_RCVBUF, &value,
-                          sizeof(value));
-    }
-    if (tcp_sndbuf) {
-        u32 value = tcp_sndbuf;
-        NetDll_setsockopt(CALLER_SYSAPP, socket, SOL_SOCKET, SO_SNDBUF, &value,
-                          sizeof(value));
-    }
-
-    if (tcp_nodelay) {
-        u32 value = 1;
-        NetDll_setsockopt(CALLER_SYSAPP, socket, IPPROTO_TCP, TCP_NODELAY_OPT,
-                          &value, sizeof(value));
+    if (mark_insecure(socket) < 0) {
+        NetDll_closesocket(CALLER_SYSAPP, socket);
+        return fail(TCP_ERR_INSECURE);
     }
 
     address.family = AF_INET;
@@ -211,6 +296,8 @@ static void accept_loop(void *parameter)
             continue;
         }
         tcp_stats.accepts++;
+        mark_insecure(accepted);
+        tune(accepted);
 
         slot = take_slot();
         if (!slot) {

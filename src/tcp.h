@@ -27,6 +27,9 @@ extern volatile u32 tcp_chunk;      /* bytes per send/recv call */
 extern volatile u32 tcp_sndbuf;     /* SO_SNDBUF, 0 leaves xnet's own */
 extern volatile u32 tcp_rcvbuf;     /* SO_RCVBUF, 0 leaves xnet's own */
 extern volatile u32 tcp_nodelay;    /* TCP_NODELAY on the source's sends */
+extern volatile u32 tcp_timeout;    /* SO_SNDTIMEO/SO_RCVTIMEO in ms, 0 = none */
+extern volatile u32 tcp_cpu;        /* N+1 pins a connection to hardware thread N */
+extern volatile u32 tcp_prio;       /* absolute thread priority, 0 = leave it */
 
 /* Start the listeners. Thread-only -- it allocates and blocks. Returns 0, or the
  * step that failed; calling it again after success does nothing. */
@@ -40,6 +43,7 @@ enum {
     TCP_ERR_BIND,
     TCP_ERR_LISTEN,
     TCP_ERR_THREAD,
+    TCP_ERR_INSECURE,       /* xnet refused the insecure-socket options */
 };
 
 typedef struct {
@@ -55,6 +59,8 @@ typedef struct {
     u32 recv_errors;
     u32 last_send_error;
     u32 last_recv_error;
+    u32 sndbuf_result;      /* 0, or WSAGetLastError() if setsockopt failed */
+    u32 rcvbuf_result;
 } TCP_STATS;
 
 extern volatile TCP_STATS tcp_stats;
