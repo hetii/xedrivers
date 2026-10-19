@@ -289,30 +289,117 @@ int usb_register(const USB_DRIVER *drv)
 /* Port lookups assert DISPATCH_LEVEL, so the walk runs raised; it is a handful of
  * table reads. Four root hubs, eight ports each covers the console's controllers
  * and the lookup does not range-check its index. The reset itself runs back at
- * PASSIVE_LEVEL, as the debug channel in xdrivers called it. */
+ * PASSIVE_LEVEL, as the debug channel in xdrivers called it.
+ *
+ * What a node is, read off the 17559 code and a live dump: 16 bytes in the
+ * controller's node table; words 0 and 1 are zero until a driver has the device;
+ * byte 8 holds the controller (bits 0-1) and the port (bits 2-4); bytes 13, 14
+ * and 15 link parent, first child and next sibling. UsbdGetPortDeviceNode (881)
+ * follows those links for any node, so the same call walks below a hub.
+ *
+ * UsbdGetDeviceDescriptor (759) does NOT answer for a node: it returns one of four
+ * shared descriptor slots chosen by bits of byte 11. With the card on the front
+ * port (EHCI 1, port 0) and the Orange Pi on port 2, both chose slot 1 and the card
+ * read as a second Orange Pi; on the back port the card happened to have a slot of
+ * its own. So a node whose descriptor says ours is reset at once, and failing that
+ * every node no driver has is reset once -- the kernel then enumerates it again
+ * and hands Match its real descriptor, and whatever is not ours stays unclaimed as
+ * it was. Nodes with children (hubs, composite devices) are left alone. */
+#define HUB_DEPTH     2
+#define UNBOUND_MAX   8
+
+typedef struct {
+    u32 driver[2];          /* zero until a driver has the device */
+    u8  where;              /* controller bits 0-1, port bits 2-4 */
+    u8  other[4];
+    u8  parent;
+    u8  child;              /* first child, 0xFF for none */
+    u8  sibling;
+} USB_NODE;
+
+/* Every node the last walk saw, for xectl.py: controller << 24 | depth << 16 |
+ * port << 8 | bound, then the descriptor slot's VID << 16 | PID (which, see
+ * above, may belong to another device). */
+volatile u32 usb_seen[32];
+static u32 seen_count;
+
+static void *unbound[UNBOUND_MAX];
+static u32 unbound_count;
+static void *was_reset[UNBOUND_MAX];
+static u32 was_reset_count;
+
+static void *find_below(void *hub, u32 depth)
+{
+    u32 port;
+
+    for (port = 0; port < 8; port++) {
+        USB_NODE *node = (USB_NODE *)UsbdGetPortDeviceNode(hub, port);
+        const u8 *dd;
+        u32 bound;
+
+        if (!node)
+            continue;
+        dd = UsbdGetDeviceDescriptor(node);
+        bound = node->driver[0] || node->driver[1];
+        if (seen_count < 16) {
+            usb_seen[2 * seen_count] = (u32)(node->where & 3) << 24 | depth << 16 |
+                                       ((node->where >> 2) & 7u) << 8 | bound;
+            usb_seen[2 * seen_count + 1] = dd ? (u32)le16(dd + 8) << 16 |
+                                                le16(dd + 10) : 0;
+            seen_count++;
+        }
+        if (ours(dd))
+            return node;
+        /* A node with children is a hub or a composite device whose functions
+         * are bound below it (the internal 045e:02aa is one): never reset. */
+        if (!bound && node->child == 0xFF && unbound_count < UNBOUND_MAX)
+            unbound[unbound_count++] = node;
+        if (depth < HUB_DEPTH) {
+            void *found = find_below(node, depth + 1);
+            if (found)
+                return found;
+        }
+    }
+    return 0;
+}
+
+static u32 reset_before(void *node)
+{
+    u32 i;
+
+    for (i = 0; i < was_reset_count; i++)
+        if (was_reset[i] == node)
+            return 1;
+    return 0;
+}
+
 u32 usb_claim_present(void)
 {
-    u32 c, port, old;
+    u32 c, i, old, reset = 0;
     void *found = 0;
 
     old = KeRaiseIrqlToDpcLevel();
+    seen_count = 0;
+    unbound_count = 0;
     for (c = 0; c < 4 && !found; c++) {
         void *hub = UsbdGetRootHubDeviceNode(c);
-        if (!hub)
-            continue;
-        for (port = 0; port < 8; port++) {
-            void *node = UsbdGetPortDeviceNode(hub, port);
-            if (node && ours(UsbdGetDeviceDescriptor(node))) {
-                found = node;
-                break;
-            }
-        }
+        if (hub)
+            found = find_below(hub, 0);
     }
     KfLowerIrql(old);
 
-    if (!found)
-        return 0;
-    usb_stats.scan_found = (u32)(unsigned long)found;
-    usb_stats.reset_status = (u32)UsbdResetDevice(found);
-    return 1;
+    if (found) {
+        usb_stats.scan_found = (u32)(unsigned long)found;
+        usb_stats.reset_status = (u32)UsbdResetDevice(found);
+        return 1;
+    }
+    for (i = 0; i < unbound_count; i++) {
+        if (reset_before(unbound[i]) || was_reset_count >= UNBOUND_MAX)
+            continue;
+        was_reset[was_reset_count++] = unbound[i];
+        usb_stats.unbound_resets++;
+        UsbdResetDevice(unbound[i]);
+        reset++;
+    }
+    return reset ? 2 : 0;
 }

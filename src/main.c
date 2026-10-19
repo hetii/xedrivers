@@ -191,7 +191,7 @@ static void worker(void *parameter)
         if (!usb.active && xe_state.claim_attempts < 6 &&
             (tick == 50 || (tick > 50 && tick % 250 == 0))) {
             xe_state.claim_attempts++;
-            if (usb_claim_present())
+            if (usb_claim_present() == 1)
                 xe_state.claim_found++;
         }
 

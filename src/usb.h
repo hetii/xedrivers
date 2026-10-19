@@ -50,7 +50,9 @@ u32   usb_control(const u8 setup[8], void *buffer, u32 length, u32 *actual,
                   u32 timeout_ms);
 
 /* Find our device among those already enumerated and reset it so the kernel offers
- * it again -- boot enumeration is over before plugins load.
+ * it again -- boot enumeration is over before plugins load. 1: ours found and
+ * reset; 2: not recognised, but devices no driver had were reset once each so
+ * Match sees their real descriptors; 0: nothing to do.
  * xerunner: plugin-load-vs-enumeration@1, xerunner: usb-driver-object-f19@1 */
 u32   usb_claim_present(void);
 
@@ -67,6 +69,7 @@ typedef struct {
     u32 last_open_status;
     u32 scan_found;
     u32 reset_status;
+    u32 unbound_resets;     /* nodes no driver had, reset to be offered again */
 } USB_STATS;
 
 extern volatile USB_STATS usb_stats;
