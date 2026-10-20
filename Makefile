@@ -79,7 +79,7 @@ BUILD    ?= build
 # xe_driver_<directory>; the table of them is generated, so nothing else names a
 # driver (src/core/driver.h).
 DRIVERS  ?= $(notdir $(patsubst %/,%,$(wildcard src/drivers/*/)))
-SRC_DIRS := src/core src/net $(addprefix src/drivers/,$(DRIVERS)) \
+SRC_DIRS := src/core src/net src/wireless $(addprefix src/drivers/,$(DRIVERS)) \
             $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h)
@@ -161,7 +161,7 @@ test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndi
 	@$(BUILD)/test_rndis
 	@AIC_FW=$(AIC_FW) $(BUILD)/test_aic
 
-HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core -I src/net
+HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core -I src/net -I src/wireless
 
 $(BUILD)/test_cdc: tests/drivers/cdc/test_cdc.c src/drivers/cdc/cdc.c \
                    tests/drivers/cdc/fixtures.h $(HEADERS)
@@ -184,10 +184,13 @@ $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c 
 	    src/drivers/rndis/rndis.c
 
 $(BUILD)/test_aic: tests/drivers/aic8800/test_aic.c src/drivers/aic8800/aic_fw.c \
+                   src/drivers/aic8800/aic_wifi.c src/wireless/wireless.c \
+                   tests/drivers/aic8800/wifi-8d81.txt \
                    src/drivers/aic8800/aic_cmd.c tests/drivers/aic8800/load-8d80.txt $(HEADERS)
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/drivers/aic8800 -o $@ tests/drivers/aic8800/test_aic.c \
-	    src/drivers/aic8800/aic_fw.c src/drivers/aic8800/aic_cmd.c
+	    src/drivers/aic8800/aic_fw.c src/drivers/aic8800/aic_cmd.c \
+	    src/drivers/aic8800/aic_wifi.c src/wireless/wireless.c
 
 lint:
 	@command -v cppcheck >/dev/null && cppcheck --std=c99 --enable=warning,style \

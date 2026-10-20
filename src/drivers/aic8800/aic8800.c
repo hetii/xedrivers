@@ -1,8 +1,9 @@
 /* AIC8800D80 USB Wi-Fi: the driver the core sees (aic.h for the chip).
  *
- * For now one phase: a chip in boot ROM (8d80) gets its firmware and is let go --
- * it leaves the bus and comes back as another product, which this driver does not
- * take yet. Its NET_DEV stays without a link, so it never becomes the uplink.
+ * Two phases, one device each time: a chip in boot ROM (8d80) gets its firmware and
+ * is let go -- it leaves the bus and comes back as 8d81 with the Wi-Fi firmware
+ * running, which is brought up and scans (aic_wifi.c). Not joining a network yet,
+ * its NET_DEV has no link, so it never becomes the uplink.
  */
 
 #include "aic.h"
@@ -14,11 +15,18 @@ volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
 
 static AIC aic_inst[AIC_MAX];
 
+/* The boot ROM by its product alone; the Wi-Fi firmware's composite device by its
+ * vendor interface (the Bluetooth ones, class e0, are left), or by product alone
+ * when only the device is known. */
 static u32 aic8800_match(const u8 *device, const u8 *interface)
 {
-    (void)interface;
-    if ((u32)(device[8] | device[9] << 8) == AIC_VENDOR &&
-        (u32)(device[10] | device[11] << 8) == AIC_PRODUCT_D80)
+    u32 product = (u32)(device[10] | device[11] << 8);
+
+    if ((u32)(device[8] | device[9] << 8) != AIC_VENDOR)
+        return XE_MATCH_NONE;
+    if (product == AIC_PRODUCT_D80)
+        return XE_MATCH_VENDOR;
+    if (product == AIC_PRODUCT_D81 && (!interface || interface[5] == 0xFF))
         return XE_MATCH_VENDOR;
     return XE_MATCH_NONE;
 }
@@ -42,16 +50,48 @@ static AIC *take_instance(NET_DEV *nd)
     return 0;
 }
 
+/* Which phase the chip is in: its device descriptor's product. */
+static u32 product_of(AIC *a, u32 *product)
+{
+    static const u8 get_device[8] = { 0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 18, 0 };
+    u32 status, actual = 0;
+
+    if (!a->desc_buf)
+        a->desc_buf = (u8 *)net_dma_scratch(AIC_DESC_SIZE);
+    if (!a->desc_buf)
+        return STATUS_UNSUCCESSFUL;
+    status = usb_control(a->dev, get_device, a->desc_buf, 18, &actual, 1000);
+    if (NT_SUCCESS(status) && actual < 12)
+        status = STATUS_UNSUCCESSFUL;
+    if (NT_SUCCESS(status))
+        *product = (u32)(a->desc_buf[10] | a->desc_buf[11] << 8);
+    return status;
+}
+
 static u32 aic8800_start(NET_DEV *nd)
 {
     AIC *a = take_instance(nd);
-    u32 step;
+    u32 step, status, product = 0;
 
     if (!a)
         return AIC_STEP_DMA;
-    a->st->product = AIC_PRODUCT_D80;
     a->st->step = 0;
-    step = aic_open(a);
+    status = product_of(a, &product);
+    if (!NT_SUCCESS(status)) {
+        a->st->step = AIC_STEP_DESCRIPTOR;
+        a->st->step_status = status;
+        return AIC_STEP_DESCRIPTOR;
+    }
+    a->st->product = product;
+    if (product == AIC_PRODUCT_D81)
+        return aic_wifi_start(a);
+    if (product != AIC_PRODUCT_D80) {
+        a->st->step = AIC_STEP_UNKNOWN_PRODUCT;
+        return AIC_STEP_UNKNOWN_PRODUCT;
+    }
+    /* aicwf_parse_usb: the first bulk IN and OUT -- the boot ROM's 0x82 and 0x01. */
+    a->ind = 0;
+    step = aic_open(a, 0x01, 0x82);
     if (step) {
         a->st->step = step;
         return step;
@@ -59,6 +99,18 @@ static u32 aic8800_start(NET_DEV *nd)
     step = aic_load_firmware(a);
     aic_close(a);
     return step;
+}
+
+#define CMD_SCAN 30u    /* xectl.py cmd 30: scan again */
+
+static u32 aic8800_command(NET_DEV *nd, u32 what, volatile u32 *args)
+{
+    AIC *a = (AIC *)nd->priv;
+
+    if (what != CMD_SCAN || !a || a->st->product != AIC_PRODUCT_D81)
+        return 0;
+    args[5] = aic_wifi_scan(a);
+    return 1;
 }
 
 static void aic8800_detached(NET_DEV *nd)
@@ -94,4 +146,5 @@ const XE_DRIVER xe_driver_aic8800 = {
     .detached = aic8800_detached,
     .xmit = aic8800_xmit,
     .tx_space = aic8800_tx_space,
+    .command = aic8800_command,
 };

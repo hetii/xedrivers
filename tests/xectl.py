@@ -72,7 +72,10 @@ STRUCTS = {
                   "commands", "timeouts", "tx_errors", "tx_last_error", "rx_transfers",
                   "rx_errors", "rx_last_error", "rx_messages", "rx_unexpected",
                   "rx_last_id", "rx_data", "last_cfm_id"] + ["rx_first%d" % i
-                                                            for i in range(8)],
+                                                            for i in range(8)] +
+                 ["scan_results"] + ["fw_text%d" % i for i in range(12)],
+    "wl_stats": ["scans", "scans_done", "results", "bad_frames", "table_full",
+                 "bss_count", "last_scan_status"],
     "file_stats": ["opens", "found", "last_status", "read_errors",
                    "last_read_status"],
     "stack_stats": ["arp_replies", "icmp_replies", "udp_echo", "discard_frames",
@@ -235,6 +238,24 @@ def status(sym):
                       a["rx_last_error"], a["rx_messages"], a["rx_unexpected"],
                       a["rx_last_id"], a["rx_data"]))
             print("aic rx0  " + " ".join("%08x" % a["rx_first%d" % k] for k in range(8)))
+            text = b"".join(struct.pack(">I", a["fw_text%d" % k]) for k in range(12))
+            if a["product"] == 0x8D81:
+                print("aic fw   %r scan_results=%d" % (
+                    text.split(b"\0")[0].decode("ascii", "replace"), a["scan_results"]))
+    if "wl_stats" in sym:
+        w = read_struct(sym, "wl_stats")
+        print("wireless scans=%d/%d results=%d bad=%d full=%d networks=%d status=%#x" % (
+            w["scans"], w["scans_done"], w["results"], w["bad_frames"], w["table_full"],
+            w["bss_count"], w["last_scan_status"]))
+        raw = read(sym["wl_bss"], 52 * min(w["bss_count"], 24))
+        for k in range(min(w["bss_count"], 24)):
+            e = raw[52 * k:52 * (k + 1)]
+            bssid = e[0:6].hex(":")
+            ssid = e[8:8 + e[6]].decode("utf-8", "replace")
+            rssi, sec = struct.unpack(">bB", e[41:43])
+            freq, = struct.unpack(">H", e[44:46])
+            print("  %s ch %3d %4d MHz %4d dBm sec %02x %r" % (bssid, e[7], freq, rssi,
+                                                             sec, ssid))
     if "file_stats" in sym:
         f = read_struct(sym, "file_stats")
         base = sym["file_stats"] + 4 * len(STRUCTS["file_stats"])

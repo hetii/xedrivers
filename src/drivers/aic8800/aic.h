@@ -21,6 +21,7 @@
 
 #define AIC_VENDOR          0xA69Cu
 #define AIC_PRODUCT_D80     0x8D80u     /* boot ROM, waiting for firmware */
+#define AIC_PRODUCT_D81     0x8D81u     /* the Wi-Fi firmware running */
 
 /* A message to the chip, as it goes over bulk OUT (aicwf_set_cmd_tx):
  *   +0  u16 LE  length of what follows the first word, i.e. total - 4, 12 bits
@@ -72,6 +73,17 @@ enum {
     AIC_STEP_START_APP,
     AIC_STEP_FIRMWARE_STARTED,  /* not a failure: the chip leaves the bus now */
     AIC_STEP_UNKNOWN_PRODUCT,
+    AIC_STEP_DESCRIPTOR,        /* reading the device descriptor */
+    AIC_STEP_WIFI_STACK = 20,   /* the Wi-Fi firmware's bring-up, aic_wifi.c */
+    AIC_STEP_WIFI_TXPWR,
+    AIC_STEP_WIFI_CALIB,
+    AIC_STEP_WIFI_MAC,
+    AIC_STEP_WIFI_RESET,
+    AIC_STEP_WIFI_CONFIG,
+    AIC_STEP_WIFI_START,
+    AIC_STEP_WIFI_IF,
+    AIC_STEP_WIFI_SCAN,
+    AIC_STEP_WIFI_UP,           /* not a failure: up, not joined */
 };
 
 /* One device slot's; read by tests/xectl.py. */
@@ -99,6 +111,8 @@ typedef struct {
     u32 rx_data;                /* data frames (none expected from the boot ROM) */
     u32 last_cfm_id;
     u32 rx_first[8];            /* the first 32 bytes of the first transfer received */
+    u32 scan_results;
+    u32 fw_text[12];            /* MM_GET_FW_VERSION's text, bytes in order */
 } AIC_STATS;
 
 extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
@@ -107,6 +121,7 @@ extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
 #define AIC_RX_SIZE     4096
 #define AIC_TX_SIZE     2048
 #define AIC_CFM_MAX     64      /* parameter bytes of a confirm we keep */
+#define AIC_DESC_SIZE   64      /* control buffer: the device descriptor */
 
 typedef struct AIC {
     u32 in_use;
@@ -128,10 +143,15 @@ typedef struct AIC {
     u32 cfm_len;
     u8 cfm[AIC_CFM_MAX];
     u8 *file_buf;               /* AIC_BLOCK bytes, for reading files */
+    u8 *desc_buf;               /* AIC_DESC_SIZE bytes, for control transfers */
+    /* A message nobody waits for: returns 1 if it knew it. DISPATCH_LEVEL. */
+    u32 (*ind)(struct AIC *a, u32 id, const u8 *params, u32 length);
+    volatile u32 scanning;
+    u32 vif;                    /* the station interface's index */
 } AIC;
 
-/* aic_cmd.c: the message channel. */
-u32 aic_open(AIC *a);
+/* aic_cmd.c: the message channel, on bulk `ep_out` and `ep_in` (512 bytes). */
+u32 aic_open(AIC *a, u32 ep_out, u32 ep_in);
 void aic_close(AIC *a);
 u32 aic_send(AIC *a, u32 id, const void *params, u32 length, u32 cfm_id);
 u32 aic_mem_read(AIC *a, u32 address, u32 *value);
@@ -142,6 +162,10 @@ u32 aic_start_app(AIC *a, u32 address, u32 type);
 
 /* aic_fw.c: loading the firmware into a chip in boot ROM. Returns 0 or a step. */
 u32 aic_load_firmware(AIC *a);
+
+/* aic_wifi.c: the Wi-Fi firmware brought up, and a scan started. */
+u32 aic_wifi_start(AIC *a);
+u32 aic_wifi_scan(AIC *a);
 
 static inline u32 aic_le32(const u8 *p)
 {

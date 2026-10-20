@@ -1,8 +1,9 @@
-/* Native test of the AIC8800D80 firmware load (aic_fw.c over aic_cmd.c) against
- * Linux's own: tests/drivers/aic8800/load-8d80.txt is aic_load_fw's load of the same
- * firmware, recorded with usbmon. Every message the driver sends must be the one
- * Linux sent, byte for byte (by length and CRC-32, the recording keeps no firmware),
- * and the chip's answers are replayed from the recording.
+/* Native tests of the AIC8800D80 driver against Linux's own, recorded with usbmon:
+ * load-8d80.txt, aic_load_fw loading the firmware (aic_fw.c), and wifi-8d81.txt,
+ * aic8800_fdrv bringing the Wi-Fi firmware up and scanning once (aic_wifi.c). Every
+ * message the driver sends must be the one Linux sent, byte for byte (the firmware
+ * load by length and CRC-32: that recording keeps no firmware), and the chip's
+ * answers are replayed from the recording.
  *
  * Needs the firmware files (AIC_FW, /lib/firmware/aic8800D80 by default); without
  * them the test says so and passes. Run by `make test`. */
@@ -13,6 +14,7 @@
 
 #include "aic.h"
 #include "file.h"
+#include "wireless.h"
 
 #define EP_IN  ((void *)1)
 #define EP_OUT ((void *)2)
@@ -27,6 +29,8 @@ static int failures;
 /* --- the recording --------------------------------------------------------------- */
 
 typedef struct { int out; u32 length; u32 crc; u8 *data; } STEP;
+static URB *rx_waiting[AIC_RX_COUNT];
+static u32 rx_waiting_count;
 static STEP steps[2048];
 static u32 step_count, next_step, outs_matched, first_mismatch = 0xFFFFFFFFu;
 
@@ -47,16 +51,32 @@ static int load_recording(const char *path)
     char line[4096];
     FILE *f = fopen(path, "r");
 
+    step_count = next_step = outs_matched = 0;
+    first_mismatch = 0xFFFFFFFFu;
+    rx_waiting_count = 0;
     if (!f)
         return 0;
     while (fgets(line, sizeof(line), f) && step_count < 2048) {
         STEP *s = &steps[step_count];
 
-        if (!strncmp(line, "out ", 4)) {
+        if (!strncmp(line, "out ", 4) && strchr(line + 4, ' ')) {
             s->out = 1;
             sscanf(line + 4, "%u %x", &s->length, &s->crc);
             step_count++;
-        } else if (!strncmp(line, "in ", 3)) {
+        } else if (!strncmp(line, "out ", 4) || !strncmp(line, "in ", 3)) {
+            u32 skip = line[0] == 'o' ? 4 : 3;
+            u32 n = (u32)strcspn(line + skip, "\r\n") / 2, i;
+
+            s->out = line[0] == 'o';
+            s->data = malloc(n);
+            for (i = 0; i < n; i++)
+                sscanf(line + skip + 2 * i, "%2hhx", &s->data[i]);
+            s->length = n;
+            if (s->out)
+                s->crc = crc32(s->data, n);
+            step_count++;
+            continue;
+        } else if (0) {
             u32 n = (u32)strcspn(line + 3, "\r\n") / 2, i;
 
             s->data = malloc(n);
@@ -72,8 +92,6 @@ static int load_recording(const char *path)
 
 /* --- the USB the driver sees: transfers complete at once ---------------------- */
 
-static URB *rx_waiting[AIC_RX_COUNT];
-static u32 rx_waiting_count;
 
 void usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
                  void *buffer, u32 length, const u8 *setup)
@@ -110,8 +128,20 @@ void usb_submit(URB *urb)
 
         if (s->length == urb->Length && s->crc == crc32(urb->Buffer, urb->Length))
             outs_matched++;
-        else if (first_mismatch == 0xFFFFFFFFu)
+        else if (first_mismatch == 0xFFFFFFFFu) {
             first_mismatch = outs_matched;
+            if (s->data) {
+                u32 k;
+
+                printf("  sent:     ");
+                for (k = 0; k < urb->Length && k < 48; k++)
+                    printf("%02x", ((u8 *)urb->Buffer)[k]);
+                printf("\n  expected: ");
+                for (k = 0; k < s->length && k < 48; k++)
+                    printf("%02x", s->data[k]);
+                printf("\n");
+            }
+        }
     } else if (first_mismatch == 0xFFFFFFFFu) {
         first_mismatch = outs_matched;
     }
@@ -143,6 +173,8 @@ static void *carve(u32 bytes)
 
 void *net_dma_scratch(u32 bytes) { return carve(bytes); }
 u32 net_dma_begin(NET_DEV *nd, u32 total) { (void)nd; (void)total; return 1; }
+u32 usb_control(USB_DEV *dev, const u8 setup[8], void *b, u32 l, u32 *a, u32 t)
+{ (void)dev; (void)setup; (void)b; (void)l; (void)a; (void)t; return STATUS_UNSUCCESSFUL; }
 void *net_dma_alloc(NET_DEV *nd, u32 bytes) { (void)nd; return carve(bytes); }
 
 /* --- files from AIC_FW ------------------------------------------------------------ */
@@ -166,39 +198,44 @@ u32 file_read(void *handle, void *buffer, u32 length, u32 offset)
 
 void file_close(void *handle) { fclose((FILE *)handle); }
 
-/* --- the test ------------------------------------------------------------------- */
+/* --- the tests ------------------------------------------------------------------ */
 
-int main(void)
+static u32 count_outs(void)
+{
+    u32 i, outs = 0;
+
+    for (i = 0; i < step_count; i++)
+        outs += steps[i].out;
+    return outs;
+}
+
+static void report(const char *what, u32 outs, volatile AIC_STATS *st)
+{
+    if (outs_matched != outs)
+        printf("  %s: matched %u of %u messages, first difference at %u (step %u/%#x)\n",
+               what, outs_matched, outs, first_mismatch, st->step, st->step_status);
+}
+
+static void test_load(void)
 {
     static USB_DEV dev;
     static NET_DEV nd;
     static AIC a;
     static volatile AIC_STATS st;
-    char probe[512];
-    FILE *f;
-    u32 step, outs = 0, i;
+    u32 step, outs;
 
-    fw_dir = getenv("AIC_FW") ? getenv("AIC_FW") : "/lib/firmware/aic8800D80";
-    snprintf(probe, sizeof(probe), "%s/fmacfw_8800d80_u02.bin", fw_dir);
-    f = fopen(probe, "rb");
-    if (!f) {
-        printf("aic tests skipped: no firmware in %s\n", fw_dir);
-        return 0;
-    }
-    fclose(f);
     if (!load_recording("tests/drivers/aic8800/load-8d80.txt")) {
         printf("FAIL: no recording\n");
-        return 1;
+        failures++;
+        return;
     }
-    for (i = 0; i < step_count; i++)
-        outs += steps[i].out;
-
+    outs = count_outs();
     dev.active = 1;
     nd.usb = &dev;
     a.nd = &nd;
     a.dev = &dev;
     a.st = &st;
-    CHECK(aic_open(&a) == 0);
+    CHECK(aic_open(&a, 0x01, 0x82) == 0);
     deliver_answers();
     step = aic_load_firmware(&a);
     CHECK(step == 0);
@@ -210,12 +247,73 @@ int main(void)
     CHECK(st.timeouts == 0);
     CHECK(outs_matched == outs);
     CHECK(next_step == step_count);
-    if (outs_matched != outs)
-        printf("  matched %u of %u messages, first difference at %u (step %u/%#x)\n",
-               outs_matched, outs, first_mismatch, st.step, st.step_status);
+    report("load", outs, &st);
+    printf("aic load: %u messages as Linux sent them\n", outs_matched);
+}
 
+static void test_wifi(void)
+{
+    static USB_DEV dev;
+    static NET_DEV nd;
+    static AIC a;
+    static volatile AIC_STATS st;
+    static const u8 card_mac[6] = { 0x68, 0x8f, 0xc9, 0x33, 0x7a, 0xc7 };
+    u32 step, outs, i, named = 0;
+
+    if (!load_recording("tests/drivers/aic8800/wifi-8d81.txt")) {
+        printf("FAIL: no recording\n");
+        failures++;
+        return;
+    }
+    outs = count_outs();
+    dev.active = 1;
+    nd.usb = &dev;
+    a.nd = &nd;
+    a.dev = &dev;
+    a.st = &st;
+    step = aic_wifi_start(&a);
+    deliver_answers();
+    CHECK(step == 0);
+    CHECK(st.step == AIC_STEP_WIFI_UP);
+    CHECK(memcmp(nd.mac, card_mac, 6) == 0);
+    CHECK(st.timeouts == 0);
+    CHECK(outs_matched == outs);
+    CHECK(next_step == step_count);
+    CHECK(!a.scanning);
+    CHECK(wl_stats.scans_done == 1);
+    CHECK(wl_stats.bss_count >= 3);
+    CHECK(wl_stats.bad_frames == 0);
+    for (i = 0; i < wl_stats.bss_count; i++) {
+        named += wl_bss[i].ssid_len > 0;
+        printf("  bss %02x:%02x:%02x:%02x:%02x:%02x ch %3u %4u MHz %4d dBm sec %02x '%s'\n",
+               wl_bss[i].bssid[0], wl_bss[i].bssid[1], wl_bss[i].bssid[2],
+               wl_bss[i].bssid[3], wl_bss[i].bssid[4], wl_bss[i].bssid[5],
+               wl_bss[i].channel, wl_bss[i].freq, wl_bss[i].rssi, wl_bss[i].security,
+               wl_bss[i].ssid);
+    }
+    CHECK(named >= 1);
+    report("wifi", outs, &st);
+    printf("aic wifi: %u messages as Linux sent them, %u networks\n", outs_matched,
+           wl_stats.bss_count);
+}
+
+int main(void)
+{
+    char probe[512];
+    FILE *f;
+
+    test_wifi();
+    fw_dir = getenv("AIC_FW") ? getenv("AIC_FW") : "/lib/firmware/aic8800D80";
+    snprintf(probe, sizeof(probe), "%s/fmacfw_8800d80_u02.bin", fw_dir);
+    f = fopen(probe, "rb");
+    if (f) {
+        fclose(f);
+        test_load();
+    } else {
+        printf("aic load test skipped: no firmware in %s\n", fw_dir);
+    }
     if (failures)
         return 1;
-    printf("all aic tests passed (%u messages as Linux sent them)\n", outs_matched);
+    printf("all aic tests passed\n");
     return 0;
 }

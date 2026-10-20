@@ -5,7 +5,7 @@
 
 #include "aic.h"
 
-#define CFM_TIMEOUT_MS   2000   /* RWNX_80211_CMD_TIMEOUT_MS */
+#define CFM_TIMEOUT_MS   4000   /* Linux allows 2000; RF calibration takes 1400 */
 #define TX_TIMEOUT_MS    1000
 #define RX_ERROR_LIMIT   64
 
@@ -17,7 +17,7 @@ static void rx_queue(AIC *a, URB *urb)
     usb_submit(urb);
 }
 
-/* One message of a transfer. */
+/* One message of a transfer: the confirm awaited, or an indication for a->ind. */
 static void message(AIC *a, const u8 *m, u32 length)
 {
     u32 id, params;
@@ -28,14 +28,15 @@ static void message(AIC *a, const u8 *m, u32 length)
     params = (u32)(m[6] | m[7] << 8);
     a->st->rx_messages++;
     a->st->rx_last_id = id;
+    if (params > length - (AIC_CFM_HEADER - 4))
+        params = length - (AIC_CFM_HEADER - 4);
     if (id != a->wait_id || a->cfm_done) {
-        a->st->rx_unexpected++;
+        if (!a->ind || !a->ind(a, id, m + AIC_CFM_HEADER - 4, params))
+            a->st->rx_unexpected++;
         return;
     }
     if (params > AIC_CFM_MAX)
         params = AIC_CFM_MAX;
-    if (params > length - (AIC_CFM_HEADER - 4))
-        params = length - (AIC_CFM_HEADER - 4);
     for (a->cfm_len = 0; a->cfm_len < params; a->cfm_len++)
         a->cfm[a->cfm_len] = m[AIC_CFM_HEADER - 4 + a->cfm_len];
     a->st->last_cfm_id = id;
@@ -105,7 +106,7 @@ static void tx_complete(URB *urb, u32 status)
     usb_wake();
 }
 
-u32 aic_open(AIC *a)
+u32 aic_open(AIC *a, u32 ep_out, u32 ep_in)
 {
     u32 i;
 
@@ -125,10 +126,8 @@ u32 aic_open(AIC *a)
     }
     a->tx_urb.Owner = a;
 
-    /* aicwf_parse_usb: the first bulk IN and the first bulk OUT. The boot ROM's are
-     * 0x82 and 0x01, 512 bytes, whatever the descriptor would say. */
-    a->ep_in = usb_open(a->dev, USB_TYPE_BULK, 0x82, 512, 0);
-    a->ep_out = usb_open(a->dev, USB_TYPE_BULK, 0x01, 512, 0);
+    a->ep_in = usb_open(a->dev, USB_TYPE_BULK, ep_in, 512, 0);
+    a->ep_out = usb_open(a->dev, USB_TYPE_BULK, ep_out, 512, 0);
     if (!a->ep_in || !a->ep_out)
         return AIC_STEP_ENDPOINTS;
 
