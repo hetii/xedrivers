@@ -67,6 +67,14 @@ STRUCTS = {
                     "keepalives", "indications", "last_indication", "rx_transfers",
                     "rx_bad", "intr_events", "intr_errors", "tx_too_big",
                     "tx_transfers"],
+    "aic_stats": ["product", "step", "step_status", "chip_word", "chip_id", "mcu_id",
+                  "fw_version", "bytes_loaded", "files_loaded", "file_status",
+                  "commands", "timeouts", "tx_errors", "tx_last_error", "rx_transfers",
+                  "rx_errors", "rx_last_error", "rx_messages", "rx_unexpected",
+                  "rx_last_id", "rx_data", "last_cfm_id"] + ["rx_first%d" % i
+                                                            for i in range(8)],
+    "file_stats": ["opens", "found", "last_status", "read_errors",
+                   "last_read_status"],
     "stack_stats": ["arp_replies", "icmp_replies", "udp_echo", "discard_frames",
                     "discard_bytes", "discard_bytes_hi", "peer_ip", "peer_mac_hi",
                     "peer_mac_lo", "blast_sent", "blast_busy", "not_ours"],
@@ -212,6 +220,30 @@ def status(sym):
                       i, rs["init_status"], rs["max_packets"], rs["max_transfer"],
                       rs["alignment"], rs["media_status"], rs["rx_transfers"],
                       rs["rx_bad"], rs["tx_transfers"]))
+    if "aic_stats" in sym:
+        for i in range(NET_MAX):
+            a = read_struct(sym, "aic_stats", i)
+            if not a["product"]:
+                continue
+            print("aic slot %d step=%d/%#x chip=%08x id=%d mcu=%d fw=%08x loaded=%d B in "
+                  "%d files (missing %#x) cmds=%d timeouts=%d tx_err=%d/%#x rx=%d "
+                  "err=%d/%#x msgs=%d unexpected=%d last=%#x data=%d" % (
+                      i, a["step"], a["step_status"], a["chip_word"], a["chip_id"],
+                      a["mcu_id"], a["fw_version"], a["bytes_loaded"], a["files_loaded"],
+                      a["file_status"], a["commands"], a["timeouts"], a["tx_errors"],
+                      a["tx_last_error"], a["rx_transfers"], a["rx_errors"],
+                      a["rx_last_error"], a["rx_messages"], a["rx_unexpected"],
+                      a["rx_last_id"], a["rx_data"]))
+            print("aic rx0  " + " ".join("%08x" % a["rx_first%d" % k] for k in range(8)))
+    if "file_stats" in sym:
+        f = read_struct(sym, "file_stats")
+        base = sym["file_stats"] + 4 * len(STRUCTS["file_stats"])
+        text = read(base, 192)
+        pdir = text[:96].split(b"\0")[0].decode("ascii", "replace")
+        last = text[96:].split(b"\0")[0].decode("ascii", "replace")
+        print("files    opens=%d found=%d status=%#x read_err=%d/%#x dir=%r last=%r" % (
+            f["opens"], f["found"], f["last_status"], f["read_errors"],
+            f["last_read_status"], pdir, last))
     if "rtl_stats" in sym:
         for i in range(NET_MAX):
             rs = read_struct(sym, "rtl_stats", i)

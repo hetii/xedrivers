@@ -23,6 +23,7 @@
 #include "kernel.h"
 #include "config.h"
 #include "usb.h"
+#include "file.h"
 #include "net.h"
 #include "bench.h"
 
@@ -173,12 +174,12 @@ int DllMain(void *instance, u32 reason, void *reserved)
 {
     void *thread = 0;
 
-    (void)instance;
     (void)reserved;
     if (reason != 1)                            /* DLL_PROCESS_ATTACH */
         return 1;
 
     xe_state.magic = 0x58454452u;               /* 'XEDR' */
+    file_set_plugin(instance);
     net_register();
     ExCreateThread(&thread, 0, 0, 0, (void *)worker, 0, 2);
     return 1;

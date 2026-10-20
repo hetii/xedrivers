@@ -8,6 +8,8 @@
 #   make test            native unit tests of the pure parts (cdc, stack checksum)
 #   make lint            cppcheck / clang-tidy over src/, if installed
 #   make push            put the plugin on the Orange Pi's mass-storage image (Usb:)
+#   make push-fw         put the AIC8800 firmware beside it (plugin/aic8800D80/), from
+#                        AIC_FW -- vendor files, not kept here
 #   make deploy          push, then arm a slot, reboot, read markers, disarm
 #   make kit             regenerate kit/ from xerunner, and show what changed
 #   make clean
@@ -99,9 +101,15 @@ XERUNNER_HOME ?= $(abspath ../xerunner)
 XERUNNER      ?= $(firstword $(wildcard $(XERUNNER_HOME)/.venv/bin/xerunner) xerunner)
 
 XEX := $(BUILD)/$(NAME).xex
+
+# The AIC8800D80's firmware as Linux installs it; only the files the driver loads.
+AIC_FW       ?= /lib/firmware/aic8800D80
+AIC_FW_FILES := fw_patch_table_8800d80_u02.bin fw_adid_8800d80_u02.bin \
+                fw_patch_8800d80_u02.bin fw_patch_8800d80_u02_ext0.bin \
+                fmacfw_8800d80_u02.bin fmacfw_8800d80_h_u02.bin
 FLAGS_LINE := DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST))
 
-.PHONY: all clean test lint kit push deploy
+.PHONY: all clean test lint kit push push-fw deploy
 
 all: $(XEX)
 
@@ -145,11 +153,13 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # Native tests. cdc.c and stack.c are pure byte code; kernel.h's inline asm is not
 # reached by the test translation units, so they build with the host compiler.
 # Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
-test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis
+test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis \
+      $(BUILD)/test_aic
 	@$(BUILD)/test_cdc
 	@$(BUILD)/test_stack
 	@$(BUILD)/test_rtl
 	@$(BUILD)/test_rndis
+	@AIC_FW=$(AIC_FW) $(BUILD)/test_aic
 
 HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core -I src/net
 
@@ -172,6 +182,12 @@ $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c 
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/drivers/rndis -o $@ tests/drivers/rndis/test_rndis.c \
 	    src/drivers/rndis/rndis.c
+
+$(BUILD)/test_aic: tests/drivers/aic8800/test_aic.c src/drivers/aic8800/aic_fw.c \
+                   src/drivers/aic8800/aic_cmd.c tests/drivers/aic8800/load-8d80.txt $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -I src/drivers/aic8800 -o $@ tests/drivers/aic8800/test_aic.c \
+	    src/drivers/aic8800/aic_fw.c src/drivers/aic8800/aic_cmd.c
 
 lint:
 	@command -v cppcheck >/dev/null && cppcheck --std=c99 --enable=warning,style \
@@ -196,6 +212,16 @@ push: $(XEX)
 	    || { echo "copy on the medium is not what was built"; exit 1; }
 	ssh -o StrictHostKeyChecking=no $(PI) \
 	    "umount $(PI_MNT) && losetup /dev/loop0 $(PI_IMG) && \
+	     modprobe g_mass_storage file=/dev/loop0 removable=1 ro=0 stall=0 && sleep 2 && \
+	     echo attached, link \$$(cat /sys/class/udc/*/current_speed)"
+
+push-fw:
+	tar -C $(AIC_FW) -cf - $(AIC_FW_FILES) | ssh -o StrictHostKeyChecking=no $(PI) \
+	    "rmmod g_mass_storage 2>/dev/null; losetup -d /dev/loop0 2>/dev/null; \
+	     mkdir -p $(PI_MNT) && mount -o loop $(PI_IMG) $(PI_MNT) && \
+	     mkdir -p $(PI_MNT)/plugin/aic8800D80 && tar -C $(PI_MNT)/plugin/aic8800D80 -xf - && \
+	     sync && ls -l $(PI_MNT)/plugin/aic8800D80 && umount $(PI_MNT) && \
+	     losetup /dev/loop0 $(PI_IMG) && \
 	     modprobe g_mass_storage file=/dev/loop0 removable=1 ro=0 stall=0 && sleep 2 && \
 	     echo attached, link \$$(cat /sys/class/udc/*/current_speed)"
 

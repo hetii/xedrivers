@@ -222,6 +222,24 @@ extern void  KeReleaseSpinLockFromRaisedIrql(KSPIN_LOCK *lock);
 extern void  KeInitializeDpc(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *context);
 extern int   KeInsertQueueDpc(KDPC *dpc, void *arg1, void *arg2);
 
+/* --- files ---------------------------------------------------------------------
+ * Object names are ANSI on this kernel. NtCreateFile (210) takes nine arguments, so
+ * it is called through kcall9 (kit/kcall.S), which puts the ninth where the console
+ * reads it; NtReadFile (240) takes eight, all in registers: (handle, event, apc
+ * routine, apc context, io status, buffer, length, byte offset or 0). NtClose 207.
+ * xerunner examples/plugins/plugin-probe.c. */
+typedef struct { u16 Length, MaximumLength; const char *Buffer; } ANSI_STRING;
+typedef struct { void *RootDirectory; ANSI_STRING *ObjectName; u32 Attributes; }
+    OBJECT_ATTRIBUTES;
+typedef struct { u32 Status; u32 Information; } IO_STATUS_BLOCK;
+extern u32   NtCreateFile(void **handle, u32 access, OBJECT_ATTRIBUTES *attributes,
+                          IO_STATUS_BLOCK *io, s64 *allocation, u32 file_attributes,
+                          u32 share, u32 disposition, u32 options);
+extern u32   NtReadFile(void *handle, void *event, void *apc, void *apc_context,
+                        IO_STATUS_BLOCK *io, void *buffer, u32 length, s64 *offset);
+extern u32   NtClose(void *handle);
+extern u32   kcall9(u32 *args);
+
 /* --- the wired NIC interface xnet calls -------------------------------------
  * Imported so the loader hands us the kernel's own addresses: our hooks call these
  * and xam's thunks are re-pointed at the hooks. Shapes from the 17559 disassembly

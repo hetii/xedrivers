@@ -16,7 +16,13 @@
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
 
-#define SCRATCH_BYTES 8192
+#define SCRATCH_BYTES 16384
+
+/* A slot's ring block, at least: the most any driver asks (rndis, 16 receive and
+ * 16 transmit buffers of 16 and 24 KB), so whichever device comes next to the slot
+ * fits -- an AIC8800 leaves and comes back as another product, a phone replaces a
+ * card. */
+#define NET_RINGS_MIN (16 * 16384 + 16 * 24576 + 2 * 2048)
 
 volatile NET_RX net_rx;
 volatile NET_LINK net_link_cb;
@@ -216,14 +222,16 @@ void *net_dma_scratch(u32 bytes)
 }
 
 /* A slot's block stays with the slot: the next device in it, of whatever driver,
- * carves it again, and must not need more. */
+ * carves it again; NET_RINGS_MIN makes it big enough for any of them. */
 u32 net_dma_begin(NET_DEV *nd, u32 total)
 {
     if (!nd->rings) {
-        nd->rings = (u8 *)MmAllocatePhysicalMemory(2, total, 4);
+        u32 size = total > NET_RINGS_MIN ? total : NET_RINGS_MIN;
+
+        nd->rings = (u8 *)MmAllocatePhysicalMemory(2, size, 4);
         if (!nd->rings)
             return 0;
-        nd->rings_size = total;
+        nd->rings_size = size;
     }
     nd->rings_used = 0;
     return total <= nd->rings_size;
