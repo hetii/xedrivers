@@ -200,6 +200,17 @@ extern int   ExCreateThread(void **handle, u32 stackSize, u32 *threadId,
                             void *parameter, u32 flags);
 extern int   KeDelayExecutionThread(u32 waitMode, u32 alertable, s64 *interval);
 
+/* A dispatcher object is a 16-byte DISPATCHER_HEADER and, for an event, nothing
+ * else. Type 1 is a synchronization (auto-reset) event. (event, type, state);
+ * (event, increment, wait) -> the previous state; (object, reason, mode,
+ * alertable, relative-or-absolute timeout or 0) -> NTSTATUS. Ordinals 112, 157
+ * and 176. */
+typedef struct { u32 header[4]; } __attribute__((aligned(8))) KEVENT;
+extern void  KeInitializeEvent(KEVENT *event, u32 type, u32 state);
+extern int   KeSetEvent(KEVENT *event, int increment, u32 wait);
+extern u32   KeWaitForSingleObject(void *object, u32 reason, u32 mode, u32 alertable,
+                                   s64 *timeout);
+
 extern u32   KeRaiseIrqlToDpcLevel(void);
 extern void  KfLowerIrql(u32 irql);
 extern u32   KfAcquireSpinLock(KSPIN_LOCK *lock);

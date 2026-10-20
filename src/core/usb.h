@@ -60,6 +60,11 @@ u32   usb_claim_present(void);
 
 void  usb_sleep(u32 ms);
 
+/* Wait up to `ms`, or until usb_wake: the worker's and usb_control's wait, which a
+ * dimmed dashboard does not stall. usb_wake may be called at DISPATCH_LEVEL. */
+void  usb_wait(u32 ms);
+void  usb_wake(void);
+
 typedef struct {
     u32 match_calls;
     u32 add_calls;

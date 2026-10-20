@@ -38,6 +38,32 @@ void usb_sleep(u32 ms)
     KeDelayExecutionThread(0, 0, &interval);
 }
 
+/* The worker's alarm clock. A timed wait alone is not enough: once the dashboard
+ * dims the screen after ten idle minutes, a thread waiting only on a timeout here
+ * is not woken again until somebody touches a pad (measured: the worker stopped at
+ * the same tick every time, and went on as soon as the pad moved). So the worker
+ * and the control transfers it waits for also wait on this event, which whatever
+ * they wait for sets -- a device arriving or leaving, a control transfer done. */
+static KEVENT wake_event;
+static volatile u32 wake_ready;
+
+void usb_wake(void)
+{
+    if (wake_ready)
+        KeSetEvent(&wake_event, 0, 0);
+}
+
+void usb_wait(u32 ms)
+{
+    s64 timeout = -((s64)ms * 10000);
+
+    if (!wake_ready) {
+        usb_sleep(ms);
+        return;
+    }
+    KeWaitForSingleObject(&wake_event, 0, 0, 0, &timeout);
+}
+
 static void submit_now(URB *urb)
 {
     if (!usb.device) {
@@ -132,6 +158,7 @@ static void control_complete(URB *urb, u32 status)
     urb->Busy = 0;
     mem_sync();
     control_done = 1;
+    usb_wake();
 }
 
 u32 usb_control(const u8 setup[8], void *buffer, u32 length, u32 *actual,
@@ -149,7 +176,7 @@ u32 usb_control(const u8 setup[8], void *buffer, u32 length, u32 *actual,
     for (waited = 0; !control_done; waited++) {
         if (waited >= timeout_ms)
             return STATUS_UNSUCCESSFUL;
-        usb_sleep(1);
+        usb_wait(1);
     }
     if (actual)
         *actual = control_urb.Actual;
@@ -250,6 +277,7 @@ static int add_device(void *device)
     mem_sync();
     usb.active = 1;
     UsbdAddDeviceComplete(device, STATUS_SUCCESS);
+    usb_wake();
     return 0;
 }
 
@@ -265,6 +293,7 @@ static int remove_device(void *device)
     mem_sync();
     if (client->detached)
         client->detached();
+    usb_wake();
     close_complete(&close_urb, 0);
     return 0;
 }
@@ -272,6 +301,9 @@ static int remove_device(void *device)
 int usb_register(const USB_CLIENT *who)
 {
     client = who;
+    KeInitializeEvent(&wake_event, 1, 0);
+    mem_sync();
+    wake_ready = 1;
     KeInitializeDpc(&submit_dpc, submit_dpc_routine, 0);
     submit_dpc.TargetNumber = USB_PROCESSOR + 1;
 

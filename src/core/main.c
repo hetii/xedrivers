@@ -73,11 +73,40 @@ static u32 run(u32 what)
     }
 }
 
+/* The worker runs on hardware thread WORKER_PROCESSOR, not where ExCreateThread
+ * put it -- hardware thread 2, the USB processor. Once the dashboard dims the
+ * screen after about ten idle minutes, a thread waiting there is no longer woken
+ * until a pad is touched: not by its timeout, not by its event being set (measured:
+ * the worker stopped at the same tick on every idle boot, with
+ * KeDelayExecutionThread and with KeWaitForSingleObject alike, while frames kept
+ * flowing; on thread 5 it went on past the dim). Why the dashboard does that to
+ * thread 2 is not known. USB requests from here go to thread 2 by DPC
+ * (usb_submit), as they always did from a thread. */
+#define WORKER_PROCESSOR 5
+
+/* (thread, affinity mask, &previous): ordinal 151; the current thread is the word
+ * at PCR+0x100. */
+extern u32 KeSetAffinityThread(void *thread, u32 affinity, u32 *previous);
+
+static void away_from_the_usb_processor(void)
+{
+    void *self;
+    u32 previous;
+
+#if defined(__powerpc__)
+    __asm__ volatile("lwz %0, 0x100(13)" : "=r"(self));
+#else
+    self = 0;
+#endif
+    KeSetAffinityThread(self, 1u << WORKER_PROCESSOR, &previous);
+}
+
 static void worker(void *parameter)
 {
     u32 tick, what;
 
     (void)parameter;
+    away_from_the_usb_processor();
     bench_init();
     net_layer_init();
 
@@ -108,7 +137,7 @@ static void worker(void *parameter)
             xe_cmd[6] = what;
             xe_cmd[4] = xe_cmd[4] + 1;
         }
-        usb_sleep(20);
+        usb_wait(20);
     }
 }
 

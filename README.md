@@ -252,6 +252,18 @@ and xnet moves back once its link is up. Measured: the onboard port answered at
 once each time; back on the card 4 s after its PHY came up, and at once after a
 physical replug of the card.
 
+## The worker and the dimmed screen
+
+About ten minutes after the last pad input the dashboard dims the screen, and from
+then on a thread waiting on hardware thread 2 -- where ExCreateThread puts the
+plugin's worker, and where the USB stack runs -- is not woken again until a pad is
+touched: neither its timeout nor a set event brings it back. Frames kept flowing
+(they are completions, not the worker), but a card plugged in meanwhile was not
+brought up, and the notification endpoint was not re-armed. The worker now runs on
+hardware thread 5, where it went on past the dim; it also waits on an event that a
+device arriving or leaving and a finished control transfer set, instead of
+sleeping in fixed steps. Why thread 2 sleeps through the dim is not known.
+
 ## The interrupt endpoint
 
 The RTL8156 in ECM answers every poll of its notification endpoint with the same
