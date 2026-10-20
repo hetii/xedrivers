@@ -13,7 +13,10 @@
 #define XE_BENCH_H
 
 #include "kernel.h"
-#include "net.h"
+
+/* A frame receiver, as the network layer's NET_RX; spelt out so that the core does
+ * not depend on the layer. */
+typedef void (*BENCH_RX)(const u8 *frame, u32 length);
 
 #ifndef XE_BENCH
 #define XE_BENCH 0
@@ -32,7 +35,7 @@ u32    bench_command(u32 what, volatile u32 *args);
 
 /* The receiver for a mode only the bench has (XE_MODE_STANDALONE), set up for it;
  * 0 for any other mode. */
-NET_RX bench_mode(u32 mode);
+BENCH_RX bench_mode(u32 mode);
 #else
 static inline void   bench_init(void) { }
 static inline void   bench_tick(u32 tick) { (void)tick; }
@@ -42,7 +45,7 @@ static inline u32    bench_command(u32 what, volatile u32 *args)
     (void)args;
     return 0;
 }
-static inline NET_RX bench_mode(u32 mode) { (void)mode; return 0; }
+static inline BENCH_RX bench_mode(u32 mode) { (void)mode; return 0; }
 #endif
 
 #endif /* XE_BENCH_H */

@@ -1,12 +1,19 @@
-/* The network device; see net.h. Everything here is the same for every card: which
- * driver has the device, its DMA memory, frames handed up, link state, counters.
- * How frames reach the wire is the driver's (src/drivers/).
+/* The network layer; see net.h. Everything here is the same for every wired card:
+ * which driver has the device, its DMA memory, frames handed up, link state,
+ * counters, and who consumes the frames (xnet, the bench's responder, nobody). How
+ * frames reach the wire is the driver's (src/drivers/).
  */
 
 #include "net.h"
 #include "usb.h"
 #include "driver.h"
+#include "config.h"
+#include "xnet.h"
+#include "bench.h"
 #include "prof.h"
+
+#define CMD_MODE       5u   /* [1] XE_MODE_* */
+#define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
 
 #define SCRATCH_BYTES 4096
 
@@ -199,11 +206,78 @@ u32 net_tx_space(void)
     return drv && net_stats.ready && drv->tx_space();
 }
 
+/* --- who consumes the frames ------------------------------------------------- */
+
+volatile NET_STATE net_state;
+
+static void no_frames(const u8 *frame, u32 length)
+{
+    (void)frame;
+    (void)length;
+}
+
+/* Switch who consumes frames. xnet needs a card that is up; until it is, the mode
+ * is remembered in xe_config and applied by the next bring-up. A mode only the
+ * bench has (standalone) is its receiver, or drop in a build without it. */
+static u32 set_mode(u32 mode)
+{
+    BENCH_RX receiver;
+
+    xe_config.mode = mode;
+    if (mode == XE_MODE_XNET) {
+        if (!net_stats.ready) {
+            net_rx = no_frames;
+            net_state.mode = XE_MODE_DROP;
+            return STATUS_UNSUCCESSFUL;
+        }
+        net_state.xnet_status = xnet_enable();
+        if (net_state.xnet_status) {
+            net_rx = no_frames;
+            net_state.mode = XE_MODE_DROP;
+            return net_state.xnet_status;
+        }
+        net_state.mode = XE_MODE_XNET;
+        return 0;
+    }
+
+    xnet_disable();
+    net_link_cb = 0;
+    receiver = bench_mode(mode);
+    net_rx = receiver ? (NET_RX)receiver : no_frames;
+    net_state.mode = receiver ? mode : XE_MODE_DROP;
+    return 0;
+}
+
+void net_layer_init(void)
+{
+    set_mode(xe_config.mode == XE_MODE_XNET ? XE_MODE_DROP : xe_config.mode);
+    xe_config.mode = XE_MODE;
+}
+
+void net_bring_up(void)
+{
+    net_state.start_count++;
+    net_state.start_result = net_start();
+    if (net_state.start_result)
+        return;
+    set_mode(xe_config.mode);
+}
+
 u32 net_command(u32 what, volatile u32 *args)
 {
     const XE_DRIVER *drv = xe_driver;
 
-    return drv && drv->command && drv->command(what, args);
+    switch (what) {
+    case CMD_MODE:
+        args[5] = set_mode(args[1]);
+        return 1;
+    case CMD_XNET_IFACE:
+        xnet_rx_iface = args[1];
+        args[5] = 0;
+        return 1;
+    default:
+        return drv && drv->command && drv->command(what, args);
+    }
 }
 
 /* --- which driver gets the device ------------------------------------------- */

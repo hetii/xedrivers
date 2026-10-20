@@ -77,7 +77,7 @@ BUILD    ?= build
 # xe_driver_<directory>; the table of them is generated, so nothing else names a
 # driver (src/core/driver.h).
 DRIVERS  ?= $(notdir $(patsubst %/,%,$(wildcard src/drivers/*/)))
-SRC_DIRS := src/core $(addprefix src/drivers/,$(DRIVERS)) \
+SRC_DIRS := src/core src/net $(addprefix src/drivers/,$(DRIVERS)) \
             $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h)
@@ -151,7 +151,7 @@ test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndi
 	@$(BUILD)/test_rtl
 	@$(BUILD)/test_rndis
 
-HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core
+HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core -I src/net
 
 $(BUILD)/test_cdc: tests/drivers/cdc/test_cdc.c src/drivers/cdc/cdc.c \
                    tests/drivers/cdc/fixtures.h $(HEADERS)

@@ -47,8 +47,8 @@ PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up']
 
 STRUCTS = {
     "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls"],
-    "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found",
-                 "start_result", "start_count", "mode", "xnet_status"],
+    "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found"],
+    "net_state": ["start_result", "start_count", "mode", "xnet_status"],
     "xe_config": ["magic", "mode", "advertise", "ip", "transport"],
     "net_stats": ["driver", "step", "step_status", "ready", "link", "speed_mbps",
                   "rx_frames", "rx_bytes", "rx_bytes_hi", "rx_errors", "rx_last_error",
@@ -150,6 +150,7 @@ def driver_names(sym):
 
 def status(sym):
     st = read_struct(sym, "xe_state")
+    nst = read_struct(sym, "net_state")
     cf = read_struct(sym, "xe_config")
     ns = read_struct(sym, "net_stats")
     ss = read_struct(sym, "stack_stats") if "stack_stats" in sym else None
@@ -162,9 +163,9 @@ def status(sym):
         drivers.get(ns["driver"], ns["driver"])))
     print("config   mode=%s advertise=0x%02x ip=%s" % (
         names.get(cf["mode"], cf["mode"]), cf["advertise"], ip(cf["ip"])))
-    print("running  mode=%s start=%d/%#x claims=%d/%d" % (
-        names.get(st["mode"], st["mode"]), st["start_count"], st["start_result"],
-        st["claim_found"], st["claim_attempts"]))
+    print("running  mode=%s start=%d/%#x claims=%d/%d xnet=%#x" % (
+        names.get(nst["mode"], nst["mode"]), nst["start_count"], nst["start_result"],
+        st["claim_found"], st["claim_attempts"], nst["xnet_status"]))
     print("card     ready=%d link=%d speed=%dM mac=%s step=%d/%#x" % (
         ns["ready"], ns["link"], ns["speed_mbps"], mac.hex(":"), ns["step"],
         ns["step_status"]))

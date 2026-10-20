@@ -201,8 +201,10 @@ commands and the standalone mode -- which without any tool is empty inlines.
 
 ## Drivers
 
-Everything that does not depend on the card is in `src/core/`: the USB driver
-object, the network device that xnet and the standalone stack see, the worker.
+Everything that does not depend on the device is in `src/core/`: the USB driver
+object, the worker and its command channel. The network layer is `src/net/`: the
+network device that xnet and the standalone stack see, xnet itself, and who
+consumes the frames; the core calls it through three entry points.
 Each card driver is a directory of its own under `src/drivers/`, and the core
 reaches it only through `src/core/driver.h`: one `XE_DRIVER` named
 `xe_driver_<directory>` with `match`, `start`, `detached`, `xmit`, `tx_space` and

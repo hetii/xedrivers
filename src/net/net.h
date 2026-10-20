@@ -1,6 +1,7 @@
-/* The network device as the rest of the plugin sees it: one Ethernet frame pipe,
- * whichever driver (driver.h) is behind it. Consumers -- xnet.c, stack.c -- use
- * the first half; drivers report into the second.
+/* The network layer: one Ethernet frame pipe, whichever driver (driver.h) is
+ * behind it, and who consumes it. The core calls the three entry points below;
+ * consumers -- xnet.c, the bench's stack -- use the second part; drivers report
+ * into the third.
  */
 
 #ifndef XE_NET_H
@@ -11,6 +12,32 @@
 #define ETH_ALEN      6
 #define ETH_HLEN      14
 #define ETH_FRAME_MAX 1518
+
+/* --- for the core --------------------------------------------------------------- */
+
+/* Once, from the worker before its loop: the boot mode, xnet only once a card is up. */
+void net_layer_init(void);
+
+/* A device was offered (a new USB generation): bring it up, apply the mode. */
+void net_bring_up(void);
+
+/* A host command the core does not know: the mode (5), xnet's interface id (13),
+ * else the driver's. 1 if handled, the result in args[5]. */
+u32  net_command(u32 what, volatile u32 *args);
+
+/* The USB client the core registers: match against every driver, bring-up on
+ * arrival, net_detached on removal. */
+void net_register(void);
+
+/* Read by tests/xectl.py. */
+typedef struct {
+    u32 start_result;
+    u32 start_count;
+    u32 mode;               /* the mode actually in force */
+    u32 xnet_status;
+} NET_STATE;
+
+extern volatile NET_STATE net_state;
 
 /* --- for consumers ------------------------------------------------------------ */
 
@@ -45,13 +72,6 @@ u32  net_tx_space(void);
 
 u32  net_link_up(void);
 u32  net_speed_mbps(void);
-
-/* A host command the core does not know, handed to the driver. 1 if handled. */
-u32  net_command(u32 what, volatile u32 *args);
-
-/* The USB client the core registers: match against every driver, bring-up on
- * arrival, net_detached on removal. */
-void net_register(void);
 
 /* --- for drivers -------------------------------------------------------------- */
 

@@ -69,7 +69,7 @@ u32 bench_command(u32 what, volatile u32 *args)
     }
 }
 
-NET_RX bench_mode(u32 mode)
+BENCH_RX bench_mode(u32 mode)
 {
 #if XE_BENCH_STACK
     if (mode == XE_MODE_STANDALONE) {
