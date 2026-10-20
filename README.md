@@ -268,6 +268,11 @@ cable out -> the onboard port (10.36.x); tethering on again -> the phone; off ->
 the onboard port until the card's cable was back. No network test needed at any
 step.
 
+Two phones, one in a back socket and one in the front, the card cabled: the one
+that tethered first stays the uplink whatever the other does; when it stops, the
+other's network (10.18.x) takes over; with both off, the card again. Both phones
+had their own slot and RNDIS instance the whole time.
+
 ## The worker and the dimmed screen
 
 About ten minutes after the last pad input the dashboard dims the screen, and from
