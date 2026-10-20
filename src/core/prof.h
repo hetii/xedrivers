@@ -1,4 +1,4 @@
-/* Where the time of a frame goes, measured with the time base. `make PROF=1` only:
+/* Where the time of a frame goes, measured with the time base. `make bench=prof` only:
  * a plain build compiles every macro here to nothing.
  *
  * Each slot sums the ticks spent inside one stage, the calls and the bytes they

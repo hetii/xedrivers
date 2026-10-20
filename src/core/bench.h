@@ -1,12 +1,12 @@
 /* Where the core lets the tuning tools in (src/bench/), and nothing more.
  *
  * Everything that exists to measure and tune -- the flight recorder, the
- * standalone responder with its UDP generator, the stage timers of PROF=1, the
- * register and thread-priority commands, the TCP server of TCP=1 -- lives under
- * src/bench/ and is built only with BENCH=1 (the default while developing;
- * `make RELEASE=1` leaves it out). The core reaches it through these four calls;
- * without BENCH every one is an empty inline the compiler drops, so a release build
- * carries none of the code, data or cycles.
+ * standalone responder with its UDP generator, the stage timers, the register and
+ * thread-priority commands, the TCP server -- lives under src/bench/<tool>/ and is
+ * built only when named: `make bench=history,stack`, `make bench=all`. A plain
+ * `make` is the plugin for people and has none of it. The core reaches it through
+ * these four calls; without any tool every one is an empty inline the compiler
+ * drops, so that build carries none of the code, data or cycles.
  */
 
 #ifndef XE_BENCH_H

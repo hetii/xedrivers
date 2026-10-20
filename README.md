@@ -95,7 +95,7 @@ limit; the console's EHCI controller is (above).
 
 ### Where a frame's time goes
 
-`make PROF=1` times each stage with the time base (`src/core/prof.h`) and
+`make bench=prof` times each stage with the time base (`src/core/prof.h`) and
 `tests/xectl.py prof 5` reads it. During the TCP runs below, single stream:
 
 | stage | console -> PC (15.0k frames/s) | PC -> console (18.5k frames/s) |
@@ -118,7 +118,7 @@ limit either.
 `src/bench/tcp/` serves two ports out of RAM on the console's own stack -- 5201 sends,
 5202 reads and discards, a thread a connection -- with xam's socket calls imported
 by ordinal (the kit packs xam as a second import library). It is built
-only with `make TCP=1` and started with `tests/xectl.py cmd 14`; a plain build has
+only with `make bench=tcp` and started with `tests/xectl.py cmd 14`; a plain build has
 no xam imports at all, so the driver never depends on xam to load. Measured with
 `tests/tcpbench.py`, router at 1 Gbit/s:
 
@@ -166,31 +166,34 @@ console's network until a power cycle; with FTP every value worked. It stays 0.
 
 ## Building
 
-    make RELEASE=1                         the plugin for people: no tuning tools
-    make                                   xnet, advertise 2500, with the bench
-    make MODE=standalone IP=10.36.0.2      the built-in responder, for measuring
-    make MODE=standalone ADVERTISE=1000 IP=192.168.50.2
-    make TCP=1                             add the RAM-to-RAM TCP server
+    make                                   the plugin for people: xnet, advertise 2500
+    make bench=history,stack               ... with the tuning tools named
+    make bench=all                         ... with every one
+    make MODE=standalone IP=10.36.0.2 bench=stack   the built-in responder
+    make MODE=standalone ADVERTISE=1000 IP=192.168.50.2 bench=stack
+    make bench=tcp                         add the RAM-to-RAM TCP server
     make test                              host unit tests
     make push                              put it on the Usb: medium (Orange Pi)
     make DRIVERS=cdc                       only the drivers named (default: all)
 
 ## The bench
 
-Everything that exists to measure and tune lives in `src/bench/` and is built only
-with `BENCH=1`, the default while developing; `make RELEASE=1` leaves all of it out
-(image 0x10000 against 0x17000, and none of its cycles):
+Everything that exists to measure and tune lives in `src/bench/<tool>/` and is
+built in only when named: `make bench=history,stack`, `make bench=all`. A plain
+`make` is the plugin for people, with none of it (image 0x10000 against 0x18000
+with every tool, and none of their cycles):
 
 | `src/bench/` | what | used by |
 |---|---|---|
 | `history/` | flight recorder: frames, bytes, in-flight, drops every 200 ms, ~100 s | `xectl.py history` |
 | `stack/` | `MODE=standalone`: ARP/ICMP/UDP echo/discard and the UDP generator | `speedtest.py`, `phoneblast.py`, `xectl.py blast` |
 | `debug/` | commands 15-17: thread priority by id, read/write any word (MMIO too) | `xectl.py cmd 15/16/17` |
-| `prof/` | `PROF=1`: where the stage timers sum up (hooks in `src/core/prof.h`) | `xectl.py prof` |
-| `tcp/` | `TCP=1`: the RAM-to-RAM TCP server | `tcpbench.py` |
+| `prof/` | where the stage timers sum up (hooks in `src/core/prof.h`) | `xectl.py prof` |
+| `tcp/` | the RAM-to-RAM TCP server, the plugin's only imports from xam | `tcpbench.py` |
 
 The core reaches it only through `src/core/bench.h` -- an init, a tick, unknown
-commands and the standalone mode -- which without `BENCH` is empty inlines.
+commands and the standalone mode -- which without any tool is empty inlines.
+`MODE=standalone` needs `bench=stack`.
 
 ## Drivers
 

@@ -1,11 +1,10 @@
 # Building the RTL8156 driver plugin, and running the host tests.
 #
-#   make                 build build/xedrivers.xex
+#   make                 build build/xedrivers.xex: the plugin for people, no tuning
+#   make bench=history,stack   ... with the tuning tools named (src/bench/<name>):
+#                        history, stack, debug, prof, tcp, or bench=all
 #   make MODE=xnet ADVERTISE=2500 IP=10.36.0.2
 #                        choose how it runs (see "Modes" below)
-#   make RELEASE=1       the plugin for people: no src/bench/ (tuning tools) at all
-#   make TCP=1           add the RAM-to-RAM TCP throughput server (src/bench/tcp)
-#   make PROF=1          time each stage of a frame (src/core/prof.h, xectl.py prof)
 #   make test            native unit tests of the pure parts (cdc, stack checksum)
 #   make lint            cppcheck / clang-tidy over src/, if installed
 #   make push            put the plugin on the Orange Pi's mass-storage image (Usb:)
@@ -49,37 +48,37 @@ MODE_VALUE := $(or $(mode_$(MODE)),$(error MODE must be standalone, xnet or drop
 ADV_VALUE  := $(or $(adv_$(ADVERTISE)),$(error ADVERTISE must be 2500, 1000, 100 or default))
 IP_VALUE   := $(shell python3 -c "import ipaddress,sys; print(hex(int(ipaddress.IPv4Address('$(IP)'))))")
 
-# BENCH=1 (the default while developing) builds src/bench/: the flight recorder,
-# the standalone responder and its UDP generator, the register and thread
-# commands. RELEASE=1 is the plugin for people, without any of it: BENCH=0, xnet.
-# TCP=1 adds the throughput server -- the plugin's only imports from xam -- and
-# PROF=1 the stage timers; both are bench tools and need BENCH=1.
-RELEASE   ?= 0
-BENCH     ?= $(if $(filter 1,$(RELEASE)),0,1)
-TCP       ?= 0
-PROF      ?= 0
-BENCH_VALUE := $(if $(filter 0 1,$(BENCH)),$(BENCH),$(error BENCH must be 0 or 1))
-TCP_VALUE := $(if $(filter 0 1,$(TCP)),$(TCP),$(error TCP must be 0 or 1))
-PROF_VALUE := $(if $(filter 0 1,$(PROF)),$(PROF),$(error PROF must be 0 or 1))
-$(if $(filter 1,$(RELEASE)),$(if $(filter 1,$(BENCH) $(TCP) $(PROF)),\
-    $(error RELEASE=1 builds no bench tools: drop BENCH, TCP and PROF)))
-$(if $(filter 0,$(BENCH)),$(if $(filter 1,$(TCP) $(PROF)),\
-    $(error TCP=1 and PROF=1 are bench tools: they need BENCH=1)))
-$(if $(filter 0,$(BENCH)),$(if $(filter standalone,$(MODE)),\
-    $(error MODE=standalone is the bench's responder: it needs BENCH=1)))
+# bench= names the tuning tools to build in, comma-separated, each a directory of
+# src/bench/: history (flight recorder), stack (MODE=standalone and its UDP
+# generator), debug (commands 15-17), prof (stage timers), tcp (the throughput
+# server -- the plugin's only imports from xam); `all` for every one. Empty, the
+# default, is the plugin for people: none of src/bench/ is compiled in.
+comma      := ,
+empty      :=
+space      := $(empty) $(empty)
+BENCH_ALL  := history stack debug prof tcp
+BENCH_ASKED := $(subst $(comma), ,$(bench))
+BENCH_LIST := $(sort $(if $(filter all,$(BENCH_ASKED)),$(BENCH_ALL),$(BENCH_ASKED)))
+$(if $(filter-out $(BENCH_ALL),$(BENCH_LIST)),\
+    $(error bench= knows $(BENCH_ALL) and all, not $(filter-out $(BENCH_ALL),$(BENCH_LIST))))
+$(if $(filter standalone,$(MODE)),$(if $(filter stack,$(BENCH_LIST)),,\
+    $(error MODE=standalone is the bench's responder: build with bench=stack)))
+bench_on    = $(if $(filter $(1),$(BENCH_LIST)),1,0)
+BENCH_FLAGS := -D XE_BENCH=$(if $(BENCH_LIST),1,0) \
+               -D XE_BENCH_HISTORY=$(call bench_on,history) \
+               -D XE_BENCH_STACK=$(call bench_on,stack) \
+               -D XE_BENCH_DEBUG=$(call bench_on,debug) \
+               -D XE_PROF=$(call bench_on,prof) -D XE_TCP=$(call bench_on,tcp)
 
 BUILD    ?= build
 
 # The core, every driver directory in DRIVERS (all of src/drivers/ by default),
-# and the TCP server with TCP=1. Each driver directory defines one XE_DRIVER named
+# and the bench's dispatcher and each tool named in bench=. Each driver directory defines one XE_DRIVER named
 # xe_driver_<directory>; the table of them is generated, so nothing else names a
 # driver (src/core/driver.h).
 DRIVERS  ?= $(notdir $(patsubst %/,%,$(wildcard src/drivers/*/)))
 SRC_DIRS := src/core $(addprefix src/drivers/,$(DRIVERS)) \
-            $(if $(filter 1,$(BENCH)),src/bench src/bench/history src/bench/stack \
-                                      src/bench/debug) \
-            $(if $(filter 1,$(PROF)),src/bench/prof) \
-            $(if $(filter 1,$(TCP)),src/bench/tcp)
+            $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h)
 INCLUDES := $(addprefix -I ,$(SRC_DIRS))
@@ -100,7 +99,7 @@ XERUNNER_HOME ?= $(abspath ../xerunner)
 XERUNNER      ?= $(firstword $(wildcard $(XERUNNER_HOME)/.venv/bin/xerunner) xerunner)
 
 XEX := $(BUILD)/$(NAME).xex
-FLAGS_LINE := DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) BENCH=$(BENCH_VALUE) TCP=$(TCP_VALUE) PROF=$(PROF_VALUE)
+FLAGS_LINE := DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST))
 
 .PHONY: all clean test lint kit push deploy
 
@@ -115,7 +114,7 @@ FORCE:
 
 # One ordinal table per module the plugin may import from, each naming its module
 # and identity in its header; the packer looks every import up in all of them and
-# gives a module a record only when something is imported from it (xam: TCP=1).
+# gives a module a record only when something is imported from it (xam: bench=tcp).
 TABLES := $(KIT)/ordinals-xboxkrnl-$(ORDINALS).txt $(KIT)/ordinals-xam-$(ORDINALS).txt
 
 $(BUILD)/drivers.generated.c: $(BUILD)/flags
@@ -138,7 +137,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
-	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u -D XE_BENCH=$(BENCH_VALUE) -D XE_TCP=$(TCP_VALUE) -D XE_PROF=$(PROF_VALUE) \
+	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u $(BENCH_FLAGS) \
 	    --name $(NAME).dll --into $(BUILD)
 	@mv $(BUILD)/plugin.xex $@
 	@echo "  -> $@"

@@ -34,7 +34,7 @@
 #define CMD_CLAIM      3u   /* find the card on the hubs and reset it */
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_RESTART    6u   /* run the bring-up again */
-/* 4 and 14..17 belong to the bench (src/bench/bench.c, BENCH=1 builds), 7..11 to
+/* 4 and 14..17 belong to the bench (src/bench/bench.c, `make bench=...`), 7..11 to
  * the driver of the card (rtl8156: advertise, registers, PHY); any number the core
  * does not know is offered to the bench, then to the driver. */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */

@@ -16,7 +16,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py reg pla|usb 0xe610 [value] read/write a MAC register word
     xectl.py blast COUNT [PAYLOAD] [PORT]
     xectl.py cmd N [a1 a2 a3]           any raw command
-    xectl.py prof [SECONDS]             where a frame's time goes (PROF=1 builds)
+    xectl.py prof [SECONDS]             where a frame's time goes (bench=prof)
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
 
 Environment: XE_HOST (default 192.168.1.210), XERUNNER (path to the CLI).
@@ -235,7 +235,7 @@ def status(sym):
 def prof(sym, seconds):
     """Two snapshots of net_prof, and what each stage cost between them."""
     if "net_prof" not in sym:
-        print("this build has no profile; make PROF=1")
+        print("this build has no profile; make bench=prof")
         return
     a = read_struct(sym, "net_prof")
     time.sleep(seconds)
@@ -258,9 +258,9 @@ def prof(sym, seconds):
 
 
 def history(sym, last):
-    """The flight recorder (BENCH=1 builds), oldest first, as rates per sample."""
+    """The flight recorder (bench=history), oldest first, as rates per sample."""
     if "xe_history" not in sym:
-        print("this build has no flight recorder; build with BENCH=1")
+        print("this build has no flight recorder; make bench=history")
         return
     names = ["tick", "rx_frames", "tx_frames", "tx_inflight", "tx_drops", "rx_errors",
              "xmit_usb", "xmit_dropped", "rx_bytes", "tx_bytes"]

@@ -1,4 +1,4 @@
-/* Where PROF=1 keeps its sums; the hooks themselves are src/core/prof.h. */
+/* Where bench=prof keeps its sums; the hooks themselves are src/core/prof.h. */
 
 #include "prof.h"
 
