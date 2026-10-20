@@ -69,14 +69,29 @@ static u32 better(const NET_DEV *a, const NET_DEV *b, const NET_DEV *current)
     return socket_rank(a) < socket_rank(b);
 }
 
+/* From one device to another, xnet has to see the link go down in between, or it
+ * keeps its address: both report the same LINK_UP_VALUE, so a down and an up
+ * notified back to back are read as one unbroken link (measured: switching from
+ * the RTL8156 to a phone and back, the console kept the old address until the
+ * dashboard's network test). So such a switch first gives xnet no link at all --
+ * not the onboard port's either -- for SWITCH_GAP_TICKS of the worker (~1.5 s),
+ * then the new uplink. To or from no uplink there is no gap: the onboard port's
+ * link reads differently, and xnet starts over by itself. */
+#define SWITCH_GAP_TICKS 45
+
+volatile u32 net_switching;
+static u32 switch_ticks;
+
 /* Pick the uplink again; on a change, tell the consumer -- xnet then asks for the
  * link and runs DHCP on whatever it is now (or the onboard port). Any IRQL up to
  * DISPATCH. */
 static void choose(void)
 {
     NET_DEV *current = uplink(), *best = 0;
-    u32 i, was_up, now_up;
+    u32 i;
 
+    if (net_switching)
+        return;                 /* decided again when the gap ends (net_tick) */
     for (i = 0; i < NET_MAX; i++) {
         NET_DEV *nd = &net_devs[i];
 
@@ -85,22 +100,25 @@ static void choose(void)
         if (!best || better(nd, best, current))
             best = nd;
     }
-    was_up = current && current->st->ready && current->st->link;
-    if (best == current && (best != 0) == was_up)
+    if (best == current)
         return;
+    if (current && best) {
+        net_active = 0;
+        switch_ticks = 0;
+        mem_sync();
+        net_switching = 1;
+        if (net_link_cb)
+            net_link_cb(0);
+        return;
+    }
     if (best) {
         for (i = 0; i < ETH_ALEN; i++)
             net_mac[i] = best->mac[i];
     }
-    /* From one device to another the network changes too (a phone's is not the
-     * router's): report the link down first, so xnet starts over with DHCP. */
-    if (was_up && best && net_link_cb)
-        net_link_cb(0);
     mem_sync();
     net_active = best ? (u32)(best - net_devs) + 1 : 0;
-    now_up = best != 0;
     if (net_link_cb)
-        net_link_cb(now_up);
+        net_link_cb(best != 0);
 }
 
 /* --- frames and link, from the drivers -------------------------------------- */
@@ -358,6 +376,12 @@ void net_bring_up(USB_DEV *dev)
 void net_tick(void)
 {
     u32 i;
+
+    if (net_switching && ++switch_ticks >= SWITCH_GAP_TICKS) {
+        net_switching = 0;
+        mem_sync();
+        choose();
+    }
 
     for (i = 0; i < NET_MAX; i++) {
         NET_DEV *nd = &net_devs[i];

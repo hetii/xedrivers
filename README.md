@@ -252,6 +252,22 @@ and xnet moves back once its link is up. Measured: the onboard port answered at
 once each time; back on the card 4 s after its PHY came up, and at once after a
 physical replug of the card.
 
+## Several devices, one uplink
+
+Up to four USB devices are owned at once, each with its driver. Of those with a
+link up, one is the uplink xnet is given: a phone that tethers before a USB card,
+a faster link before a slower one, the uplink in force before an equal one, two
+phones by who tethered first, then the back sockets before the front and a lower
+port first; with none, the onboard port. Frames from the others are dropped.
+Switching from one device to another gives xnet no link at all for ~1.5 s
+first: both read the same to it, and without the gap it kept the old address.
+
+Tried on the console with the RTL8156 cabled and a phone: tethering on -> the
+phone's address (10.63.x); off or unplugged -> 192.168.1.210 from the card; card's
+cable out -> the onboard port (10.36.x); tethering on again -> the phone; off ->
+the onboard port until the card's cable was back. No network test needed at any
+step.
+
 ## The worker and the dimmed screen
 
 About ten minutes after the last pad input the dashboard dims the screen, and from

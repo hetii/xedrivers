@@ -101,6 +101,10 @@ extern volatile NET_STATS net_stats[NET_MAX];
  * and a lower port first. */
 extern volatile u32 net_active;
 
+/* Nonzero for the moment between two uplinks, when xnet is to see no link at
+ * all, not even the onboard port's (see choose() in net.c). */
+extern volatile u32 net_switching;
+
 /* --- for consumers ------------------------------------------------------------ */
 
 /* Where received frames go. Called at DISPATCH_LEVEL on the USB processor (or on

@@ -257,6 +257,8 @@ static u32 nic_link_state_hook(u32 device_flags)
     xnet_stats.link_polls++;
     if ((device_flags & NIC_IFACE_USBENET) && net_link_up())
         return LINK_UP_VALUE;
+    if ((device_flags & NIC_IFACE_USBENET) && net_switching)
+        return 0;
     if (device_flags & NIC_IFACE_USBENET)
         xnet_stats.link_fallback++;
     return NicGetLinkState(device_flags & ~NIC_IFACE_USBENET);
