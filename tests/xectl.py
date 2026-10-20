@@ -146,6 +146,12 @@ def command(sym, what, *args, wait=30.0):
     """Arguments first, the request word last: the worker takes the request the
     moment it sees it, so it must not see it before the arguments are in place."""
     base = sym["xe_cmd"]
+    # The symbols are build/'s: if the console runs another build, xe_cmd is some
+    # other word of its memory. Its xe_state.magic must be there first.
+    magic = struct.unpack(">I", read(sym["xe_state"], 4))[0]
+    if magic != 0x58454452:
+        raise SystemExit("xe_state.magic is %08x, not 'XEDR': the console runs another "
+                         "build than build/ (make the same bench= first)" % magic)
     before = struct.unpack(">I", read(base + 16, 4))[0]
     words = list(args) + [0] * (3 - len(args))
     write(base + 4, struct.pack(">3I", *words))
