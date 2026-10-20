@@ -273,6 +273,13 @@ that tethered first stays the uplink whatever the other does; when it stops, the
 other's network (10.18.x) takes over; with both off, the card again. Both phones
 had their own slot and RNDIS instance the whole time.
 
+Two RTL8156B (back and front) and the onboard port, all on one 100M switch: every
+one of them gets 192.168.1.210, since xnet sends the console's own MAC through
+whichever is the uplink and the router answers that MAC. Equal kind and speed, so
+the uplink in force keeps it: pulling the uplink's cable moves xnet to the other
+card (the gap shows 0.0.0.0 for a moment, then DHCP); pulling the other card's
+cable, or the same card's again once it is no longer the uplink, changes nothing.
+
 ## The worker and the dimmed screen
 
 About ten minutes after the last pad input the dashboard dims the screen, and from
