@@ -53,7 +53,8 @@ STRUCTS = {
     "net_stats": ["driver", "step", "step_status", "ready", "link", "speed_mbps",
                   "rx_frames", "rx_bytes", "rx_bytes_hi", "rx_errors", "rx_last_error",
                   "rx_short", "rx_stopped", "tx_frames", "tx_bytes", "tx_bytes_hi",
-                  "tx_drops", "tx_errors", "tx_last_error", "tx_inflight"],
+                  "tx_drops", "tx_errors", "tx_last_error", "tx_inflight",
+                  "rx_not_uplink", "where"],
     "cdc_stats": ["transport", "config_value", "data_interface", "ep_in", "ep_out",
                   "ep_intr", "intr_events", "intr_errors", "last_notify0",
                   "last_notify1", "rx_deferred", "rx_ntbs", "rx_ntb_errors", "tx_ntbs",
@@ -108,10 +109,26 @@ def write(addr, data):
     xerunner("console", "write-memory", hex(addr), data.hex())
 
 
-def read_struct(sym, name):
+def read_struct(sym, name, index=0):
+    """One struct by symbol; `index` picks an element of an array of them (the
+    per-device net_stats, cdc_stats, rndis_stats, rtl_stats)."""
     fields = STRUCTS[name]
-    raw = read(sym[name], 4 * len(fields))
+    raw = read(sym[name] + index * 4 * len(fields), 4 * len(fields))
     return dict(zip(fields, struct.unpack(">%dI" % len(fields), raw)))
+
+
+NET_MAX = 4
+
+
+def uplink_index(sym):
+    """The device slot xnet is given, or None (the onboard port)."""
+    a = struct.unpack(">I", read(sym["net_active"], 4))[0]
+    return a - 1 if a else None
+
+
+def uplink_stats(sym):
+    """The uplink's net_stats (slot 0's when there is none)."""
+    return read_struct(sym, "net_stats", uplink_index(sym) or 0)
 
 
 def command(sym, what, *args, wait=30.0):
@@ -152,60 +169,55 @@ def status(sym):
     st = read_struct(sym, "xe_state")
     nst = read_struct(sym, "net_state")
     cf = read_struct(sym, "xe_config")
-    ns = read_struct(sym, "net_stats")
     ss = read_struct(sym, "stack_stats") if "stack_stats" in sym else None
     xs = read_struct(sym, "xnet_stats")
     mac = read(sym["net_mac"], 6)
     names = {v: k for k, v in MODES.items()}
     drivers = driver_names(sym)
-    print("plugin   magic=%08x version=%08x ticks=%d driver=%s" % (
-        st["magic"], st["version"], st["worker_ticks"],
-        drivers.get(ns["driver"], ns["driver"])))
+    up = uplink_index(sym)
+    print("plugin   magic=%08x version=%08x ticks=%d" % (
+        st["magic"], st["version"], st["worker_ticks"]))
     print("config   mode=%s advertise=0x%02x ip=%s" % (
         names.get(cf["mode"], cf["mode"]), cf["advertise"], ip(cf["ip"])))
-    print("running  mode=%s start=%d/%#x claims=%d/%d xnet=%#x" % (
+    print("running  mode=%s start=%d/%#x claims=%d/%d xnet=%#x uplink=%s mac=%s" % (
         names.get(nst["mode"], nst["mode"]), nst["start_count"], nst["start_result"],
-        st["claim_found"], st["claim_attempts"], nst["xnet_status"]))
-    print("card     ready=%d link=%d speed=%dM mac=%s step=%d/%#x" % (
-        ns["ready"], ns["link"], ns["speed_mbps"], mac.hex(":"), ns["step"],
-        ns["step_status"]))
+        st["claim_found"], st["claim_attempts"], nst["xnet_status"],
+        "slot %d" % up if up is not None else "onboard", mac.hex(":")))
+    for i in range(NET_MAX):
+        ns = read_struct(sym, "net_stats", i)
+        if not ns["driver"]:
+            continue
+        where = ns["where"]
+        print("%s slot %d %-8s ready=%d link=%d speed=%dM ctrl=%d port=%d step=%d/%#x "
+              "rx=%d tx=%d drops=%d not_uplink=%d" % (
+                  "*" if i == up else " ", i, drivers.get(ns["driver"], ns["driver"]),
+                  ns["ready"], ns["link"], ns["speed_mbps"], where & 3,
+                  (where >> 2) & 7, ns["step"], ns["step_status"], ns["rx_frames"],
+                  ns["tx_frames"], ns["tx_drops"], ns["rx_not_uplink"]))
     if "cdc_stats" in sym:
-        cs = read_struct(sym, "cdc_stats")
-        print("cdc      config=%d transport=%s intr=%d/%d parked=%d" % (
-            cs["config_value"], "ncm" if cs["transport"] else "ecm",
-            cs["intr_events"], cs["intr_errors"], cs["intr_parked"]))
-        if cs["transport"]:
-            print("ntb      in_max=%d out_max=%d align=%#x max_dg=%d formats=%#x rx=%d "
-                  "rx_err=%d tx=%d" % (
-                      cs["ntb_in_max"], cs["ntb_out_max"], cs["ntb_out_align"],
-                      cs["ntb_out_datagrams"], cs["ntb_formats"], cs["rx_ntbs"],
-                      cs["rx_ntb_errors"], cs["tx_ntbs"]))
-            print("ncm req  set_input=%#x set_format=%#x crc_off=%#x max_dgram=%#x" % (
-                cs["ntb_input_status"], cs["ntb_format_status"], cs["crc_status"],
-                cs["dgram_status"]))
-    if "rndis_stats" in sym and drivers.get(ns["driver"]) == "rndis":
-        rs = read_struct(sym, "rndis_stats")
-        print("rndis    init=%#x max_pkts=%d max_xfer=%d align=%d filter=%#x media=%d "
-              "speed=%d00bps" % (rs["init_status"], rs["max_packets"],
-                                 rs["max_transfer"], rs["alignment"],
-                                 rs["filter_status"], rs["media_status"],
-                                 rs["link_speed"]))
-        print("rndis io rx_xfers=%d bad=%d polls=%d keepalive=%d indic=%d/%#x intr=%d/%d "
-              "too_big=%d tx_xfers=%d" % (rs["rx_transfers"], rs["rx_bad"],
-                                          rs["control_polls"], rs["keepalives"],
-                                          rs["indications"], rs["last_indication"],
-                                          rs["intr_events"], rs["intr_errors"],
-                                          rs["tx_too_big"], rs["tx_transfers"]))
+        for i in range(2):
+            cs = read_struct(sym, "cdc_stats", i)
+            if not cs["config_value"]:
+                continue
+            print("cdc %d    config=%d transport=%s intr=%d/%d parked=%d" % (
+                i, cs["config_value"], "ncm" if cs["transport"] else "ecm",
+                cs["intr_events"], cs["intr_errors"], cs["intr_parked"]))
+    if "rndis_stats" in sym:
+        for i in range(2):
+            rs = read_struct(sym, "rndis_stats", i)
+            if not rs["max_transfer"]:
+                continue
+            print("rndis %d  init=%#x max_pkts=%d max_xfer=%d align=%d media=%d "
+                  "rx_xfers=%d bad=%d tx_xfers=%d" % (
+                      i, rs["init_status"], rs["max_packets"], rs["max_transfer"],
+                      rs["alignment"], rs["media_status"], rs["rx_transfers"],
+                      rs["rx_bad"], rs["tx_transfers"]))
     if "rtl_stats" in sym:
-        rs = read_struct(sym, "rtl_stats")
-        print("rtl      chip=%04x adv_status=%#x" % (rs["chip_version"],
-                                                    rs["advertise_status"]))
-    print("rx       frames=%d bytes=%d errors=%d stopped=%d" % (
-        ns["rx_frames"], ns["rx_bytes_hi"] << 32 | ns["rx_bytes"], ns["rx_errors"],
-        ns["rx_stopped"]))
-    print("tx       frames=%d bytes=%d drops=%d errors=%d" % (
-        ns["tx_frames"], ns["tx_bytes_hi"] << 32 | ns["tx_bytes"], ns["tx_drops"],
-        ns["tx_errors"]))
+        for i in range(NET_MAX):
+            rs = read_struct(sym, "rtl_stats", i)
+            if rs["chip_version"]:
+                print("rtl slot %d chip=%04x adv_status=%#x" % (
+                    i, rs["chip_version"], rs["advertise_status"]))
     if ss:
         print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
             ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],

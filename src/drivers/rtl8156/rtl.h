@@ -18,6 +18,7 @@
 #define XE_RTL_H
 
 #include "kernel.h"
+#include "usb.h"
 
 #define RTL_PLA 0x0100u
 #define RTL_USB 0x0000u
@@ -44,21 +45,21 @@
 #define RTL_ADV_2500_FULL 0x40u
 #define RTL_ADV_ALL       0x6Fu
 
-u32 rtl_read_dword(u32 mcu, u32 addr, u32 *value);
-u32 rtl_read_word(u32 mcu, u32 addr, u32 *value);
-u32 rtl_write_word(u32 mcu, u32 addr, u32 value);
-u32 rtl_phy_read(u32 addr, u32 *value);
-u32 rtl_phy_write(u32 addr, u32 value);
+u32 rtl_read_dword(USB_DEV *dev, u32 mcu, u32 addr, u32 *value);
+u32 rtl_read_word(USB_DEV *dev, u32 mcu, u32 addr, u32 *value);
+u32 rtl_write_word(USB_DEV *dev, u32 mcu, u32 addr, u32 value);
+u32 rtl_phy_read(USB_DEV *dev, u32 addr, u32 *value);
+u32 rtl_phy_write(USB_DEV *dev, u32 addr, u32 value);
 
 /* Program the PHY's advertisement from RTL_ADV_* bits and restart negotiation.
  * Returns STATUS_SUCCESS or the first failing transfer's status. */
-u32 rtl_set_advertise(u32 advertise);
+u32 rtl_set_advertise(USB_DEV *dev, u32 advertise);
 
 /* Pure: the three advertisement register values for `advertise`, given what they
  * hold now (only the speed bits are changed). For tests/. */
 void rtl_advert_regs(u32 advertise, u32 *adv, u32 *ctrl1000, u32 *ctrl10g);
 
-void rtl_forget_page(void);     /* after a reset the window is the card's default */
+void rtl_forget_page(USB_DEV *dev);     /* after a reset the window is the card's default */
 
 /* Read by tests/xectl.py. */
 typedef struct {
@@ -66,6 +67,6 @@ typedef struct {
     u32 advertise_status;   /* of the last advertisement write */
 } RTL_STATS;
 
-extern volatile RTL_STATS rtl_stats;
+extern volatile RTL_STATS rtl_stats[USB_MAX_DEVICES];   /* by device slot */
 
 #endif /* XE_RTL_H */

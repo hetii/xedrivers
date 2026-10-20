@@ -160,7 +160,8 @@ typedef struct _URB {
     struct _URB   *Next;                        /* submit queue link */
     u32            Tag;
     u32            Busy;
-    u32            Spare;
+    struct USB_DEV *Dev;                        /* the device it goes to (usb_prepare) */
+    void          *Owner;                       /* the driver instance it belongs to */
 } URB;
 
 extern int   UsbdRegisterDriverObject(USBD_DRIVER_OBJECT *driver);

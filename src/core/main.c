@@ -52,19 +52,31 @@ volatile XE_CONFIG xe_config = { 0x58434647u, XE_MODE, XE_ADVERTISE, XE_IP,
  *   [4] ack counter   [5] result   [6] the request answered   [7] status */
 volatile u32 xe_cmd[8] = { 0 };
 
-static u32 seen_generation;
+static u32 seen_generation[USB_MAX_DEVICES];
+
+/* Command 2: UsbdResetDevice on slot [1] (0 when only one device is owned). */
+static u32 reset_device(u32 slot)
+{
+    USB_DEV *dev = slot < USB_MAX_DEVICES ? &usb_devs[slot] : 0;
+
+    return dev && dev->active ? (u32)UsbdResetDevice(dev->device)
+                              : STATUS_UNSUCCESSFUL;
+}
 
 static u32 run(u32 what)
 {
+    u32 i;
+
     switch (what) {
     case CMD_PING:
         return 0x50494E47u;
     case CMD_RESET:
-        return usb.active ? (u32)UsbdResetDevice(usb.device) : STATUS_UNSUCCESSFUL;
+        return reset_device(xe_cmd[1]);
     case CMD_CLAIM:
         return usb_claim_present();
     case CMD_RESTART:
-        seen_generation = 0;
+        for (i = 0; i < USB_MAX_DEVICES; i++)
+            seen_generation[i] = 0;
         return 0;
     default:
         if (bench_command(what, xe_cmd) || net_command(what, xe_cmd))
@@ -101,9 +113,21 @@ static void away_from_the_usb_processor(void)
     KeSetAffinityThread(self, 1u << WORKER_PROCESSOR, &previous);
 }
 
+/* Whether any device is owned: the boot claims stop once one is (the others that
+ * enumerated before us are reset by the same claim, see usb_claim_present). */
+static u32 owned(void)
+{
+    u32 i;
+
+    for (i = 0; i < USB_MAX_DEVICES; i++)
+        if (usb_devs[i].active)
+            return 1;
+    return 0;
+}
+
 static void worker(void *parameter)
 {
-    u32 tick, what;
+    u32 tick, what, i;
 
     (void)parameter;
     away_from_the_usb_processor();
@@ -116,16 +140,20 @@ static void worker(void *parameter)
 
         /* Ticks are 20 ms: the first claim one second in, then every five while
          * nothing has been offered, six tries in all. */
-        if (!usb.active && xe_state.claim_attempts < 6 &&
+        if (!owned() && xe_state.claim_attempts < 6 &&
             (tick == 50 || (tick > 50 && tick % 250 == 0))) {
             xe_state.claim_attempts++;
-            if (usb_claim_present() == 1)
+            if (usb_claim_present())
                 xe_state.claim_found++;
         }
 
-        if (usb.active && usb.generation != seen_generation) {
-            seen_generation = usb.generation;
-            net_bring_up();
+        for (i = 0; i < USB_MAX_DEVICES; i++) {
+            USB_DEV *dev = &usb_devs[i];
+
+            if (dev->active && dev->generation != seen_generation[i]) {
+                seen_generation[i] = dev->generation;
+                net_bring_up(dev);
+            }
         }
         net_tick();
 

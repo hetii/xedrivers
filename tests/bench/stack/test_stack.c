@@ -13,15 +13,13 @@
 u8 net_mac[ETH_ALEN];
 volatile NET_RX net_rx;
 volatile NET_LINK net_link_cb;
-volatile NET_STATS net_stats;
+volatile NET_STATS net_stats[NET_MAX];
 volatile USB_STATS usb_stats;
-USB_DEV usb;
 u32 net_tx(const u8 *frame, u32 length) { (void)frame; (void)length; return 0; }
 u32 net_link_up(void) { return 0; }
 u32 net_tx_space(void) { return 0; }
 volatile NET_TX_IDLE net_tx_idle;
 u32 net_speed_mbps(void) { return 0; }
-void *net_dma_alloc(u32 bytes) { (void)bytes; return 0; }
 void usb_sleep(u32 ms) { (void)ms; }
 
 static int failures;

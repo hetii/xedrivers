@@ -91,42 +91,64 @@
 
 volatile u32 cdc_tx_eager = 2;
 volatile u32 cdc_ncm_ndp_end = 1;
-volatile CDC_STATS cdc_stats;
+volatile CDC_STATS cdc_stats[CDC_MAX];
 
-static CDC_LAYOUT layout;
-static NCM_PARAMS ncm_params;
-static u32 ncm;                 /* this bring-up uses NCM */
-static void *ep_in;
-static void *ep_out;
-static void *ep_intr;
+#define NOTE_KINDS 4
 
-static URB rx_urb[RX_SLOTS];
-static u8 *rx_buf[RX_SLOTS];
-static u32 rx_count;
-static u32 rx_size;
-static u32 rx_consecutive_errors;
+/* One device's worth of everything above: CDC_MAX of them, so two CDC cards (or a
+ * card and an RTL8156) run at once. Completions find theirs through the request's
+ * Owner, the receive DPC through its context. */
+typedef struct CDC {
+    u32 in_use;
+    NET_DEV *nd;
+    USB_DEV *dev;
+    volatile CDC_STATS *st;
+    CDC_LAYOUT layout;
+    NCM_PARAMS ncm_params;
+    u32 ncm;                    /* this bring-up uses NCM */
+    void *ep_in;
+    void *ep_out;
+    void *ep_intr;
+    URB rx_urb[RX_SLOTS];
+    u8 *rx_buf[RX_SLOTS];
+    u32 rx_count;
+    u32 rx_size;
+    u32 rx_consecutive_errors;
+    URB tx_urb[TX_SLOTS];
+    u8 *tx_buf[TX_SLOTS];
+    u32 tx_len[TX_SLOTS];
+    u32 tx_frames_in[TX_SLOTS];
+    u32 tx_count;
+    u32 tx_size;
+    u32 tx_next;
+    u32 tx_inflight;
+    KSPIN_LOCK tx_lock;
+    NCM_TX ntb;                 /* the block being filled */
+    u32 ntb_slot;
+    u16 ntb_sequence;
+    URB intr_urb;
+    u8 *intr_buf;
+    u32 intr_consecutive_errors;
+    u8 *ctrl_buf;
+    volatile u32 running;
+    KDPC rx_dpc;
+    KSPIN_LOCK rx_lock;
+    URB *rx_head, *rx_tail;
+    u16 bcd_usb;                /* the device descriptor's, read in find_config */
+    u8 last_note[NOTE_KINDS][16];
+    u32 last_note_len[NOTE_KINDS];
+    volatile u32 intr_parked;   /* 1: waiting for the tick to re-arm */
+    u32 intr_parked_ticks;
+} CDC;
 
-static URB tx_urb[TX_SLOTS];
-static u8 *tx_buf[TX_SLOTS];
-static u32 tx_len[TX_SLOTS];
-static u32 tx_frames_in[TX_SLOTS];
-static u32 tx_count;
-static u32 tx_size;
-static u32 tx_next;
-static u32 tx_inflight;
-static KSPIN_LOCK tx_lock;
+static CDC cdc_inst[CDC_MAX];
 
-static NCM_TX ntb;              /* the block being filled */
-static u32 ntb_slot = NONE;
-static u16 ntb_sequence;
 
-static URB intr_urb;
-static u8 *intr_buf;
-static u32 intr_consecutive_errors;
 
-static u8 *ctrl_buf;
 
-static volatile u32 running;
+
+
+
 
 static u16 le16(const u8 *p)
 {
@@ -139,14 +161,16 @@ static void rx_complete(URB *urb, u32 status);
 
 static void rx_queue(URB *urb)
 {
-    usb_prepare(urb, ep_in, rx_complete, rx_buf[urb->Tag], rx_size, 0);
+    CDC *c = (CDC *)urb->Owner;
+    usb_prepare(urb, c->dev, c->ep_in, rx_complete, c->rx_buf[urb->Tag], c->rx_size, 0);
     usb_submit(urb);
 }
 
 static void deliver(const u8 *frame, u32 length, void *context)
 {
-    (void)context;
-    net_frame_in(frame, length);
+    CDC *c = (CDC *)context;
+
+    net_frame_in(c->nd, frame, length);
 }
 
 /* Where received frames are handed up. Inline, they are handed up from the USB
@@ -160,38 +184,36 @@ static void deliver(const u8 *frame, u32 length, void *context)
  * keep it 0. */
 volatile u32 cdc_rx_cpu = 0;
 
-static KDPC rx_dpc;
-static KSPIN_LOCK rx_lock;
-static URB *rx_head, *rx_tail;
 
 static void rx_process(URB *urb)
 {
-    if (ncm) {
-        cdc_stats.rx_ntbs++;
-        if (cdc_ncm_parse_ntb(rx_buf[urb->Tag], urb->Actual, deliver, 0) < 0)
-            cdc_stats.rx_ntb_errors++;
+    CDC *c = (CDC *)urb->Owner;
+    if (c->ncm) {
+        c->st->rx_ntbs++;
+        if (cdc_ncm_parse_ntb(c->rx_buf[urb->Tag], urb->Actual, deliver, c) < 0)
+            c->st->rx_ntb_errors++;
     } else {
-        deliver(rx_buf[urb->Tag], urb->Actual, 0);
+        deliver(c->rx_buf[urb->Tag], urb->Actual, c);
     }
 }
 
 static void rx_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
 {
+    CDC *c = (CDC *)context;
     URB *list, *next;
 
     (void)dpc;
-    (void)context;
     (void)a1;
     (void)a2;
-    KeAcquireSpinLockAtRaisedIrql(&rx_lock);
-    list = rx_head;
-    rx_head = rx_tail = 0;
-    KeReleaseSpinLockFromRaisedIrql(&rx_lock);
+    KeAcquireSpinLockAtRaisedIrql(&c->rx_lock);
+    list = c->rx_head;
+    c->rx_head = c->rx_tail = 0;
+    KeReleaseSpinLockFromRaisedIrql(&c->rx_lock);
 
     for (; list; list = next) {
         next = list->Next;
         list->Next = 0;
-        if (!running || !usb.active) {
+        if (!c->running || !c->dev->active) {
             list->Busy = 0;
             continue;
         }
@@ -202,37 +224,38 @@ static void rx_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
 
 static void rx_complete_timed(URB *urb, u32 status)
 {
+    CDC *c = (CDC *)urb->Owner;
     u32 cpu;
 
-    if (!running || !usb.active) {
+    if (!c->running || !c->dev->active) {
         urb->Busy = 0;
         return;
     }
 
     if (NT_SUCCESS(status)) {
-        rx_consecutive_errors = 0;
+        c->rx_consecutive_errors = 0;
         cpu = cdc_rx_cpu;
         if (cpu) {
-            cdc_stats.rx_deferred++;
-            KeAcquireSpinLockAtRaisedIrql(&rx_lock);
+            c->st->rx_deferred++;
+            KeAcquireSpinLockAtRaisedIrql(&c->rx_lock);
             urb->Next = 0;
-            if (rx_tail)
-                rx_tail->Next = urb;
+            if (c->rx_tail)
+                c->rx_tail->Next = urb;
             else
-                rx_head = urb;
-            rx_tail = urb;
-            if (!rx_dpc.InsertedNumber)
-                rx_dpc.TargetNumber = (u8)cpu;
-            KeReleaseSpinLockFromRaisedIrql(&rx_lock);
-            KeInsertQueueDpc(&rx_dpc, 0, 0);
+                c->rx_head = urb;
+            c->rx_tail = urb;
+            if (!c->rx_dpc.InsertedNumber)
+                c->rx_dpc.TargetNumber = (u8)cpu;
+            KeReleaseSpinLockFromRaisedIrql(&c->rx_lock);
+            KeInsertQueueDpc(&c->rx_dpc, 0, 0);
             return;
         }
         rx_process(urb);
     } else {
-        net_stats.rx_errors++;
-        net_stats.rx_last_error = status;
-        if (++rx_consecutive_errors > RX_ERROR_LIMIT) {
-            net_stats.rx_stopped++;
+        c->nd->st->rx_errors++;
+        c->nd->st->rx_last_error = status;
+        if (++c->rx_consecutive_errors > RX_ERROR_LIMIT) {
+            c->nd->st->rx_stopped++;
             urb->Busy = 0;
             return;
         }
@@ -255,157 +278,162 @@ static void rx_complete(URB *urb, u32 status)
 
 static void tx_complete(URB *urb, u32 status);
 
-static void tx_send(u32 i)
+static void tx_send(CDC *c, u32 i)
 {
     if (i == NONE)
         return;
-    usb_prepare(&tx_urb[i], ep_out, tx_complete, tx_buf[i], tx_len[i], 0);
-    usb_submit(&tx_urb[i]);
+    usb_prepare(&c->tx_urb[i], c->dev, c->ep_out, tx_complete, c->tx_buf[i], c->tx_len[i], 0);
+    usb_submit(&c->tx_urb[i]);
 }
 
 /* Close the open NTB and return its slot for sending, or NONE. Lock held. */
-static u32 ntb_close_locked(void)
+static u32 ntb_close_locked(CDC *c)
 {
-    u32 i = ntb_slot;
+    u32 i = c->ntb_slot;
 
-    if (i == NONE || !ntb.count)
+    if (i == NONE || !c->ntb.count)
         return NONE;
-    tx_len[i] = cdc_ncm_tx_finish(&ntb, layout.out_max);
-    tx_frames_in[i] = ntb.count;
-    ntb_slot = NONE;
-    tx_inflight++;
-    cdc_stats.tx_ntbs++;
+    c->tx_len[i] = cdc_ncm_tx_finish(&c->ntb, c->layout.out_max);
+    c->tx_frames_in[i] = c->ntb.count;
+    c->ntb_slot = NONE;
+    c->tx_inflight++;
+    c->st->tx_ntbs++;
     return i;
 }
 
 /* Take the next slot and start a block in it; 0 if the ring is full. Lock held. */
-static u32 ntb_open_locked(void)
+static u32 ntb_open_locked(CDC *c)
 {
-    u32 i = tx_next;
+    u32 i = c->tx_next;
 
-    if (tx_urb[i].Busy)
+    if (c->tx_urb[i].Busy)
         return 0;
-    tx_urb[i].Busy = 1;
-    tx_next = (i + 1) % tx_count;
-    ntb_slot = i;
-    cdc_ncm_tx_begin(&ntb, tx_buf[i], tx_size, &ncm_params, ntb_sequence++,
+    c->tx_urb[i].Busy = 1;
+    c->tx_next = (i + 1) % c->tx_count;
+    c->ntb_slot = i;
+    cdc_ncm_tx_begin(&c->ntb, c->tx_buf[i], c->tx_size, &c->ncm_params, c->ntb_sequence++,
                      cdc_ncm_ndp_end);
     return 1;
 }
 
 static void tx_complete(URB *urb, u32 status)
 {
+    CDC *c = (CDC *)urb->Owner;
     u32 irql, send = NONE, i = urb->Tag, length = urb->Length;
     PROF_START(t);
 
-    irql = KfAcquireSpinLock(&tx_lock);
+    irql = KfAcquireSpinLock(&c->tx_lock);
     if (NT_SUCCESS(status)) {
-        net_stats.tx_frames += tx_frames_in[i];
-        net_add64(&net_stats.tx_bytes, &net_stats.tx_bytes_hi, urb->Length);
+        c->nd->st->tx_frames += c->tx_frames_in[i];
+        net_add64(&c->nd->st->tx_bytes, &c->nd->st->tx_bytes_hi, urb->Length);
     } else {
-        net_stats.tx_errors++;
-        net_stats.tx_last_error = status;
+        c->nd->st->tx_errors++;
+        c->nd->st->tx_last_error = status;
     }
-    tx_inflight--;
-    net_stats.tx_inflight = tx_inflight;
+    c->tx_inflight--;
+    c->nd->st->tx_inflight = c->tx_inflight;
     urb->Busy = 0;
-    if (ncm && tx_inflight < cdc_tx_eager)
-        send = ntb_close_locked();
-    KfReleaseSpinLock(&tx_lock, irql);
+    if (c->ncm && c->tx_inflight < cdc_tx_eager)
+        send = ntb_close_locked(c);
+    KfReleaseSpinLock(&c->tx_lock, irql);
 
-    tx_send(send);
-    net_tx_done();
+    tx_send(c, send);
+    net_tx_done(c->nd);
     PROF_END(tx_done, t, length);
     (void)length;
 }
 
-u32 cdc_tx_space(void)
+u32 cdc_tx_space(NET_DEV *nd)
 {
-    if (!running)
+    CDC *c = (CDC *)nd->priv;
+
+    if (!c->running)
         return 0;
-    if (ncm && ntb_slot != NONE)
+    if (c->ncm && c->ntb_slot != NONE)
         return 1;
-    return !tx_urb[tx_next].Busy;
+    return !c->tx_urb[c->tx_next].Busy;
 }
 
-static u32 tx_ecm(const u8 *frame, u32 length)
+static u32 tx_ecm(CDC *c, const u8 *frame, u32 length)
 {
     u32 irql, i, n;
     u8 *dst;
 
     /* Slots are taken in order and complete in order on one endpoint, so a busy
      * next slot means the ring is full. */
-    irql = KfAcquireSpinLock(&tx_lock);
-    i = tx_next;
-    if (tx_urb[i].Busy) {
-        KfReleaseSpinLock(&tx_lock, irql);
-        net_stats.tx_drops++;
+    irql = KfAcquireSpinLock(&c->tx_lock);
+    i = c->tx_next;
+    if (c->tx_urb[i].Busy) {
+        KfReleaseSpinLock(&c->tx_lock, irql);
+        c->nd->st->tx_drops++;
         return 0;
     }
-    tx_urb[i].Busy = 1;
-    tx_next = (i + 1) % tx_count;
-    tx_inflight++;
-    net_stats.tx_inflight = tx_inflight;
-    KfReleaseSpinLock(&tx_lock, irql);
+    c->tx_urb[i].Busy = 1;
+    c->tx_next = (i + 1) % c->tx_count;
+    c->tx_inflight++;
+    c->nd->st->tx_inflight = c->tx_inflight;
+    KfReleaseSpinLock(&c->tx_lock, irql);
 
-    dst = tx_buf[i];
+    dst = c->tx_buf[i];
     {
         PROF_START(t);
         xe_copy(dst, frame, length);
         PROF_END(copy, t, length);
     }
     n = length;
-    if (layout.out_max && (n % layout.out_max) == 0)
+    if (c->layout.out_max && (n % c->layout.out_max) == 0)
         dst[n++] = 0;
-    tx_len[i] = n;
-    tx_frames_in[i] = 1;
-    tx_send(i);
+    c->tx_len[i] = n;
+    c->tx_frames_in[i] = 1;
+    tx_send(c, i);
     return 1;
 }
 
-static u32 tx_ncm(const u8 *frame, u32 length)
+static u32 tx_ncm(CDC *c, const u8 *frame, u32 length)
 {
     u32 irql, full = NONE, now = NONE, queued = 0;
 
-    irql = KfAcquireSpinLock(&tx_lock);
-    if (ntb_slot == NONE && !ntb_open_locked())
+    irql = KfAcquireSpinLock(&c->tx_lock);
+    if (c->ntb_slot == NONE && !ntb_open_locked(c))
         goto out;
-    if (!cdc_ncm_tx_add(&ntb, frame, length)) {
-        full = ntb_close_locked();
-        if (!ntb_open_locked() || !cdc_ncm_tx_add(&ntb, frame, length))
+    if (!cdc_ncm_tx_add(&c->ntb, frame, length)) {
+        full = ntb_close_locked(c);
+        if (!ntb_open_locked(c) || !cdc_ncm_tx_add(&c->ntb, frame, length))
             goto out;
     }
     queued = 1;
-    if (tx_inflight < cdc_tx_eager)
-        now = ntb_close_locked();
+    if (c->tx_inflight < cdc_tx_eager)
+        now = ntb_close_locked(c);
 out:
-    net_stats.tx_inflight = tx_inflight;
-    KfReleaseSpinLock(&tx_lock, irql);
+    c->nd->st->tx_inflight = c->tx_inflight;
+    KfReleaseSpinLock(&c->tx_lock, irql);
 
-    tx_send(full);
-    tx_send(now);
+    tx_send(c, full);
+    tx_send(c, now);
     if (!queued)
-        net_stats.tx_drops++;
+        c->nd->st->tx_drops++;
     return queued;
 }
 
-u32 cdc_xmit(const u8 *frame, u32 length)
+u32 cdc_xmit(NET_DEV *nd, const u8 *frame, u32 length)
 {
-    if (!running) {
-        net_stats.tx_drops++;
+    CDC *c = (CDC *)nd->priv;
+
+    if (!c->running) {
+        c->nd->st->tx_drops++;
         return 0;
     }
-    return ncm ? tx_ncm(frame, length) : tx_ecm(frame, length);
+    return c->ncm ? tx_ncm(c, frame, length) : tx_ecm(c, frame, length);
 }
 
 /* --- link notifications ------------------------------------------------------ */
 
 static void intr_complete(URB *urb, u32 status);
 
-static void intr_queue(void)
+static void intr_queue(CDC *c)
 {
-    usb_prepare(&intr_urb, ep_intr, intr_complete, intr_buf, layout.intr_max, 0);
-    usb_submit(&intr_urb);
+    usb_prepare(&c->intr_urb, c->dev, c->ep_intr, intr_complete, c->intr_buf, c->layout.intr_max, 0);
+    usb_submit(&c->intr_urb);
 }
 
 /* The interrupt endpoint, and a card that never stops talking on it.
@@ -430,19 +458,12 @@ static void intr_queue(void)
  * transfers a second. */
 #define INTR_QUIET_TICKS 30     /* ~1 s of worker ticks, ~33 ms each as measured */
 
-static u16 bcd_usb;             /* the device descriptor's, read in find_config */
-/* The last notification of each kind seen, to tell a repeat from news. */
-#define NOTE_KINDS 4
-static u8 last_note[NOTE_KINDS][16];
-static u32 last_note_len[NOTE_KINDS];
-static volatile u32 intr_parked;        /* 1: waiting for the tick to re-arm */
-static u32 intr_parked_ticks;
 
-static u32 intr_interval_ms(u32 b_interval)
+static u32 intr_interval_ms(CDC *c, u32 b_interval)
 {
     u32 ms = b_interval;
 
-    if (bcd_usb >= 0x0200) {    /* high speed: 2^(bInterval-1) microframes */
+    if (c->bcd_usb >= 0x0200) {    /* high speed: 2^(bInterval-1) microframes */
         if (b_interval < 1)
             b_interval = 1;
         ms = b_interval > 9 ? 256 : (1u << (b_interval - 1)) / 8;
@@ -454,21 +475,21 @@ static u32 intr_interval_ms(u32 b_interval)
 
 /* 1 if `data` repeats the last notification of its kind; otherwise it is
  * remembered (in a free slot, or the last one) and 0. */
-static u32 repeat_of_last(const u8 *data, u32 length)
+static u32 repeat_of_last(CDC *c, const u8 *data, u32 length)
 {
     u32 k, i, free = NOTE_KINDS - 1;
 
-    if (length < 2 || length > sizeof(last_note[0]))
+    if (length < 2 || length > sizeof(c->last_note[0]))
         return 0;
     for (k = 0; k < NOTE_KINDS; k++) {
-        if (!last_note_len[k]) {
+        if (!c->last_note_len[k]) {
             free = k;
             break;
         }
-        if (last_note[k][1] != data[1])
+        if (c->last_note[k][1] != data[1])
             continue;
-        if (last_note_len[k] == length) {
-            for (i = 0; i < length && last_note[k][i] == data[i]; i++)
+        if (c->last_note_len[k] == length) {
+            for (i = 0; i < length && c->last_note[k][i] == data[i]; i++)
                 ;
             if (i == length)
                 return 1;
@@ -477,69 +498,72 @@ static u32 repeat_of_last(const u8 *data, u32 length)
         break;
     }
     for (i = 0; i < length; i++)
-        last_note[free][i] = data[i];
-    last_note_len[free] = length;
+        c->last_note[free][i] = data[i];
+    c->last_note_len[free] = length;
     return 0;
 }
 
 static void intr_complete(URB *urb, u32 status)
 {
+    CDC *c = (CDC *)urb->Owner;
     u32 at, used;
     CDC_NOTE note;
 
-    if (!running || !usb.active) {
+    if (!c->running || !c->dev->active) {
         urb->Busy = 0;
         return;
     }
 
     if (NT_SUCCESS(status)) {
-        intr_consecutive_errors = 0;
+        c->intr_consecutive_errors = 0;
         for (at = 0; at < urb->Actual; at += used) {
-            used = cdc_parse_notification(intr_buf + at, urb->Actual - at, &note);
+            used = cdc_parse_notification(c->intr_buf + at, urb->Actual - at, &note);
             if (!used)
                 break;
-            cdc_stats.intr_events++;
-            cdc_stats.last_notify[0] = (u32)intr_buf[at + 1] << 16 |
-                                       le16(intr_buf + at + 2);
+            c->st->intr_events++;
+            c->st->last_notify[0] = (u32)c->intr_buf[at + 1] << 16 |
+                                       le16(c->intr_buf + at + 2);
             if (note.kind == CDC_NOTE_LINK) {
-                net_link_report(note.link_up);
+                net_link_report(c->nd, note.link_up);
             } else if (note.kind == CDC_NOTE_SPEED) {
-                cdc_stats.last_notify[1] = note.down_bps;
-                net_speed_report(note.down_bps / 1000000u);
+                c->st->last_notify[1] = note.down_bps;
+                net_speed_report(c->nd, note.down_bps / 1000000u);
             }
         }
     } else {
-        cdc_stats.intr_errors++;
-        if (++intr_consecutive_errors > INTR_ERROR_LIMIT) {
+        c->st->intr_errors++;
+        if (++c->intr_consecutive_errors > INTR_ERROR_LIMIT) {
             urb->Busy = 0;
             return;
         }
     }
-    if (NT_SUCCESS(status) && urb->Actual && repeat_of_last(intr_buf, urb->Actual)) {
-        cdc_stats.intr_parked++;
+    if (NT_SUCCESS(status) && urb->Actual && repeat_of_last(c, c->intr_buf, urb->Actual)) {
+        c->st->intr_parked++;
         urb->Busy = 0;
-        intr_parked_ticks = 0;
+        c->intr_parked_ticks = 0;
         mem_sync();
-        intr_parked = 1;
+        c->intr_parked = 1;
         return;
     }
-    intr_queue();
+    intr_queue(c);
 }
 
 /* From the worker: re-arm a parked interrupt endpoint once it has been quiet. */
-void cdc_tick(void)
+void cdc_tick(NET_DEV *nd)
 {
-    if (!intr_parked || !running || !usb.active)
+    CDC *c = (CDC *)nd->priv;
+
+    if (!c->intr_parked || !c->running || !c->dev->active)
         return;
-    if (++intr_parked_ticks < INTR_QUIET_TICKS)
+    if (++c->intr_parked_ticks < INTR_QUIET_TICKS)
         return;
-    intr_parked = 0;
-    intr_queue();
+    c->intr_parked = 0;
+    intr_queue(c);
 }
 
 /* --- bring-up ---------------------------------------------------------------- */
 
-u32 cdc_control(u8 type, u8 request, u16 value, u16 index, u16 length, u32 *actual)
+static u32 cdc_control(CDC *c, u8 type, u8 request, u16 value, u16 index, u16 length, u32 *actual)
 {
     u8 setup[8];
 
@@ -551,225 +575,259 @@ u32 cdc_control(u8 type, u8 request, u16 value, u16 index, u16 length, u32 *actu
     setup[5] = (u8)(index >> 8);
     setup[6] = (u8)(length & 0xFF);
     setup[7] = (u8)(length >> 8);
-    return usb_control(setup, ctrl_buf, length, actual, 1000);
+    return usb_control(c->dev, setup, c->ctrl_buf, length, actual, 1000);
 }
 
-u8 *cdc_ctrl_buffer(void)
+static u8 *cdc_ctrl_buffer(CDC *c)
 {
-    return ctrl_buf;
+    return c->ctrl_buf;
 }
 
-static u32 fail(u32 step, u32 status)
+static u32 fail(CDC *c, u32 step, u32 status)
 {
-    net_stats.step = step;
-    net_stats.step_status = status;
+    c->nd->st->step = step;
+    c->nd->st->step_status = status;
     return step;
 }
 
 /* The control buffers once, from the core's scratch block. */
-static u32 alloc_control(void)
+static u32 alloc_control(CDC *c)
 {
-    if (!ctrl_buf) {
-        ctrl_buf = (u8 *)net_dma_scratch(CTRL_SIZE);
-        intr_buf = (u8 *)net_dma_scratch(INTR_SIZE);
+    if (!c->ctrl_buf) {
+        c->ctrl_buf = (u8 *)net_dma_scratch(CTRL_SIZE);
+        c->intr_buf = (u8 *)net_dma_scratch(INTR_SIZE);
     }
-    return ctrl_buf && intr_buf;
+    return c->ctrl_buf && c->intr_buf;
 }
 
 /* The rings are carved again on every bring-up, because ECM and NCM want different
  * counts and sizes out of the same block. */
-static u32 alloc_rings(void)
+static u32 alloc_rings(CDC *c)
 {
     u32 i;
 
-    if (!net_dma_begin(DMA_BYTES))
+    if (!net_dma_begin(c->nd, DMA_BYTES))
         return 0;
 
-    rx_count = ncm ? NCM_RX_COUNT : RX_COUNT;
-    rx_size = ncm ? NTB_SIZE : FRAME_SIZE;
-    tx_count = ncm ? NCM_TX_COUNT : TX_COUNT;
-    tx_size = ncm ? NTB_SIZE : FRAME_SIZE;
+    c->rx_count = c->ncm ? NCM_RX_COUNT : RX_COUNT;
+    c->rx_size = c->ncm ? NTB_SIZE : FRAME_SIZE;
+    c->tx_count = c->ncm ? NCM_TX_COUNT : TX_COUNT;
+    c->tx_size = c->ncm ? NTB_SIZE : FRAME_SIZE;
 
-    for (i = 0; i < rx_count; i++) {
-        rx_buf[i] = (u8 *)net_dma_alloc(rx_size);
-        rx_urb[i].Tag = i;
+    for (i = 0; i < c->rx_count; i++) {
+        c->rx_buf[i] = (u8 *)net_dma_alloc(c->nd, c->rx_size);
+        c->rx_urb[i].Tag = i;
+        c->rx_urb[i].Owner = c;
     }
-    for (i = 0; i < tx_count; i++) {
-        tx_buf[i] = (u8 *)net_dma_alloc(tx_size);
-        tx_urb[i].Tag = i;
+    for (i = 0; i < c->tx_count; i++) {
+        c->tx_buf[i] = (u8 *)net_dma_alloc(c->nd, c->tx_size);
+        c->tx_urb[i].Tag = i;
+        c->tx_urb[i].Owner = c;
     }
-    return rx_buf[rx_count - 1] && tx_buf[tx_count - 1];
+    return c->rx_buf[c->rx_count - 1] && c->tx_buf[c->tx_count - 1];
 }
 
 /* Every configuration the device has, until one parses as the subclass wanted. */
-static u32 find_config(u32 subclass)
+static u32 find_config(CDC *c, u32 subclass)
 {
     u32 index, actual, status, total, configs;
 
-    status = cdc_control(0x80, 0x06, 0x0100, 0, 18, &actual);
+    status = cdc_control(c, 0x80, 0x06, 0x0100, 0, 18, &actual);
     if (!NT_SUCCESS(status) || actual < 18)
-        return fail(CDC_STEP_DEVICE_DESC, status);
-    bcd_usb = le16(ctrl_buf + 2);
-    configs = ctrl_buf[17];
+        return fail(c, CDC_STEP_DEVICE_DESC, status);
+    c->bcd_usb = le16(c->ctrl_buf + 2);
+    configs = c->ctrl_buf[17];
 
     for (index = 0; index < configs; index++) {
-        status = cdc_control(0x80, 0x06, (u16)(0x0200 | index), 0, 9, &actual);
+        status = cdc_control(c, 0x80, 0x06, (u16)(0x0200 | index), 0, 9, &actual);
         if (!NT_SUCCESS(status) || actual < 9)
-            return fail(CDC_STEP_CONFIG_DESC, status);
-        total = le16(ctrl_buf + 2);
+            return fail(c, CDC_STEP_CONFIG_DESC, status);
+        total = le16(c->ctrl_buf + 2);
         if (total > CTRL_SIZE)
             continue;
-        status = cdc_control(0x80, 0x06, (u16)(0x0200 | index), 0, (u16)total, &actual);
+        status = cdc_control(c, 0x80, 0x06, (u16)(0x0200 | index), 0, (u16)total, &actual);
         if (!NT_SUCCESS(status))
-            return fail(CDC_STEP_CONFIG_DESC, status);
-        if (cdc_parse_config(ctrl_buf, actual, &layout) && layout.subclass == subclass)
+            return fail(c, CDC_STEP_CONFIG_DESC, status);
+        if (cdc_parse_config(c->ctrl_buf, actual, &c->layout) && c->layout.subclass == subclass)
             return 0;
     }
-    return fail(CDC_STEP_LAYOUT, configs);
+    return fail(c, CDC_STEP_LAYOUT, configs);
 }
 
 /* GET_NTB_PARAMETERS, then ask for input blocks no larger than our buffers. The
  * second is optional in the spec, so its failure is recorded and lived with --
  * unless the device's own size is larger than a buffer, which would babble. */
-static u32 ncm_setup(void)
+static u32 ncm_setup(CDC *c)
 {
     u32 status, actual, want = NTB_SIZE;
 
-    status = cdc_control(0xA1, 0x80, 0, layout.comm_interface, 28, &actual);
-    if (!NT_SUCCESS(status) || !cdc_ncm_parse_params(ctrl_buf, actual, &ncm_params))
-        return fail(CDC_STEP_NTB_PARAMS, status);
-    cdc_stats.ntb_in_max = ncm_params.in_max;
-    cdc_stats.ntb_out_max = ncm_params.out_max;
-    cdc_stats.ntb_out_align = (u32)ncm_params.out_divisor << 16 |
-                              ncm_params.out_remainder;
-    cdc_stats.ntb_out_datagrams = ncm_params.out_max_datagrams;
+    status = cdc_control(c, 0xA1, 0x80, 0, c->layout.comm_interface, 28, &actual);
+    if (!NT_SUCCESS(status) || !cdc_ncm_parse_params(c->ctrl_buf, actual, &c->ncm_params))
+        return fail(c, CDC_STEP_NTB_PARAMS, status);
+    c->st->ntb_in_max = c->ncm_params.in_max;
+    c->st->ntb_out_max = c->ncm_params.out_max;
+    c->st->ntb_out_align = (u32)c->ncm_params.out_divisor << 16 |
+                              c->ncm_params.out_remainder;
+    c->st->ntb_out_datagrams = c->ncm_params.out_max_datagrams;
 
-    cdc_stats.ntb_formats = ncm_params.formats;
+    c->st->ntb_formats = c->ncm_params.formats;
 
     /* What Linux cdc_ncm sends next, all while the data interface is at alt 0,
      * all optional in the spec and so recorded rather than required: NTB16 when
      * the device also does NTB32, no CRC appended, and the largest datagram
      * from the Ethernet functional descriptor. A device left expecting CRCs or
      * NTB32 accepts our NTB16/NCM0 blocks and transmits nothing. */
-    cdc_stats.ntb_format_status = 0xFFFFFFFFu;
-    if (ncm_params.formats & 2)
-        cdc_stats.ntb_format_status = cdc_control(0x21, 0x84, 0, layout.comm_interface,
+    c->st->ntb_format_status = 0xFFFFFFFFu;
+    if (c->ncm_params.formats & 2)
+        c->st->ntb_format_status = cdc_control(c, 0x21, 0x84, 0, c->layout.comm_interface,
                                               0, 0);
-    cdc_stats.crc_status = cdc_control(0x21, 0x8A, 0, layout.comm_interface, 0, 0);
-    if (layout.max_segment) {
-        ctrl_buf[0] = (u8)layout.max_segment;
-        ctrl_buf[1] = (u8)(layout.max_segment >> 8);
-        cdc_stats.dgram_status = cdc_control(0x21, 0x88, 0, layout.comm_interface, 2, 0);
+    c->st->crc_status = cdc_control(c, 0x21, 0x8A, 0, c->layout.comm_interface, 0, 0);
+    if (c->layout.max_segment) {
+        c->ctrl_buf[0] = (u8)c->layout.max_segment;
+        c->ctrl_buf[1] = (u8)(c->layout.max_segment >> 8);
+        c->st->dgram_status = cdc_control(c, 0x21, 0x88, 0, c->layout.comm_interface, 2, 0);
     }
 
-    if (ncm_params.in_max != want) {
-        ctrl_buf[0] = (u8)want;
-        ctrl_buf[1] = (u8)(want >> 8);
-        ctrl_buf[2] = (u8)(want >> 16);
-        ctrl_buf[3] = (u8)(want >> 24);
-        status = cdc_control(0x21, 0x86, 0, layout.comm_interface, 4, 0);
-        cdc_stats.ntb_input_status = status;
-        if (!NT_SUCCESS(status) && ncm_params.in_max > NTB_SIZE)
-            return fail(CDC_STEP_NTB_PARAMS, status);
+    if (c->ncm_params.in_max != want) {
+        c->ctrl_buf[0] = (u8)want;
+        c->ctrl_buf[1] = (u8)(want >> 8);
+        c->ctrl_buf[2] = (u8)(want >> 16);
+        c->ctrl_buf[3] = (u8)(want >> 24);
+        status = cdc_control(c, 0x21, 0x86, 0, c->layout.comm_interface, 4, 0);
+        c->st->ntb_input_status = status;
+        if (!NT_SUCCESS(status) && c->ncm_params.in_max > NTB_SIZE)
+            return fail(c, CDC_STEP_NTB_PARAMS, status);
     }
     return 0;
 }
 
-u32 cdc_start(void)
+/* A free instance for `nd`'s device, or 0 when CDC_MAX are in use. */
+static CDC *take_instance(NET_DEV *nd)
 {
+    u32 i;
+
+    for (i = 0; i < CDC_MAX; i++) {
+        CDC *c = &cdc_inst[i];
+
+        if (c->in_use && c->nd != nd)
+            continue;
+        c->in_use = 1;
+        c->nd = nd;
+        c->dev = nd->usb;
+        c->st = &cdc_stats[i];
+        c->ntb_slot = NONE;
+        c->intr_urb.Owner = c;
+        nd->priv = c;
+        return c;
+    }
+    return 0;
+}
+
+u32 cdc_start(NET_DEV *nd)
+{
+    CDC *c = take_instance(nd);
     u32 i, status, actual;
 
-    running = 0;
-    intr_parked = 0;
+    if (!c) {
+        nd->st->step = CDC_STEP_DMA;
+        return CDC_STEP_DMA;
+    }
+    c->running = 0;
+    c->intr_parked = 0;
     for (i = 0; i < NOTE_KINDS; i++)
-        last_note_len[i] = 0;
-    rx_consecutive_errors = 0;
-    intr_consecutive_errors = 0;
-    ep_in = ep_out = ep_intr = 0;
-    ncm = xe_config.transport == XE_TRANSPORT_NCM;
+        c->last_note_len[i] = 0;
+    c->rx_consecutive_errors = 0;
+    c->intr_consecutive_errors = 0;
+    c->ep_in = c->ep_out = c->ep_intr = 0;
+    c->ncm = xe_config.transport == XE_TRANSPORT_NCM;
 
-    if (!alloc_control())
-        return fail(CDC_STEP_DMA, 0);
+    if (!alloc_control(c))
+        return fail(c, CDC_STEP_DMA, 0);
 
     /* The transport asked for, else the other one: a device may have only one. */
-    if (find_config(ncm ? CDC_SUBCLASS_NCM : CDC_SUBCLASS_ECM)) {
-        if (net_stats.step != CDC_STEP_LAYOUT)
-            return net_stats.step;
-        ncm = !ncm;
-        if (find_config(ncm ? CDC_SUBCLASS_NCM : CDC_SUBCLASS_ECM))
-            return net_stats.step;
+    if (find_config(c, c->ncm ? CDC_SUBCLASS_NCM : CDC_SUBCLASS_ECM)) {
+        if (c->nd->st->step != CDC_STEP_LAYOUT)
+            return c->nd->st->step;
+        c->ncm = !c->ncm;
+        if (find_config(c, c->ncm ? CDC_SUBCLASS_NCM : CDC_SUBCLASS_ECM))
+            return c->nd->st->step;
     }
-    if (!alloc_rings())
-        return fail(CDC_STEP_DMA, 0);
-    cdc_stats.transport = ncm;
-    cdc_stats.config_value = layout.config_value;
-    cdc_stats.data_interface = layout.data_interface;
+    if (!alloc_rings(c))
+        return fail(c, CDC_STEP_DMA, 0);
+    c->st->transport = c->ncm;
+    c->st->config_value = c->layout.config_value;
+    c->st->data_interface = c->layout.data_interface;
 
-    if (layout.mac_string) {
-        status = cdc_control(0x80, 0x06, (u16)(0x0300 | layout.mac_string), 0x0409, 255,
+    if (c->layout.mac_string) {
+        status = cdc_control(c, 0x80, 0x06, (u16)(0x0300 | c->layout.mac_string), 0x0409, 255,
                          &actual);
-        if (!NT_SUCCESS(status) || !cdc_parse_mac(ctrl_buf, actual, net_mac))
-            return fail(CDC_STEP_MAC, status);
+        if (!NT_SUCCESS(status) || !cdc_parse_mac(c->ctrl_buf, actual, c->nd->mac))
+            return fail(c, CDC_STEP_MAC, status);
     }
 
-    status = cdc_control(0x00, 0x09, layout.config_value, 0, 0, 0);
+    status = cdc_control(c, 0x00, 0x09, c->layout.config_value, 0, 0, 0);
     if (!NT_SUCCESS(status))
-        return fail(CDC_STEP_SET_CONFIG, status);
+        return fail(c, CDC_STEP_SET_CONFIG, status);
 
-    if (ncm) {
-        status = cdc_control(0x01, 0x0B, 0, layout.data_interface, 0, 0);
+    if (c->ncm) {
+        status = cdc_control(c, 0x01, 0x0B, 0, c->layout.data_interface, 0, 0);
         if (!NT_SUCCESS(status))
-            return fail(CDC_STEP_SET_INTERFACE, status);
-        if (ncm_setup())
-            return net_stats.step;
+            return fail(c, CDC_STEP_SET_INTERFACE, status);
+        if (ncm_setup(c))
+            return c->nd->st->step;
     }
 
-    status = cdc_control(0x01, 0x0B, layout.data_alt, layout.data_interface, 0, 0);
+    status = cdc_control(c, 0x01, 0x0B, c->layout.data_alt, c->layout.data_interface, 0, 0);
     if (!NT_SUCCESS(status))
-        return fail(CDC_STEP_SET_INTERFACE, status);
+        return fail(c, CDC_STEP_SET_INTERFACE, status);
 
-    ep_in = usb_open(USB_TYPE_BULK, layout.ep_in, layout.in_max, 0);
-    ep_out = usb_open(USB_TYPE_BULK, layout.ep_out, layout.out_max, 0);
-    if (layout.ep_intr)
-        ep_intr = usb_open(USB_TYPE_INTERRUPT, layout.ep_intr, layout.intr_max,
-                           intr_interval_ms(layout.intr_interval));
-    cdc_stats.ep_in = (u32)(unsigned long)ep_in;
-    cdc_stats.ep_out = (u32)(unsigned long)ep_out;
-    cdc_stats.ep_intr = (u32)(unsigned long)ep_intr;
-    if (!ep_in || !ep_out)
-        return fail(CDC_STEP_ENDPOINTS, usb_stats.last_open_status);
+    c->ep_in = usb_open(c->dev, USB_TYPE_BULK, c->layout.ep_in, c->layout.in_max, 0);
+    c->ep_out = usb_open(c->dev, USB_TYPE_BULK, c->layout.ep_out, c->layout.out_max, 0);
+    if (c->layout.ep_intr)
+        c->ep_intr = usb_open(c->dev, USB_TYPE_INTERRUPT, c->layout.ep_intr, c->layout.intr_max,
+                           intr_interval_ms(c, c->layout.intr_interval));
+    c->st->ep_in = (u32)(unsigned long)c->ep_in;
+    c->st->ep_out = (u32)(unsigned long)c->ep_out;
+    c->st->ep_intr = (u32)(unsigned long)c->ep_intr;
+    if (!c->ep_in || !c->ep_out)
+        return fail(c, CDC_STEP_ENDPOINTS, usb_stats.last_open_status);
 
     /* PROMISCUOUS | ALL_MULTICAST | DIRECTED | BROADCAST */
-    status = cdc_control(0x21, 0x43, 0x000F, layout.comm_interface, 0, 0);
+    status = cdc_control(c, 0x21, 0x43, 0x000F, c->layout.comm_interface, 0, 0);
     if (!NT_SUCCESS(status))
-        return fail(CDC_STEP_FILTER, status);
+        return fail(c, CDC_STEP_FILTER, status);
 
-    KeInitializeDpc(&rx_dpc, rx_dpc_routine, 0);
-    rx_head = rx_tail = 0;
+    KeInitializeDpc(&c->rx_dpc, rx_dpc_routine, c);
+    c->rx_head = c->rx_tail = 0;
 
-    tx_next = 0;
-    tx_inflight = 0;
-    ntb_slot = NONE;
-    for (i = 0; i < tx_count; i++)
-        tx_urb[i].Busy = 0;
-    net_stats.tx_inflight = 0;
+    c->tx_next = 0;
+    c->tx_inflight = 0;
+    c->ntb_slot = NONE;
+    for (i = 0; i < c->tx_count; i++)
+        c->tx_urb[i].Busy = 0;
+    c->nd->st->tx_inflight = 0;
 
-    running = 1;
+    c->running = 1;
     mem_sync();
-    for (i = 0; i < rx_count; i++)
-        rx_queue(&rx_urb[i]);
-    if (ep_intr)
-        intr_queue();
+    for (i = 0; i < c->rx_count; i++)
+        rx_queue(&c->rx_urb[i]);
+    if (c->ep_intr)
+        intr_queue(c);
 
-    net_stats.step = CDC_STEP_OK;
+    c->nd->st->step = CDC_STEP_OK;
     return 0;
 }
 
 /* From RemoveDevice, at DISPATCH_LEVEL: stop resubmitting; the close chain that
  * follows completes whatever is still queued. */
-void cdc_detached(void)
+void cdc_detached(NET_DEV *nd)
 {
-    running = 0;
+    CDC *c = (CDC *)nd->priv;
+
+    if (!c)
+        return;
+    c->in_use = 0;
+    c->running = 0;
     mem_sync();
 }
 
@@ -789,5 +847,12 @@ static u32 cdc_match(const u8 *device, const u8 *interface)
 }
 
 const XE_DRIVER xe_driver_cdc = {
-    "cdc", cdc_match, cdc_start, cdc_detached, cdc_xmit, cdc_tx_space, 0, cdc_tick
+    .name = "cdc",
+    .kind = XE_KIND_WIRED,
+    .match = cdc_match,
+    .start = cdc_start,
+    .detached = cdc_detached,
+    .xmit = cdc_xmit,
+    .tx_space = cdc_tx_space,
+    .tick = cdc_tick,
 };

@@ -56,7 +56,7 @@ def test_tx(sym, seconds, payload):
     time.sleep(seconds)
     b2, p2, t2 = nic("rx_bytes"), nic("rx_packets"), time.time()
     sent = xectl.command(sym, xectl.CMD["blast"], 0)[0]
-    ns = xectl.read_struct(sym, "net_stats")
+    ns = xectl.uplink_stats(sym)
     rate = (b2 - b1) * 8 / (t2 - t1) / 1e6
     print("tx        console->PC %.1f Mbit/s, %.0f pkt/s, payload %d, sent %d, "
           "tx errors %d" % (rate, (p2 - p1) / (t2 - t1), payload, sent, ns["tx_errors"]))
@@ -84,7 +84,7 @@ def _flood(seconds, payload, out):
 def test_rx(sym, seconds, payload, senders):
     import multiprocessing as mp
     st0 = xectl.read_struct(sym, "stack_stats")
-    ns0 = xectl.read_struct(sym, "net_stats")
+    ns0 = xectl.uplink_stats(sym)
     q = mp.Queue()
     procs = [mp.Process(target=_flood, args=(seconds, payload, q))
              for _ in range(senders)]
@@ -97,7 +97,7 @@ def test_rx(sym, seconds, payload, senders):
     sent = sum(q.get() for _ in procs)
     time.sleep(0.5)
     st1 = xectl.read_struct(sym, "stack_stats")
-    ns1 = xectl.read_struct(sym, "net_stats")
+    ns1 = xectl.uplink_stats(sym)
     got = ((st1["discard_bytes_hi"] << 32 | st1["discard_bytes"]) -
            (st0["discard_bytes_hi"] << 32 | st0["discard_bytes"]))
     frames = st1["discard_frames"] - st0["discard_frames"]

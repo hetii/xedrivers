@@ -1,4 +1,5 @@
-/* One USB device, claimed for whichever driver matches it, and transfers on it.
+/* The USB devices we own -- up to USB_MAX_DEVICES, each for whichever driver
+ * matches it -- and transfers on them.
  *
  * The kernel's USB stack expects UsbdQueueAsyncTransfer on hardware thread 2 at
  * DISPATCH_LEVEL (CUsbEnet: the checked kernel asserts it; the retail one merely
@@ -16,16 +17,29 @@
 #define USB_TYPE_BULK      2
 #define USB_TYPE_INTERRUPT 3
 
-typedef struct {
+#define USB_MAX_DEVICES 4
+
+/* One device we own. Everything that was the single device's is per device now:
+ * the kernel's handles, the endpoints closed on removal, the control transfer the
+ * bring-up waits for. `index` is the slot, `where` the node's controller/port byte
+ * (bits 0-1 controller, 2-4 port), for telling sockets apart. */
+typedef struct USB_DEV {
     void         *device;           /* the kernel's device node, while we own it */
     void         *control;          /* default endpoint */
     void         *ep[4];            /* opened by the driver, closed in reverse */
     u32           ep_count;
     volatile u32  active;           /* cleared the moment removal starts */
-    volatile u32  generation;       /* grows with every AddDevice */
+    volatile u32  generation;       /* grows with every AddDevice on this slot */
+    u32           index;
+    u32           where;
+    void         *client;           /* the client's per-device state (net.c's) */
+    URB           control_urb;
+    volatile u32  control_done;
+    volatile u32  control_status;
+    URB           close_urb;
 } USB_DEV;
 
-extern USB_DEV usb;
+extern USB_DEV usb_devs[USB_MAX_DEVICES];
 
 /* Who decides which devices are ours and hears of their arrival and removal --
  * net.c, for every driver at once. `match` gets an interface descriptor (or 0 when
@@ -33,28 +47,28 @@ extern USB_DEV usb;
  * `attached` and `detached` run inside AddDevice/RemoveDevice and must not block. */
 typedef struct {
     u32  (*match)(const u8 *interface, const u8 *device);
-    void (*attached)(void);
-    void (*detached)(void);
+    void (*attached)(USB_DEV *dev);
+    void (*detached)(USB_DEV *dev);
 } USB_CLIENT;
 
 int   usb_register(const USB_CLIENT *client);
-void *usb_open(u32 type, u32 address, u32 max_packet, u32 interval);
+void *usb_open(USB_DEV *dev, u32 type, u32 address, u32 max_packet, u32 interval);
 void  usb_submit(URB *urb);
 
-/* Fill a request for the default endpoint or for `endpoint`. */
-void  usb_prepare(URB *urb, void *endpoint, URB_COMPLETION done, void *buffer,
-                  u32 length, const u8 *setup);
+/* Fill a request for `dev`'s default endpoint or for `endpoint`. */
+void  usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
+                  void *buffer, u32 length, const u8 *setup);
 
-/* Thread-only: one control transfer, waited for. Returns the completion status, or
- * STATUS_UNSUCCESSFUL on timeout; *actual gets the bytes moved. `buffer` must be
- * DMA memory (from net_dma_alloc). */
-u32   usb_control(const u8 setup[8], void *buffer, u32 length, u32 *actual,
-                  u32 timeout_ms);
+/* Thread-only: one control transfer on `dev`, waited for. Returns the completion
+ * status, or STATUS_UNSUCCESSFUL on timeout; *actual gets the bytes moved.
+ * `buffer` must be DMA memory. */
+u32   usb_control(USB_DEV *dev, const u8 setup[8], void *buffer, u32 length,
+                  u32 *actual, u32 timeout_ms);
 
-/* Find our device among those already enumerated and reset it so the kernel offers
- * it again -- boot enumeration is over before plugins load. 1: ours found and
- * reset; 2: not recognised, but devices no driver had were reset once each so
- * Match sees their real descriptors; 0: nothing to do.
+/* Have the devices that enumerated before the plugin loaded offered again: every
+ * node no driver has is reset, once each, so the kernel enumerates it again and
+ * Match sees its real descriptor (boot enumeration is over before plugins load).
+ * Returns how many were reset.
  * xerunner: plugin-load-vs-enumeration@1, xerunner: usb-driver-object-f19@1 */
 u32   usb_claim_present(void);
 
@@ -77,6 +91,7 @@ typedef struct {
     u32 scan_found;
     u32 reset_status;
     u32 unbound_resets;     /* nodes no driver had, reset to be offered again */
+    u32 no_slot;            /* devices refused: USB_MAX_DEVICES already owned */
 } USB_STATS;
 
 extern volatile USB_STATS usb_stats;

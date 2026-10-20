@@ -1,7 +1,8 @@
 /* The network layer; see net.h. Everything here is the same for every wired card:
- * which driver has the device, its DMA memory, frames handed up, link state,
- * counters, and who consumes the frames (xnet, the bench's responder, nobody). How
- * frames reach the wire is the driver's (src/drivers/).
+ * which driver has each device, their DMA memory, frames handed up, link state,
+ * counters, which device is the uplink, and who consumes the frames (xnet, the
+ * bench's responder, nobody). How frames reach the wire is the drivers'
+ * (src/drivers/).
  */
 
 #include "net.h"
@@ -15,17 +16,17 @@
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
 
-#define SCRATCH_BYTES 4096
+#define SCRATCH_BYTES 8192
 
 volatile NET_RX net_rx;
 volatile NET_LINK net_link_cb;
 volatile NET_TX_IDLE net_tx_idle;
 u8 net_mac[ETH_ALEN];
-volatile NET_STATS net_stats;
-const XE_DRIVER *volatile xe_driver;
+NET_DEV net_devs[NET_MAX];
+volatile NET_STATS net_stats[NET_MAX];
+volatile u32 net_active;
 
-
-static u32 link_down_seen;
+static u32 up_counter;
 
 void net_add64(volatile u32 *lo, volatile u32 *hi, u32 n)
 {
@@ -36,29 +37,100 @@ void net_add64(volatile u32 *lo, volatile u32 *hi, u32 n)
     *lo = v;
 }
 
-/* --- frames and link, from the driver --------------------------------------- */
-
-static void set_link(u32 up)
+static NET_DEV *uplink(void)
 {
-    if (net_stats.link == up)
-        return;
-    net_stats.link = up;
-    if (net_link_cb)
-        net_link_cb(up);
+    u32 a = net_active;
+
+    return a ? &net_devs[a - 1] : 0;
 }
 
-void net_frame_in(const u8 *frame, u32 length)
+/* --- which device is the uplink -------------------------------------------- */
+
+/* Back sockets before front, a lower port first: the controller's low bit is the
+ * pair (0 the back, 1 the front and the internal connectors), bits 2-4 the port. */
+static u32 socket_rank(const NET_DEV *nd)
+{
+    u32 where = nd->st->where;
+
+    return (where & 1u) << 3 | ((where >> 2) & 7u);
+}
+
+/* 1 if `a` should be the uplink rather than `b` (both with a link up). */
+static u32 better(const NET_DEV *a, const NET_DEV *b, const NET_DEV *current)
+{
+    if (a->drv->kind != b->drv->kind)
+        return a->drv->kind > b->drv->kind;
+    if (a->st->speed_mbps != b->st->speed_mbps)
+        return a->st->speed_mbps > b->st->speed_mbps;
+    if (a == current || b == current)
+        return a == current;
+    if (a->drv->kind == XE_KIND_TETHER && a->up_order != b->up_order)
+        return a->up_order < b->up_order;      /* the phone that tethered first */
+    return socket_rank(a) < socket_rank(b);
+}
+
+/* Pick the uplink again; on a change, tell the consumer -- xnet then asks for the
+ * link and runs DHCP on whatever it is now (or the onboard port). Any IRQL up to
+ * DISPATCH. */
+static void choose(void)
+{
+    NET_DEV *current = uplink(), *best = 0;
+    u32 i, was_up, now_up;
+
+    for (i = 0; i < NET_MAX; i++) {
+        NET_DEV *nd = &net_devs[i];
+
+        if (!nd->drv || !nd->st->ready || !nd->st->link)
+            continue;
+        if (!best || better(nd, best, current))
+            best = nd;
+    }
+    was_up = current && current->st->ready && current->st->link;
+    if (best == current && (best != 0) == was_up)
+        return;
+    if (best) {
+        for (i = 0; i < ETH_ALEN; i++)
+            net_mac[i] = best->mac[i];
+    }
+    /* From one device to another the network changes too (a phone's is not the
+     * router's): report the link down first, so xnet starts over with DHCP. */
+    if (was_up && best && net_link_cb)
+        net_link_cb(0);
+    mem_sync();
+    net_active = best ? (u32)(best - net_devs) + 1 : 0;
+    now_up = best != 0;
+    if (net_link_cb)
+        net_link_cb(now_up);
+}
+
+/* --- frames and link, from the drivers -------------------------------------- */
+
+static void set_link(NET_DEV *nd, u32 up)
+{
+    if (nd->st->link == up)
+        return;
+    nd->st->link = up;
+    if (up)
+        nd->up_order = ++up_counter;
+    choose();
+}
+
+void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
 {
     if (length < ETH_HLEN || length > ETH_FRAME_MAX + 4) {
-        net_stats.rx_short++;
+        nd->st->rx_short++;
         return;
     }
-    net_stats.rx_frames++;
-    net_add64(&net_stats.rx_bytes, &net_stats.rx_bytes_hi, length);
+    nd->st->rx_frames++;
+    net_add64(&nd->st->rx_bytes, &nd->st->rx_bytes_hi, length);
     /* A device that never sends a link notification still delivers frames; one
      * arriving is as good a sign of link as any. */
-    if (!net_stats.link && !link_down_seen)
-        set_link(1);
+    if (!nd->st->link && !nd->link_down_seen)
+        set_link(nd, 1);
+    if (uplink() != nd) {
+        nd->st->rx_not_uplink++;
+        return;
+    }
     if (net_rx) {
         PROF_START(t);
         net_rx(frame, length);
@@ -66,41 +138,45 @@ void net_frame_in(const u8 *frame, u32 length)
     }
 }
 
-void net_link_report(u32 up)
+void net_link_report(NET_DEV *nd, u32 up)
 {
     if (!up)
-        link_down_seen = 1;
-    set_link(up);
+        nd->link_down_seen = 1;
+    set_link(nd, up);
 }
 
-void net_speed_report(u32 mbps)
+void net_speed_report(NET_DEV *nd, u32 mbps)
 {
-    net_stats.speed_mbps = mbps;
+    if (nd->st->speed_mbps == mbps)
+        return;
+    nd->st->speed_mbps = mbps;
+    choose();
 }
 
-void net_tx_done(void)
+void net_tx_done(NET_DEV *nd)
 {
-    if (net_tx_idle)
+    if (net_tx_idle && uplink() == nd)
         net_tx_idle();
 }
 
 u32 net_link_up(void)
 {
-    return net_stats.ready && net_stats.link;
+    NET_DEV *nd = uplink();
+
+    return nd && nd->st->ready && nd->st->link;
 }
 
 u32 net_speed_mbps(void)
 {
-    return net_stats.speed_mbps;
+    NET_DEV *nd = uplink();
+
+    return nd ? nd->st->speed_mbps : 0;
 }
 
 /* --- DMA memory ---------------------------------------------------------------- */
 
 static u8 *scratch;
 static u32 scratch_used;
-static u8 *rings;
-static u32 rings_size;
-static u32 rings_used;
 
 /* MmAllocatePhysicalMemory(2, size, 4), as CUsbEnet: physically contiguous, so a
  * block larger than a page is still one DMA buffer. */
@@ -121,94 +197,106 @@ void *net_dma_scratch(u32 bytes)
     return block;
 }
 
-u32 net_dma_begin(u32 total)
+/* A slot's block stays with the slot: the next device in it, of whatever driver,
+ * carves it again, and must not need more. */
+u32 net_dma_begin(NET_DEV *nd, u32 total)
 {
-    if (!rings) {
-        rings = (u8 *)MmAllocatePhysicalMemory(2, total, 4);
-        if (!rings)
+    if (!nd->rings) {
+        nd->rings = (u8 *)MmAllocatePhysicalMemory(2, total, 4);
+        if (!nd->rings)
             return 0;
-        rings_size = total;
+        nd->rings_size = total;
     }
-    rings_used = 0;
-    return total <= rings_size;
+    nd->rings_used = 0;
+    return total <= nd->rings_size;
 }
 
-void *net_dma_alloc(u32 bytes)
+void *net_dma_alloc(NET_DEV *nd, u32 bytes)
 {
     u8 *block;
 
-    rings_used = (rings_used + 2047u) & ~2047u;
-    if (!rings || rings_used + bytes > rings_size)
+    nd->rings_used = (nd->rings_used + 2047u) & ~2047u;
+    if (!nd->rings || nd->rings_used + bytes > nd->rings_size)
         return 0;
-    block = rings + rings_used;
-    rings_used += bytes;
+    block = nd->rings + nd->rings_used;
+    nd->rings_used += bytes;
     return block;
 }
 
-/* --- the device's lifetime ---------------------------------------------------- */
+/* --- a device's lifetime ----------------------------------------------------- */
 
-u32 net_start(void)
+static u32 net_start(NET_DEV *nd)
 {
-    const XE_DRIVER *drv = xe_driver;
     u32 step;
 
-    net_stats.ready = 0;
-    net_stats.link = 0;
-    net_stats.tx_inflight = 0;
-    link_down_seen = 0;
-    if (!drv)
+    nd->st->ready = 0;
+    nd->st->link = 0;
+    nd->st->tx_inflight = 0;
+    nd->link_down_seen = 0;
+    if (!nd->drv)
         return 0xFFFFFFFFu;
 
-    step = drv->start();
-    net_stats.step = step;
+    step = nd->drv->start(nd);
+    nd->st->step = step;
     if (step)
         return step;
     mem_sync();
-    net_stats.ready = 1;
+    nd->st->ready = 1;
     /* A device may report its link during start (an RNDIS phone answers
-     * MEDIA_CONNECT_STATUS there): that notification came while the device was not
-     * yet ready, so whoever asked then was told there was no link. Tell them again
-     * now that the answer is true. */
-    if (net_stats.link && net_link_cb)
-        net_link_cb(1);
+     * MEDIA_CONNECT_STATUS there), before it was ready: choose again now. */
+    choose();
     return 0;
 }
 
 /* From RemoveDevice, at DISPATCH_LEVEL. */
-void net_detached(void)
+static void net_detached(USB_DEV *dev)
 {
-    const XE_DRIVER *drv = xe_driver;
+    NET_DEV *nd = (NET_DEV *)dev->client;
 
-    net_stats.ready = 0;
+    if (!nd)
+        return;
+    nd->st->ready = 0;
     mem_sync();
-    if (drv)
-        drv->detached();
-    net_stats.speed_mbps = 0;
-    set_link(0);
+    if (nd->drv)
+        nd->drv->detached(nd);
+    nd->st->speed_mbps = 0;
+    nd->st->link = 0;
+    choose();
 }
 
 u32 net_tx(const u8 *frame, u32 length)
 {
-    const XE_DRIVER *drv = xe_driver;
+    NET_DEV *nd = uplink();
 
-    if (!drv || !net_stats.ready || !usb.active || length < ETH_HLEN ||
+    if (!nd || !nd->st->ready || !nd->usb->active || length < ETH_HLEN ||
         length > ETH_FRAME_MAX) {
-        net_stats.tx_drops++;
+        if (nd)
+            nd->st->tx_drops++;
         return 0;
     }
-    return drv->xmit(frame, length);
+    return nd->drv->xmit(nd, frame, length);
 }
 
 u32 net_tx_space(void)
 {
-    const XE_DRIVER *drv = xe_driver;
+    NET_DEV *nd = uplink();
 
-    return drv && net_stats.ready && drv->tx_space();
+    return nd && nd->st->ready && nd->drv->tx_space(nd);
 }
 
 /* --- who consumes the frames ------------------------------------------------- */
 
 volatile NET_STATE net_state;
+
+static u32 any_ready(void)
+{
+    u32 i;
+
+    for (i = 0; i < NET_MAX; i++)
+        if (net_devs[i].drv && net_stats[i].ready)
+            return 1;
+    return 0;
+}
 
 static void no_frames(const u8 *frame, u32 length)
 {
@@ -225,7 +313,7 @@ static u32 set_mode(u32 mode)
 
     xe_config.mode = mode;
     if (mode == XE_MODE_XNET) {
-        if (!net_stats.ready) {
+        if (!any_ready()) {
             net_rx = no_frames;
             net_state.mode = XE_MODE_DROP;
             return STATUS_UNSUCCESSFUL;
@@ -254,10 +342,14 @@ void net_layer_init(void)
     xe_config.mode = XE_MODE;
 }
 
-void net_bring_up(void)
+void net_bring_up(USB_DEV *dev)
 {
+    NET_DEV *nd = (NET_DEV *)dev->client;
+
+    if (!nd)
+        return;
     net_state.start_count++;
-    net_state.start_result = net_start();
+    net_state.start_result = net_start(nd);
     if (net_state.start_result)
         return;
     set_mode(xe_config.mode);
@@ -265,16 +357,36 @@ void net_bring_up(void)
 
 void net_tick(void)
 {
-    const XE_DRIVER *drv = xe_driver;
+    u32 i;
 
-    if (drv && drv->tick && net_stats.ready)
-        drv->tick();
+    for (i = 0; i < NET_MAX; i++) {
+        NET_DEV *nd = &net_devs[i];
+
+        if (nd->drv && nd->drv->tick && nd->st->ready)
+            nd->drv->tick(nd);
+    }
+}
+
+/* A driver's own command goes to the uplink's driver if it answers it, else to the
+ * first device whose driver does. */
+static u32 driver_command(u32 what, volatile u32 *args)
+{
+    NET_DEV *nd = uplink();
+    u32 i;
+
+    if (nd && nd->drv->command && nd->drv->command(nd, what, args))
+        return 1;
+    for (i = 0; i < NET_MAX; i++) {
+        nd = &net_devs[i];
+        if (nd->drv && nd->st->ready && nd->drv->command &&
+            nd->drv->command(nd, what, args))
+            return 1;
+    }
+    return 0;
 }
 
 u32 net_command(u32 what, volatile u32 *args)
 {
-    const XE_DRIVER *drv = xe_driver;
-
     switch (what) {
     case CMD_MODE:
         args[5] = set_mode(args[1]);
@@ -284,11 +396,11 @@ u32 net_command(u32 what, volatile u32 *args)
         args[5] = 0;
         return 1;
     default:
-        return drv && drv->command && drv->command(what, args);
+        return driver_command(what, args);
     }
 }
 
-/* --- which driver gets the device ------------------------------------------- */
+/* --- which driver gets a device ------------------------------------------- */
 
 /* The kernel asks per interface of the current configuration; AddDevice and the
  * scan of what enumerated before we loaded know only the device. So a driver that
@@ -330,19 +442,30 @@ static u32 client_match(const u8 *interface, const u8 *device)
     return 1;
 }
 
-static void client_attached(void)
+/* Inside AddDevice: the slot's NET_DEV takes the driver just matched. */
+static void client_attached(USB_DEV *dev)
 {
+    NET_DEV *nd = &net_devs[dev->index];
     u32 i;
 
-    xe_driver = pending;
+    nd->usb = dev;
+    nd->st = &net_stats[dev->index];
+    nd->priv = 0;
+    nd->drv = pending;
+    nd->st->where = dev->where;
     for (i = 0; i < xe_driver_count; i++)
         if (xe_drivers[i] == pending)
-            net_stats.driver = i + 1;
+            nd->st->driver = i + 1;
+    dev->client = nd;
 }
 
 static const USB_CLIENT client = { client_match, client_attached, net_detached };
 
 void net_register(void)
 {
+    u32 i;
+
+    for (i = 0; i < NET_MAX; i++)
+        net_devs[i].st = &net_stats[i];
     usb_register(&client);
 }

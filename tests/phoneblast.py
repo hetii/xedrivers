@@ -20,7 +20,7 @@ import xectl  # noqa: E402
 
 
 def counters(sym):
-    ns = xectl.read_struct(sym, "net_stats")
+    ns = xectl.uplink_stats(sym)
     stamp = struct.unpack(">I", xectl.read(sym["net_prof"] + 8, 4))[0] \
         if "net_prof" in sym else None
     return ns, stamp, time.time()

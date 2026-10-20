@@ -10,9 +10,8 @@
 
 /* rtl.c's transfer side is not reached by this test. */
 volatile USB_STATS usb_stats;
-USB_DEV usb;
-u32 usb_control(const u8 setup[8], void *b, u32 l, u32 *a, u32 t)
-{ (void)setup; (void)b; (void)l; (void)a; (void)t; return STATUS_UNSUCCESSFUL; }
+u32 usb_control(USB_DEV *dev, const u8 setup[8], void *b, u32 l, u32 *a, u32 t)
+{ (void)dev; (void)setup; (void)b; (void)l; (void)a; (void)t; return STATUS_UNSUCCESSFUL; }
 void *net_dma_scratch(u32 bytes) { (void)bytes; return 0; }
 
 static int failures;

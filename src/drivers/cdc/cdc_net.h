@@ -9,22 +9,21 @@
 
 #include "kernel.h"
 #include "driver.h"
+#include "net.h"
+
+/* How many CDC devices (the RTL8156 counts) can run at once. */
+#define CDC_MAX 2
 
 extern const XE_DRIVER xe_driver_cdc;
 
-/* The driver's operations, for a driver that wraps it. cdc_start picks the
- * configuration for the transport xe_config asks for, and falls back to the other
- * one when the device has only that. */
-u32  cdc_start(void);
-void cdc_detached(void);
-u32  cdc_xmit(const u8 *frame, u32 length);
-u32  cdc_tx_space(void);
-void cdc_tick(void);
-
-/* A control transfer on the default endpoint, through the driver's own DMA
- * buffer; the data stays in cdc_ctrl_buffer() until the next one. Thread-only. */
-u32  cdc_control(u8 type, u8 request, u16 value, u16 index, u16 length, u32 *actual);
-u8  *cdc_ctrl_buffer(void);
+/* The driver's operations, for a driver that wraps it. cdc_start takes a free
+ * instance for the device and picks the configuration for the transport xe_config
+ * asks for, falling back to the other one when the device has only that. */
+u32  cdc_start(NET_DEV *nd);
+void cdc_detached(NET_DEV *nd);
+u32  cdc_xmit(NET_DEV *nd, const u8 *frame, u32 length);
+u32  cdc_tx_space(NET_DEV *nd);
+void cdc_tick(NET_DEV *nd);
 
 /* NCM: below this many blocks in flight a frame goes out at once; at or above
  * it, frames are aggregated. Tunable at run time (xectl.py set cdc_tx_eager N). */
@@ -78,6 +77,6 @@ typedef struct {
     u32 intr_parked;        /* repeats that parked the interrupt endpoint */
 } CDC_STATS;
 
-extern volatile CDC_STATS cdc_stats;
+extern volatile CDC_STATS cdc_stats[CDC_MAX];
 
 #endif /* XE_CDC_NET_H */
