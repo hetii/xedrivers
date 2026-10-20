@@ -408,6 +408,80 @@ static void intr_queue(void)
     usb_submit(&intr_urb);
 }
 
+/* The interrupt endpoint, and a card that never stops talking on it.
+ *
+ * A notification endpoint is meant to answer a poll only when it has news, and NAK
+ * otherwise. The RTL8156 in ECM answers every poll with the same
+ * CONNECTION_SPEED_CHANGE and NETWORK_CONNECTION -- under Linux cdc_ether too,
+ * about four a second at the 128 ms its bInterval asks for. Two things kept that
+ * from becoming a stream here:
+ *   - UsbdOpenEndpoint's interval is in milliseconds, polled at no longer than
+ *     32 ms (measured: 11 gave 62.5 completions a second, 16 to 255 gave 31.2),
+ *     while a high-speed bInterval is an exponent of 125 us microframes -- passed
+ *     raw, 11 polled every 16 ms instead of every 128. intr_interval_ms converts.
+ *   - a notification identical to the last one of its kind (bNotification) is not
+ *     followed by a new request at once -- the RTL8156 alternates two kinds, so it
+ *     is the last of each that counts: the endpoint is parked and re-armed from the worker's tick about a
+ *     second later. A change -- link down, another speed -- is answered at once
+ *     and re-armed at once. So a cable pulled out is seen within about a second;
+ *     a device that behaves never parks.
+ * Neither moved throughput (TCP 21.9 MB/s out at 62.5, 31.2 and no notifications
+ * a second); it is the bus and the USB stack that are spared ~60 pointless
+ * transfers a second. */
+#define INTR_QUIET_TICKS 30     /* ~1 s of worker ticks, ~33 ms each as measured */
+
+static u16 bcd_usb;             /* the device descriptor's, read in find_config */
+/* The last notification of each kind seen, to tell a repeat from news. */
+#define NOTE_KINDS 4
+static u8 last_note[NOTE_KINDS][16];
+static u32 last_note_len[NOTE_KINDS];
+static volatile u32 intr_parked;        /* 1: waiting for the tick to re-arm */
+static u32 intr_parked_ticks;
+
+static u32 intr_interval_ms(u32 b_interval)
+{
+    u32 ms = b_interval;
+
+    if (bcd_usb >= 0x0200) {    /* high speed: 2^(bInterval-1) microframes */
+        if (b_interval < 1)
+            b_interval = 1;
+        ms = b_interval > 9 ? 256 : (1u << (b_interval - 1)) / 8;
+    }
+    if (ms < 1)
+        ms = 1;
+    return ms > 32 ? 32 : ms;
+}
+
+/* 1 if `data` repeats the last notification of its kind; otherwise it is
+ * remembered (in a free slot, or the last one) and 0. */
+static u32 repeat_of_last(const u8 *data, u32 length)
+{
+    u32 k, i, free = NOTE_KINDS - 1;
+
+    if (length < 2 || length > sizeof(last_note[0]))
+        return 0;
+    for (k = 0; k < NOTE_KINDS; k++) {
+        if (!last_note_len[k]) {
+            free = k;
+            break;
+        }
+        if (last_note[k][1] != data[1])
+            continue;
+        if (last_note_len[k] == length) {
+            for (i = 0; i < length && last_note[k][i] == data[i]; i++)
+                ;
+            if (i == length)
+                return 1;
+        }
+        free = k;
+        break;
+    }
+    for (i = 0; i < length; i++)
+        last_note[free][i] = data[i];
+    last_note_len[free] = length;
+    return 0;
+}
+
 static void intr_complete(URB *urb, u32 status)
 {
     u32 at, used;
@@ -441,6 +515,25 @@ static void intr_complete(URB *urb, u32 status)
             return;
         }
     }
+    if (NT_SUCCESS(status) && urb->Actual && repeat_of_last(intr_buf, urb->Actual)) {
+        cdc_stats.intr_parked++;
+        urb->Busy = 0;
+        intr_parked_ticks = 0;
+        mem_sync();
+        intr_parked = 1;
+        return;
+    }
+    intr_queue();
+}
+
+/* From the worker: re-arm a parked interrupt endpoint once it has been quiet. */
+void cdc_tick(void)
+{
+    if (!intr_parked || !running || !usb.active)
+        return;
+    if (++intr_parked_ticks < INTR_QUIET_TICKS)
+        return;
+    intr_parked = 0;
     intr_queue();
 }
 
@@ -516,6 +609,7 @@ static u32 find_config(u32 subclass)
     status = cdc_control(0x80, 0x06, 0x0100, 0, 18, &actual);
     if (!NT_SUCCESS(status) || actual < 18)
         return fail(CDC_STEP_DEVICE_DESC, status);
+    bcd_usb = le16(ctrl_buf + 2);
     configs = ctrl_buf[17];
 
     for (index = 0; index < configs; index++) {
@@ -586,6 +680,9 @@ u32 cdc_start(void)
     u32 i, status, actual;
 
     running = 0;
+    intr_parked = 0;
+    for (i = 0; i < NOTE_KINDS; i++)
+        last_note_len[i] = 0;
     rx_consecutive_errors = 0;
     intr_consecutive_errors = 0;
     ep_in = ep_out = ep_intr = 0;
@@ -635,7 +732,7 @@ u32 cdc_start(void)
     ep_out = usb_open(USB_TYPE_BULK, layout.ep_out, layout.out_max, 0);
     if (layout.ep_intr)
         ep_intr = usb_open(USB_TYPE_INTERRUPT, layout.ep_intr, layout.intr_max,
-                           layout.intr_interval);
+                           intr_interval_ms(layout.intr_interval));
     cdc_stats.ep_in = (u32)(unsigned long)ep_in;
     cdc_stats.ep_out = (u32)(unsigned long)ep_out;
     cdc_stats.ep_intr = (u32)(unsigned long)ep_intr;
@@ -692,5 +789,5 @@ static u32 cdc_match(const u8 *device, const u8 *interface)
 }
 
 const XE_DRIVER xe_driver_cdc = {
-    "cdc", cdc_match, cdc_start, cdc_detached, cdc_xmit, cdc_tx_space, 0
+    "cdc", cdc_match, cdc_start, cdc_detached, cdc_xmit, cdc_tx_space, 0, cdc_tick
 };

@@ -19,6 +19,7 @@ u32  cdc_start(void);
 void cdc_detached(void);
 u32  cdc_xmit(const u8 *frame, u32 length);
 u32  cdc_tx_space(void);
+void cdc_tick(void);
 
 /* A control transfer on the default endpoint, through the driver's own DMA
  * buffer; the data stays in cdc_ctrl_buffer() until the next one. Thread-only. */
@@ -74,6 +75,7 @@ typedef struct {
     u32 ntb_format_status;  /* SET_NTB_FORMAT 16, or 0xFFFFFFFF when not sent */
     u32 crc_status;         /* SET_CRC_MODE off */
     u32 dgram_status;       /* SET_MAX_DATAGRAM_SIZE */
+    u32 intr_parked;        /* repeats that parked the interrupt endpoint */
 } CDC_STATS;
 
 extern volatile CDC_STATS cdc_stats;

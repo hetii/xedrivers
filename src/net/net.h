@@ -21,6 +21,9 @@ void net_layer_init(void);
 /* A device was offered (a new USB generation): bring it up, apply the mode. */
 void net_bring_up(void);
 
+/* Every worker tick: the driver's own tick, while its device is up. */
+void net_tick(void);
+
 /* A host command the core does not know: the mode (5), xnet's interface id (13),
  * else the driver's. 1 if handled, the result in args[5]. */
 u32  net_command(u32 what, volatile u32 *args);

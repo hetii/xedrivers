@@ -59,7 +59,7 @@ STRUCTS = {
                   "last_notify1", "rx_deferred", "rx_ntbs", "rx_ntb_errors", "tx_ntbs",
                   "ntb_in_max", "ntb_out_max", "ntb_out_align", "ntb_out_datagrams",
                   "ntb_formats", "ntb_input_status", "ntb_format_status", "crc_status",
-                  "dgram_status"],
+                  "dgram_status", "intr_parked"],
     "rtl_stats": ["chip_version", "advertise_status"],
     "rndis_stats": ["init_status", "max_packets", "max_transfer", "alignment",
                     "filter_status", "media_status", "link_speed", "control_polls",
@@ -171,9 +171,9 @@ def status(sym):
         ns["step_status"]))
     if "cdc_stats" in sym:
         cs = read_struct(sym, "cdc_stats")
-        print("cdc      config=%d transport=%s intr=%d/%d" % (
+        print("cdc      config=%d transport=%s intr=%d/%d parked=%d" % (
             cs["config_value"], "ncm" if cs["transport"] else "ecm",
-            cs["intr_events"], cs["intr_errors"]))
+            cs["intr_events"], cs["intr_errors"], cs["intr_parked"]))
         if cs["transport"]:
             print("ntb      in_max=%d out_max=%d align=%#x max_dg=%d formats=%#x rx=%d "
                   "rx_err=%d tx=%d" % (

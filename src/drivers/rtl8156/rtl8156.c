@@ -91,5 +91,5 @@ static u32 rtl8156_command(u32 what, volatile u32 *args)
 
 const XE_DRIVER xe_driver_rtl8156 = {
     "rtl8156", rtl8156_match, rtl8156_start, cdc_detached, cdc_xmit, cdc_tx_space,
-    rtl8156_command
+    rtl8156_command, cdc_tick
 };

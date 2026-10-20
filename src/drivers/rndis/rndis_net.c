@@ -554,5 +554,6 @@ static u32 rndis_match(const u8 *device, const u8 *interface)
 }
 
 const XE_DRIVER xe_driver_rndis = {
-    "rndis", rndis_match, rndis_start, rndis_detached, rndis_xmit, rndis_tx_space, 0
+    "rndis", rndis_match, rndis_start, rndis_detached, rndis_xmit, rndis_tx_space, 0,
+    0
 };

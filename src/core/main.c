@@ -98,6 +98,7 @@ static void worker(void *parameter)
             seen_generation = usb.generation;
             net_bring_up();
         }
+        net_tick();
 
         what = xe_cmd[0];
         if (what) {

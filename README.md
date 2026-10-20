@@ -252,6 +252,19 @@ and xnet moves back once its link is up. Measured: the onboard port answered at
 once each time; back on the card 4 s after its PHY came up, and at once after a
 physical replug of the card.
 
+## The interrupt endpoint
+
+The RTL8156 in ECM answers every poll of its notification endpoint with the same
+CONNECTION_SPEED_CHANGE and NETWORK_CONNECTION, alternately -- under Linux
+cdc_ether too, at the 128 ms its bInterval asks for. Here it came to 62.5 transfers
+a second: UsbdOpenEndpoint takes the interval in milliseconds and polls no
+less often than every 32 ms, and the high-speed bInterval (an exponent, 11) was
+passed raw. Now it is converted (32 ms), and a notification identical to the last of
+its kind parks the endpoint for about a second, while a change is acted on and
+re-armed at once: 1.0 transfer a second, a pulled cable seen within 0.9 s. TCP was
+21.9 MB/s out with 62.5, 31.2, 1 or no notifications a second -- it is the bus and
+the USB stack that are spared, not the throughput.
+
 ## Modes
 
 | `MODE` | frames go to |

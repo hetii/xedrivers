@@ -263,6 +263,14 @@ void net_bring_up(void)
     set_mode(xe_config.mode);
 }
 
+void net_tick(void)
+{
+    const XE_DRIVER *drv = xe_driver;
+
+    if (drv && drv->tick && net_stats.ready)
+        drv->tick();
+}
+
 u32 net_command(u32 what, volatile u32 *args)
 {
     const XE_DRIVER *drv = xe_driver;
