@@ -1,7 +1,11 @@
 # xedrivers
 
-A driver for the Realtek RTL8156/RTL8156B USB 2.5G Ethernet adapter (`0bda:8156`) on
-the Xbox 360, delivered as a DashLaunch plugin. Built on Linux with nothing but
+USB device drivers for the Xbox 360, delivered as one DashLaunch plugin: a shared
+core, a layer for each kind of console interface, and a directory per device, of
+which the build takes the ones named. Today that is wired networking -- the
+Realtek RTL8156/RTL8156B USB 2.5G Ethernet adapter (`0bda:8156`), any CDC ECM/NCM
+device, and Android phones tethering over RNDIS -- handed to the console's own
+network stack in place of its onboard port. Built on Linux with nothing but
 `gcc-powerpc-linux-gnu` and `python3`: the ordinals and the packer are in `kit/`,
 copied from xerunner.
 

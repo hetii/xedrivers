@@ -39,7 +39,7 @@
  * does not know is offered to the bench, then to the driver. */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
 typedef struct {
-    u32 magic;              /* 'XEAI' once DllMain ran */
+    u32 magic;              /* 'XEDR' once DllMain ran */
     u32 version;
     u32 worker_ticks;
     u32 claim_attempts;
@@ -178,7 +178,7 @@ int DllMain(void *instance, u32 reason, void *reserved)
     if (reason != 1)                            /* DLL_PROCESS_ATTACH */
         return 1;
 
-    xe_state.magic = 0x58454149u;               /* 'XEAI' */
+    xe_state.magic = 0x58454452u;               /* 'XEDR' */
     net_register();
     ExCreateThread(&thread, 0, 0, 0, (void *)worker, 0, 2);
     return 1;
