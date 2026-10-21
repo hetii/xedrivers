@@ -20,6 +20,7 @@
 #define EP_OUT      ((void *)2)     /* 0x02, commands */
 #define EP_DATA_IN  ((void *)3)     /* 0x81 */
 #define EP_DATA_OUT ((void *)4)     /* 0x01 */
+#define EP_BT       ((void *)5)     /* 0x83, the Bluetooth controller's events */
 
 volatile FILE_STATS file_stats;
 volatile USB_STATS usb_stats;
@@ -176,6 +177,8 @@ static u32 sent_length, sent_count;
 
 void usb_submit(URB *urb)
 {
+    if (urb->Endpoint == EP_BT)
+        return;                 /* the controller answers nothing here */
     if (urb->Endpoint == EP_DATA_OUT) {
         sent_length = urb->Length < sizeof(sent) ? urb->Length : sizeof(sent);
         memcpy(sent, urb->Buffer, sent_length);
@@ -227,6 +230,8 @@ static u32 wifi_phase;
 void *usb_open(USB_DEV *dev, u32 type, u32 address, u32 max_packet, u32 interval)
 {
     (void)dev; (void)type; (void)max_packet; (void)interval;
+    if (address == 0x83)
+        return EP_BT;
     if (address == 0x81)
         return EP_DATA_IN;
     if (address == 0x01 && wifi_phase)
