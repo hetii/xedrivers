@@ -254,6 +254,20 @@ fill a table of networks (`tests/xectl.py status`); `xectl.py cmd 31 <index>` jo
 one, `cmd 32` leaves. Open networks only so far: a secured one needs the WPA2 key
 exchange, which is not written yet, and is refused.
 
+WPA2-Personal works: `wifi_pass = <passphrase>` beside the name in
+`xedrivers.ini`. The console does no ciphering itself -- the card's firmware does,
+given the keys -- so all the plugin runs is the four-way handshake
+(`src/wireless/wpa.c`), and every hash and block operation in it is the console's
+own kernel (`XeCryptHmacSha*`, `XeCryptSha*`, `XeCryptAes*`), never written here.
+The association asks the firmware to leave the controlled port shut and pass
+EAPOL through; the handshake answers the access point's first and third messages,
+and the keys it settles are installed from the worker, because a key is a command
+the firmware confirms and that cannot be waited for where frames arrive. Only then
+is the link reported up, so xnet runs DHCP after the port opens and not before.
+The two awkward parts are checked on the console against published examples
+(`xectl.py cmd 20`): the key from a passphrase against IEEE 802.11i's worked
+example, and the group key's unwrapping against RFC 3394's.
+
 A network can also be joined by itself: `wifi_ssid = <name>` in `xedrivers.ini`
 beside the plugin (one `key = value` a line, `#` for comments). While the card is
 up and not joined it scans every five seconds and joins that network's strongest
@@ -282,6 +296,15 @@ frame is answered in 22-69 us and a transmit transfer accepted by the chip in
 saving off, 24 receive requests instead of 8, larger socket buffers (the console
 then offers a 64 KB window) and the firmware's other receive-aggregation setting
 each changed the figure by under a tenth.
+
+**A clear channel is worth thirteen times the driver's tuning.** With hostapd on
+5 GHz channel 149, which nothing else here uses, WPA2 and CCMP, the same console
+and the same card reach 11.0 MB/s into the console and 6.0 MB/s out of it (88 and
+48 Mbit/s, eight streams), against 0.8 MB/s on channel 36 next to a neighbour's
+network. The signal is -62 dBm rather than -71, and under load the rate holds at
+MCS 5-6 instead of collapsing to MCS 0. One stream out of the console is still
+1.0 MB/s, because its own stack keeps about four segments in flight and the air
+makes a round trip long; into the console one stream already carries 5.9 MB/s.
 
 **The radio is the limit, not this driver.** The same dongle on the PC, driven by
 aicsemi's own Linux driver and associated to the house's router, carries 1.4 MB/s

@@ -6,6 +6,7 @@
  */
 
 #include "debug.h"
+#include "wpa.h"
 
 /* (thread id, &thread) -> NTSTATUS, a referenced KTHREAD; read off ordinals 267,
  * 163 and 261 on 17559. KeSetPriorityThread is absolute and returns the old one. */
@@ -157,5 +158,46 @@ u32 debug_crypto(void)
     if (same(out, aes_want, 16) && same(back, aes_in, 16))
         passed |= 4;
 
+    return passed;
+}
+
+/* --- WPA2's two awkward parts, against known answers --------------------------
+ *   1  the key from a passphrase: "password" on the network "IEEE" gives
+ *      f42c6fc52df0ebef9ebb4b90b38a5f90 2e83fe1b135a70e23aed762e9710a12e
+ *      (the worked example in IEEE 802.11i).
+ *   2  RFC 3394's own wrap of 00112233445566778899aabbccddeeff under the key
+ *      000102030405060708090a0b0c0d0e0f, undone again.
+ */
+u32 debug_wpa(void)
+{
+    static const u8 psk_want[32] = {
+        0xf4, 0x2c, 0x6f, 0xc5, 0x2d, 0xf0, 0xeb, 0xef, 0x9e, 0xbb, 0x4b, 0x90,
+        0xb3, 0x8a, 0x5f, 0x90, 0x2e, 0x83, 0xfe, 0x1b, 0x13, 0x5a, 0x70, 0xe2,
+        0x3a, 0xed, 0x76, 0x2e, 0x97, 0x10, 0xa1, 0x2e };
+    static const u8 kek[16] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
+    static const u8 wrapped[24] = {
+        0x1f, 0xa6, 0x8b, 0x0a, 0x81, 0x12, 0xb4, 0x47, 0xae, 0xf3, 0x4b, 0xd8,
+        0xfb, 0x5a, 0x7b, 0x82, 0x9d, 0x3e, 0x86, 0x23, 0x71, 0xd2, 0xcf, 0xe5 };
+    static const u8 key_want[16] = {
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff };
+    u8 out[32];
+    u32 passed = 0, i;
+
+    for (i = 0; i < 12; i++)
+        debug_crypto_out[i] = 0;
+
+    wpa_set_psk("password", (const u8 *)"IEEE", 4);
+    keep(0, (const u8 *)wpa_psk_for_test(), 16);
+    if (same((const u8 *)wpa_psk_for_test(), psk_want, 32))
+        passed |= 1;
+
+    if (wpa_unwrap(kek, wrapped, sizeof(wrapped), out) == 16) {
+        keep(4, out, 16);
+        if (same(out, key_want, 16))
+            passed |= 2;
+    }
     return passed;
 }

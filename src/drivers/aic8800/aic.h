@@ -19,6 +19,7 @@
 #include "usb.h"
 #include "net.h"
 #include "wireless.h"
+#include "wpa.h"
 
 #define AIC_VENDOR          0xA69Cu
 #define AIC_PRODUCT_D80     0x8D80u     /* boot ROM, waiting for firmware */
@@ -124,7 +125,14 @@ typedef struct {
     u32 ap_sta;
     u32 aid;
     u32 join_freq;
-    u32 join_refused_security;  /* a secured network asked for, which needs keys */
+    u32 join_refused_security;  /* a secured network with no passphrase set */
+    u32 secured_joins;          /* joins that run the WPA2 handshake */
+    u32 eapol_in;               /* EAPOL frames taken off the air */
+    u32 eapol_out;              /* ... and put on it */
+    u32 eapol_dropped;          /* ... that could not be sent */
+    u32 keys_added;
+    u32 key_status;             /* of the last MM_KEY_ADD */
+    u32 port_status;            /* of ME_SET_CONTROL_PORT */
     u32 vif;                    /* the interface index the firmware gave us */
     u32 if_adds;
     u32 if_add_status;
@@ -185,6 +193,7 @@ extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
 #define AIC_AC_VI       2u
 #define AIC_AC_VO       3u
 #define AIC_DESC_SIZE   64      /* control buffer: the device descriptor */
+#define AIC_EAPOL_MAX   320     /* an EAPOL frame with its Ethernet header */
 
 typedef struct AIC {
     u32 in_use;
@@ -228,6 +237,9 @@ typedef struct AIC {
     u32 auto_wait;              /* worker ticks until the next automatic attempt */
     u32 auto_scanned;           /* a scan of the automatic join is under way */
     u32 auto_off;               /* left by command: no automatic join until asked */
+    u32 secured;                /* this join runs the handshake before the link */
+    u8 bssid[6];                /* the access point joined, for the EAPOL header */
+    u8 *eapol_buf;              /* DMA, one frame to send */
 } AIC;
 
 /* aic_cmd.c: the message channel, on bulk `ep_out` and `ep_in` (512 bytes). */

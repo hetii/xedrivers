@@ -25,6 +25,7 @@
  */
 
 #include "aic.h"
+#include "wpa.h"
 #include "prof.h"
 
 #define TX_HEADER       4u
@@ -100,6 +101,10 @@ u32 aic_data_xmit(AIC *a, const u8 *frame, u32 length)
     u32 i, slot = AIC_DATA_TX_COUNT, payload, total;
 
     if (!a->joined || !a->dev->active || length < ETH_HLEN)
+        return 0;
+    /* Before the handshake is through only its own frames may go. */
+    if (a->secured && wpa_stats.state != WPA_DONE &&
+        (frame[12] != (u8)(WPA_ETHERTYPE >> 8) || frame[13] != (u8)WPA_ETHERTYPE))
         return 0;
     payload = length - ETH_HLEN;
     if (TX_OVERHEAD + payload + 1 > AIC_DATA_TX_SIZE)
@@ -220,6 +225,15 @@ static void mpdu_in(AIC *a, u8 *p, u32 length)
     eth = p + strip - ETH_HLEN;
     for (i = 0; i < 2 * ETH_ALEN; i++)
         eth[i] = addresses[i];
+    if (eth[12] == (u8)(WPA_ETHERTYPE >> 8) && eth[13] == (u8)WPA_ETHERTYPE) {
+        /* The handshake's own frames are the station's business, not the
+         * console's: they arrive before any key is in place. */
+        a->st->eapol_in++;
+        wpa_eapol_in(eth + ETH_HLEN, length - strip);
+        if (wpa_stats.pending)
+            usb_wake();
+        return;
+    }
     PROF_MARK(a->last_rx_stamp);
     net_frame_in(a->nd, eth, length - strip + ETH_HLEN);
 }

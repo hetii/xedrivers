@@ -151,6 +151,10 @@ static void aic8800_tick(NET_DEV *nd)
         aic_wifi_tick(a);
 }
 
+/* The handshake finishes where frames arrive, and the keys it settled have to be
+ * installed on the worker: waking it means that happens in a moment rather than
+ * at the next tick, which an access point waiting to send is glad of. */
+
 static u32 aic8800_xmit(NET_DEV *nd, const u8 *frame, u32 length)
 {
     AIC *a = (AIC *)nd->priv;

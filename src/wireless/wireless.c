@@ -177,14 +177,19 @@ volatile WL_CONFIG wl_config;
 
 void wl_load_config(void)
 {
-    char ssid[WL_SSID_MAX + 1];
+    char value[WL_PASS_MAX + 1];
     u32 n, i;
 
-    n = file_setting(WL_SETTINGS, "wifi_ssid", ssid, sizeof(ssid));
+    n = file_setting(WL_SETTINGS, "wifi_ssid", value, WL_SSID_MAX + 1);
     for (i = 0; i < n; i++)
-        wl_config.ssid[i] = ssid[i];
+        wl_config.ssid[i] = value[i];
     wl_config.ssid[n] = 0;
     wl_config.ssid_len = n;
+    n = file_setting(WL_SETTINGS, "wifi_pass", value, sizeof(value));
+    for (i = 0; i < n; i++)
+        wl_config.pass[i] = value[i];
+    wl_config.pass[n] = 0;
+    wl_config.pass_len = n;
     wl_config.loaded = 1;
 }
 
@@ -205,8 +210,12 @@ s32 wl_pick(u32 *secured)
             ;
         if (k != b->ssid_len)
             continue;
-        if (b->security) {
-            *secured = 1;               /* open networks only, for now */
+        if (b->security & ~(u8)WL_SEC_WPA2) {
+            *secured = 1;               /* WPA2 with a pre-shared key, or open */
+            continue;
+        }
+        if ((b->security & WL_SEC_WPA2) && !wl_config.pass_len) {
+            *secured = 1;               /* no passphrase to use */
             continue;
         }
         if (best < 0 || b->rssi > wl_bss[best].rssi)

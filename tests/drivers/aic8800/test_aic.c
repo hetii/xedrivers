@@ -24,6 +24,22 @@
 volatile FILE_STATS file_stats;
 volatile USB_STATS usb_stats;
 u8 net_console_mac[ETH_ALEN];
+
+/* The console's cryptography is not here; the handshake has its own test
+ * (tests/wireless/test_wpa.c) and the real answers are checked on the console. */
+void XeCryptShaInit(XE_SHA_STATE *s) { (void)s; }
+void XeCryptShaUpdate(XE_SHA_STATE *s, const u8 *in, u32 n) { (void)s; (void)in; (void)n; }
+void XeCryptShaFinal(XE_SHA_STATE *s, u8 *out, u32 n) { (void)s; memset(out, 0, n); }
+void XeCryptHmacShaInit(XE_HMAC_STATE *s, const u8 *k, u32 n) { (void)s; (void)k; (void)n; }
+void XeCryptHmacShaUpdate(XE_HMAC_STATE *s, const u8 *in, u32 n) { (void)s; (void)in; (void)n; }
+void XeCryptHmacShaFinal(XE_HMAC_STATE *s, u8 *out, u32 n) { (void)s; memset(out, 0, n); }
+void XeCryptHmacSha(const u8 *k, u32 kl, const u8 *a, u32 al, const u8 *b, u32 bl,
+                    const u8 *c, u32 cl, u8 *out, u32 ol)
+{ (void)k; (void)kl; (void)a; (void)al; (void)b; (void)bl; (void)c; (void)cl;
+  memset(out, 0, ol); }
+void XeCryptAesKey(XE_AES_STATE *s, const u8 *key) { (void)s; (void)key; }
+void XeCryptAesEcb(XE_AES_STATE *s, const u8 *in, u8 *out, u32 e)
+{ (void)s; (void)e; memcpy(out, in, 16); }
 volatile u32 net_console_mac_known;
 
 /* What the network layer saw: the last frame handed up, and the link reports. */

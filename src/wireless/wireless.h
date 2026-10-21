@@ -64,10 +64,14 @@ u32 wl_parse_bss(const u8 *frame, u32 length, WL_BSS *bss);
 
 /* The network asked for: `wifi_ssid=` in WL_SETTINGS, read once a Wi-Fi card is
  * up. An empty name joins nothing by itself. */
+#define WL_PASS_MAX  63
+
 typedef struct {
     u32  loaded;
     u32  ssid_len;
     char ssid[WL_SSID_MAX + 1];
+    u32  pass_len;              /* `wifi_pass =`, for a WPA2 network */
+    char pass[WL_PASS_MAX + 1];
 } WL_CONFIG;
 
 extern volatile WL_CONFIG wl_config;

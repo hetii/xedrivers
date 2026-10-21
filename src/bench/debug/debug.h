@@ -21,4 +21,8 @@ extern volatile u32 debug_config_value[2];
 u32 debug_crypto(void);
 extern volatile u32 debug_crypto_out[12];
 
+/* WPA2's key from a passphrase and its group-key unwrapping, against the worked
+ * examples in IEEE 802.11i and RFC 3394. 3 when both pass. */
+u32 debug_wpa(void);
+
 #endif /* XE_DEBUG_CMDS_H */

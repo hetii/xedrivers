@@ -82,18 +82,23 @@ STRUCTS = {
                   "fw_text8", "fw_text9", "fw_text10", "fw_text11",
                   "connects", "connect_status", "connect_result",
                   "joined", "disconnects", "disconnect_reason", "ap_sta",
-                  "aid", "join_freq", "join_refused_security", "vif",
-                  "if_adds", "if_add_status", "if_removes",
-                  "if_remove_status", "if_mac0", "if_mac1", "join_index",
-                  "join_freq_asked", "ps_off_status", "auto_scans",
-                  "auto_joins", "auto_missed", "auto_secured",
-                  "bt_open_status", "bt_opened", "bssid0", "bssid1",
-                  "data_tx_frames", "data_tx_full", "data_tx_errors",
-                  "data_tx_last_error", "data_rx_transfers",
-                  "data_rx_frames", "data_rx_errors",
+                  "aid", "join_freq", "join_refused_security",
+                  "secured_joins", "eapol_in", "eapol_out",
+                  "eapol_dropped", "keys_added", "key_status",
+                  "port_status", "vif", "if_adds", "if_add_status",
+                  "if_removes", "if_remove_status", "if_mac0", "if_mac1",
+                  "join_index", "join_freq_asked", "ps_off_status",
+                  "auto_scans", "auto_joins", "auto_missed",
+                  "auto_secured", "bt_open_status", "bt_opened", "bssid0",
+                  "bssid1", "data_tx_frames", "data_tx_full",
+                  "data_tx_errors", "data_tx_last_error",
+                  "data_rx_transfers", "data_rx_frames", "data_rx_errors",
                   "data_rx_last_error", "data_rx_not_data",
                   "data_rx_unsupported", "data_rx_not_from_ds",
                   "data_rx_short", "data_rx_truncated"],
+    "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
+                  "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
+                  "no_gtk", "pending", "applied", "psk_ready"],
     "wl_stats": ["scans", "scans_done", "results", "bad_frames", "table_full",
                  "bss_count", "last_scan_status"],
     "file_stats": ["opens", "found", "last_status", "read_errors",
@@ -285,6 +290,11 @@ def status(sym):
                       "freq=%d" % (a["vif"], a["if_adds"], a["if_add_status"],
                                    a["if_removes"], a["if_remove_status"], mac,
                                    a["join_index"], a["join_freq_asked"]))
+                print("aic wpa  secured_joins=%d eapol in=%d out=%d dropped=%d "
+                      "keys=%d key_status=%#x port=%#x refused=%d" % (
+                    a["secured_joins"], a["eapol_in"], a["eapol_out"],
+                    a["eapol_dropped"], a["keys_added"], a["key_status"],
+                    a["port_status"], a["join_refused_security"]))
                 print("aic auto scans=%d joins=%d missed=%d secured=%d | bt ep 0x83 "
                       "opened=%d status=%#x" % (
                     a["auto_scans"], a["auto_joins"], a["auto_missed"],
@@ -302,6 +312,15 @@ def status(sym):
         loaded, n = struct.unpack(">II", raw[:8])
         print("wifi cfg loaded=%d ssid=%r" % (loaded, raw[8:8 + min(n, 32)].decode(
             "utf-8", "replace")))
+    if "wpa_stats" in sym:
+        w = read_struct(sym, "wpa_stats")
+        names = {0: "idle", 1: "wait-1", 2: "wait-3", 3: "done", 4: "failed"}
+        print("wpa      state=%s psk=%d in=%d out=%d mic_bad=%d replays=%d "
+              "unwrap_bad=%d no_gtk=%d fails=%d gtk=%dB key_info=%#x" % (
+                  names.get(w["state"], w["state"]), w["psk_ready"],
+                  w["messages_in"], w["messages_out"], w["mic_failures"],
+                  w["replays"], w["unwrap_failures"], w["no_gtk"], w["failures"],
+                  w["gtk_len"], w["last_key_info"]))
     if "wl_stats" in sym:
         w = read_struct(sym, "wl_stats")
         print("wireless scans=%d/%d results=%d bad=%d full=%d networks=%d status=%#x" % (

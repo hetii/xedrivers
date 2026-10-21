@@ -36,6 +36,8 @@
 #define ME_CONFIG_REQ           AIC_MSG(TASK_ME, 0)
 #define ME_CHAN_CONFIG_REQ      AIC_MSG(TASK_ME, 2)
 #define ME_SET_PS_MODE_REQ      AIC_MSG(TASK_ME, 19)
+#define ME_SET_CONTROL_PORT_REQ AIC_MSG(TASK_ME, 4)
+#define MM_KEY_ADD_REQ          AIC_MSG(TASK_MM, 36)
 #define SCANU_START_REQ         AIC_MSG(TASK_SCANU, 0)
 #define SCANU_START_CFM         AIC_MSG(TASK_SCANU, 1)
 #define SCANU_RESULT_IND        AIC_MSG(TASK_SCANU, 4)
@@ -208,6 +210,85 @@ static u32 fail(AIC *a, u32 step, u32 status)
     return step;
 }
 
+/* --- the keys, once the handshake has them ------------------------------------- */
+
+#define CIPHER_CCMP     2u
+
+/* MM_KEY_ADD_REQ, 44 bytes: the key index and the station it belongs to (0xFF for
+ * the group key, which is a default key instead), the key itself, the cipher, the
+ * interface, and whether it is the station's own. */
+static u32 wpa_install_key(void *context, u32 pairwise, u32 index, const u8 *key,
+                           u32 length)
+{
+    AIC *a = (AIC *)context;
+    u32 status, i;
+
+    if (length > 32)
+        return 0;
+    zero(scratch, 44);
+    scratch[0] = (u8)(pairwise ? 0 : index);
+    scratch[1] = (u8)(pairwise ? a->ap_sta : 0xFF);
+    scratch[4] = (u8)length;
+    for (i = 0; i < length; i++)
+        scratch[8 + i] = key[i];
+    scratch[40] = CIPHER_CCMP;
+    scratch[41] = (u8)a->vif;
+    scratch[43] = (u8)(pairwise ? 1 : 0);
+    status = aic_send(a, MM_KEY_ADD_REQ, scratch, 44, CFM(MM_KEY_ADD_REQ));
+    a->st->key_status = NT_SUCCESS(status) && a->cfm_len >= 1 ? a->cfm[0] : status;
+    if (!NT_SUCCESS(status) || (a->cfm_len >= 1 && a->cfm[0]))
+        return 0;
+    a->st->keys_added++;
+    return 1;
+}
+
+/* The handshake is over: the firmware may let ordinary traffic through, and only
+ * then is the link up as far as the network layer is concerned. */
+static void wpa_port_ready(void *context, u32 ok)
+{
+    AIC *a = (AIC *)context;
+
+    if (ok) {
+        zero(scratch, 2);
+        scratch[0] = (u8)a->ap_sta;
+        scratch[1] = 1;
+        a->st->port_status = aic_send(a, ME_SET_CONTROL_PORT_REQ, scratch, 2,
+                                      CFM(ME_SET_CONTROL_PORT_REQ));
+    }
+    mem_sync();
+    net_speed_report(a->nd, 65);
+    net_link_report(a->nd, ok);
+}
+
+/* One EAPOL frame onto the air: the Ethernet header this station and the access
+ * point share, then the handshake's own bytes. */
+static u32 wpa_send_eapol(void *context, const u8 *body, u32 length)
+{
+    AIC *a = (AIC *)context;
+    u8 *f = a->eapol_buf;
+    u32 i;
+
+    if (!f || length + ETH_HLEN > AIC_EAPOL_MAX)
+        return 0;
+    for (i = 0; i < 6; i++) {
+        f[i] = a->bssid[i];
+        f[6 + i] = a->nd->mac[i];
+    }
+    f[12] = (u8)(WPA_ETHERTYPE >> 8);
+    f[13] = (u8)WPA_ETHERTYPE;
+    for (i = 0; i < length; i++)
+        f[ETH_HLEN + i] = body[i];
+    if (!aic_data_xmit(a, f, ETH_HLEN + length)) {
+        a->st->eapol_dropped++;
+        return 0;
+    }
+    a->st->eapol_out++;
+    return 1;
+}
+
+static const WPA_HOST wpa_host = { wpa_send_eapol, wpa_install_key, wpa_port_ready,
+                                   0 };
+
 /* Indications, at DISPATCH_LEVEL. */
 static u32 wifi_ind(AIC *a, u32 id, const u8 *p, u32 length)
 {
@@ -237,6 +318,19 @@ static u32 wifi_ind(AIC *a, u32 id, const u8 *p, u32 length)
         mem_sync();
         a->joined = 1;
         a->st->joined++;
+        if (a->secured) {
+            /* Associated, but nothing may cross until the four-way handshake has
+             * run: the access point starts it, and wpa_port_ready reports the
+             * link when it is done. */
+            WPA_HOST h = wpa_host;
+            u8 rsn[32];
+
+            h.context = a;
+            for (i = 0; i < 6; i++)
+                a->bssid[i] = p[2 + i];
+            wpa_begin(&h, a->nd->mac, a->bssid, rsn, wpa_rsn_ie(rsn));
+            return 1;
+        }
         /* The speed the dashboard shows is cosmetic here; what matters is that
          * the link is up, so xnet runs DHCP on it. */
         net_speed_report(a->nd, 65);
@@ -400,9 +494,17 @@ u32 aic_wifi_start(AIC *a)
  * rather than four bytes further on. */
 static u32 build_connect(AIC *a, const WL_BSS *bss)
 {
-    u32 i;
+    u32 i, flags = 0, ie_len = 0;
 
     zero(scratch, 320);
+    if (a->secured) {
+        /* A pairwise key will be in use and this host runs the handshake, so the
+         * firmware must leave the controlled port shut and pass EAPOL through
+         * (WPA_WPA2_IN_USE | CONTROL_PORT_HOST). The association request carries
+         * the same security element the handshake's second message repeats. */
+        flags = 0x08u | 0x01u;
+        ie_len = wpa_rsn_ie(scratch + 64);
+    }
     scratch[0] = bss->ssid_len;
     for (i = 0; i < bss->ssid_len && i < WL_SSID_MAX; i++)
         scratch[1 + i] = (u8)bss->ssid[i];
@@ -410,10 +512,10 @@ static u32 build_connect(AIC *a, const WL_BSS *bss)
         scratch[34 + i] = bss->bssid[i];
     aic_put16(scratch + 40, bss->freq);         /* chan: frequency, band, flags */
     scratch[42] = (u8)(bss->freq >= 5000 ? 1 : 0);
-    aic_put32(scratch + 48, 0);                 /* flags */
+    aic_put32(scratch + 48, flags);
     scratch[52] = 0x88;                         /* controlled port ethertype 888E */
     scratch[53] = 0x8E;
-    aic_put16(scratch + 54, 0);                 /* no added elements */
+    aic_put16(scratch + 54, ie_len);
     aic_put16(scratch + 56, 0);                 /* listen interval */
     scratch[58] = 0;                            /* wait for broadcast after beacon */
     scratch[59] = 0;                            /* open authentication */
@@ -433,9 +535,10 @@ u32 aic_wifi_join(AIC *a, u32 index)
     bss = &wl_bss[index];
     if (!bss->ssid_len)
         return STATUS_UNSUCCESSFUL;             /* a hidden network needs its name */
-    if (bss->security) {
-        /* Only open networks for now: a secured one needs the key exchange, which
-         * this driver does not do yet. */
+    /* A secured network needs the passphrase and a security this driver speaks:
+     * WPA2 with a pre-shared key. */
+    a->secured = bss->security != 0;
+    if (a->secured && (!(bss->security & WL_SEC_WPA2) || !wl_config.pass_len)) {
         a->st->join_refused_security++;
         return STATUS_UNSUCCESSFUL;
     }
@@ -484,6 +587,16 @@ u32 aic_wifi_join(AIC *a, u32 index)
     status = aic_send(a, ME_SET_PS_MODE_REQ, scratch, 1, CFM(ME_SET_PS_MODE_REQ));
     a->st->ps_off_status = status;
 
+    if (a->secured) {
+        /* The key from the passphrase and this network's name, which takes a
+         * moment: done before the association, not inside the handshake. */
+        for (i = 0; i < 6; i++)
+            a->bssid[i] = bss->bssid[i];
+        wpa_set_psk((const char *)wl_config.pass, (const u8 *)bss->ssid,
+                    bss->ssid_len);
+        a->st->secured_joins++;
+    }
+
     a->st->connects++;
     status = aic_send(a, SM_CONNECT_REQ, scratch, build_connect(a, bss),
                       CFM(SM_CONNECT_REQ));
@@ -522,6 +635,10 @@ void aic_wifi_tick(AIC *a)
     u32 secured;
     s32 pick;
 
+    /* Whatever the handshake settled, handed to the firmware here: this is the
+     * worker, so a command may be waited for. */
+    if (wpa_apply())
+        return;
     if (a->joined || a->auto_off || !wl_config.ssid_len || a->scanning)
         return;
     if (a->auto_wait) {

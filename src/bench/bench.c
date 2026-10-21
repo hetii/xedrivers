@@ -28,6 +28,8 @@
                              * debug_config_value */
 #define CMD_CRYPTO     19u  /* the kernel's SHA-1, HMAC-SHA1 and AES, checked
                              * against known answers -> a bitmap, 7 for all */
+#define CMD_WPA        20u  /* WPA2's key derivation and group-key unwrapping,
+                             * likewise -> a bitmap, 3 for both */
 
 void bench_init(void)
 {
@@ -63,6 +65,9 @@ u32 bench_command(u32 what, volatile u32 *args)
         return 1;
     case CMD_CRYPTO:
         args[5] = debug_crypto();
+        return 1;
+    case CMD_WPA:
+        args[5] = debug_wpa();
         return 1;
     case CMD_POKE:
         args[5] = debug_poke(args[1], args[2], args[3]);

@@ -154,12 +154,13 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # reached by the test translation units, so they build with the host compiler.
 # Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
 test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis \
-      $(BUILD)/test_aic
+      $(BUILD)/test_aic $(BUILD)/test_wpa
 	@$(BUILD)/test_cdc
 	@$(BUILD)/test_stack
 	@$(BUILD)/test_rtl
 	@$(BUILD)/test_rndis
 	@AIC_FW=$(AIC_FW) $(BUILD)/test_aic
+	@$(BUILD)/test_wpa
 
 HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core -I src/net -I src/wireless
 
@@ -185,14 +186,18 @@ $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c 
 
 $(BUILD)/test_aic: tests/drivers/aic8800/test_aic.c src/drivers/aic8800/aic_fw.c \
                    src/drivers/aic8800/aic_wifi.c src/drivers/aic8800/aic_data.c \
-                   src/wireless/wireless.c \
+                   src/wireless/wireless.c src/wireless/wpa.c \
                    tests/drivers/aic8800/wifi-8d81.txt \
                    src/drivers/aic8800/aic_cmd.c tests/drivers/aic8800/load-8d80.txt $(HEADERS)
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/drivers/aic8800 -o $@ tests/drivers/aic8800/test_aic.c \
 	    src/drivers/aic8800/aic_fw.c src/drivers/aic8800/aic_cmd.c \
 	    src/drivers/aic8800/aic_wifi.c src/drivers/aic8800/aic_data.c \
-	    src/wireless/wireless.c
+	    src/wireless/wireless.c src/wireless/wpa.c
+
+$(BUILD)/test_wpa: tests/wireless/test_wpa.c src/wireless/wpa.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -o $@ tests/wireless/test_wpa.c src/wireless/wpa.c
 
 lint:
 	@command -v cppcheck >/dev/null && cppcheck --std=c99 --enable=warning,style \

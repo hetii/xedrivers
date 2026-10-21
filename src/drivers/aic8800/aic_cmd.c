@@ -115,8 +115,10 @@ u32 aic_open(AIC *a, u32 ep_out, u32 ep_in)
     if (!a->tx_buf) {
         a->tx_buf = (u8 *)net_dma_scratch(AIC_TX_SIZE);
         a->file_buf = (u8 *)net_dma_scratch(AIC_BLOCK);
+        a->eapol_buf = (u8 *)net_dma_scratch(AIC_EAPOL_MAX);
     }
-    if (!a->tx_buf || !a->file_buf || !net_dma_begin(a->nd, AIC_DMA_BYTES))
+    if (!a->tx_buf || !a->file_buf || !a->eapol_buf ||
+        !net_dma_begin(a->nd, AIC_DMA_BYTES))
         return AIC_STEP_DMA;
     for (i = 0; i < AIC_RX_COUNT; i++) {
         a->rx_buf[i] = (u8 *)net_dma_alloc(a->nd, AIC_RX_SIZE);
