@@ -216,6 +216,7 @@ typedef struct AIC {
     u32 data_rx_consecutive_errors;
     URB data_tx_urb[AIC_DATA_TX_COUNT];
     u8 *data_tx_buf[AIC_DATA_TX_COUNT];
+    u32 last_rx_stamp;          /* time base of the last data frame in (prof.h) */
 } AIC;
 
 /* aic_cmd.c: the message channel, on bulk `ep_out` and `ep_in` (512 bytes). */

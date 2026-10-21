@@ -164,6 +164,7 @@ typedef struct _URB {
     u32            Busy;
     struct USB_DEV *Dev;                        /* the device it goes to (usb_prepare) */
     void          *Owner;                       /* the driver instance it belongs to */
+    u32            Stamp;                       /* time base at submission (prof.h) */
 } URB;
 
 extern int   UsbdRegisterDriverObject(USBD_DRIVER_OBJECT *driver);

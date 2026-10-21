@@ -196,7 +196,8 @@ static u32 load_section(AIC *a, u32 type, u8 *pairs, u32 count, void *context)
  * aggregation counter 10, power offsets over calibration) and no patch blocks. */
 static const u32 config_pairs[][2] = {
     { 0x00B4, 0xF3010000u },
-    { 0x0170, 0x0001000Au },
+    { 0x0170, 0x0001000Au },        /* receive aggregation; PLATFORM_HI's 0x00010001
+                                     * was tried and changed nothing measurable */
     { 0x0188, 0x00000001u },
 };
 

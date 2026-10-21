@@ -218,6 +218,7 @@ knows the product (VID:PID) wins over one that only knows the class.
 | `cdc` | class: a CDC ECM or NCM interface in the current configuration | the frame transport, ECM or NCM (`cdc.c` parses, `cdc_net.c` runs it) |
 | `rtl8156` | `0bda:8156` | `cdc` plus the Realtek part: 2.5G advertisement, registers, PHY, chip version |
 | `rndis` | class: an RNDIS control interface (E0/01/03, 02/02/FF, EF/04/01) | Remote NDIS, the way Android phones tether (`rndis.c` the messages, `rndis_net.c` the driver) |
+| `aic8800` | `a69c:8d80`, then `a69c:8d81` | AIC8800D80 USB Wi-Fi 6: firmware load (`aic_fw.c`), the Wi-Fi firmware's bring-up, scan and join (`aic_wifi.c`), frames (`aic_data.c`); the networks found go to `src/wireless/` |
 
 `rndis` was first run on a Xiaomi phone tethering over USB (2717:ff80): INITIALIZE,
 MAC, filter and link state answered at the first try, the phone packs several
@@ -241,6 +242,38 @@ unclaimed). It is for devices that are CDC from the start.
 A driver that builds on another includes its public header, which is the whole of
 the dependency: `make DRIVERS=rtl8156` without `cdc` stops at that include. Tests
 sit beside the code: `tests/core/`, `tests/drivers/<d>/`.
+
+## Wi-Fi: the AIC8800D80
+
+The chip arrives as `a69c:8d80`, its boot ROM; the driver writes the firmware into
+it from the `aic8800D80` directory beside the plugin (`make push-fw` puts Linux's
+files there) and starts it, and the chip comes back as `a69c:8d81` with the Wi-Fi
+firmware running. Both phases send exactly the messages aicsemi's Linux driver
+sends, checked against its own usbmon recording (`tests/drivers/aic8800/`). Scans
+fill a table of networks (`tests/xectl.py status`); `xectl.py cmd 31 <index>` joins
+one, `cmd 32` leaves. Open networks only so far: a secured one needs the WPA2 key
+exchange, which is not written yet, and is refused.
+
+The station associates on the console's own address, read from its configuration
+(category 2, setting 1) before any device is brought up, because that is what xnet
+sends from and all it takes in. A Wi-Fi link is an uplink like any other, below a
+USB Ethernet card and above the onboard port.
+
+Measured with an open access point on the PC's twin card (Linux's aic8800 driver in
+AP mode, 20 MHz -- NetworkManager 1.46 sets no wider channel, and hostapd is not
+installed), 2.4 GHz channel 6 and 5 GHz channel 36 alike: one TCP stream 0.8 MB/s
+each way, four streams 1.9 MB/s out. The console is not what limits it. Its TCP
+keeps about four segments in flight, which on the wire (0.3 ms round trip) is
+21.9 MB/s; over this link a round takes about 7 ms, so 4 x 1460 bytes / 7 ms. Of
+those 7 ms, decomposed with usbmon on the access point's own USB: about 4.7 ms the
+access point's driver holds four received frames before its IP stack sees them,
+about 2.5 ms is the air both ways and the console. Inside the console a received
+frame is answered in 22-69 us and a transmit transfer accepted by the chip in
+0.25-0.3 ms (`make bench=prof`, stages `turnaround` and `tx_wait`). Turning power
+saving off, 24 receive requests instead of 8, larger socket buffers (the console
+then offers a 64 KB window) and the firmware's other receive-aggregation setting
+each changed the figure by under a tenth. A real access point, a wider channel and
+a stronger signal (-72 dBm here) are what is left to try.
 
 ## When the card goes
 

@@ -36,6 +36,10 @@ typedef struct {
     PROF_SLOT tx_done;      /* a transmit completion, with what it drains */
     PROF_SLOT rx_done;      /* a receive completion, with the frames handed up */
     PROF_SLOT rx_up;        /* the receiver of one frame: xnet or the stack */
+    PROF_SLOT tx_wait;      /* a transmit request, from its submission to its
+                             * completion: how long the device took to take it */
+    PROF_SLOT turnaround;   /* from the last frame received to the next one sent:
+                             * how long the console takes to answer (an ACK, most) */
 } NET_PROF;
 
 extern volatile NET_PROF net_prof;
@@ -66,10 +70,16 @@ static inline void prof_add(volatile PROF_SLOT *slot, u32 since, u32 bytes)
 #define PROF_START(v)          u32 v = prof_tb()
 #define PROF_END(slot, v, n)   prof_add(&net_prof.slot, v, n)
 #define PROF_STAMP()           (net_prof.stamp = prof_tb())
+/* A stage that ends in another context than it began: the start kept somewhere
+ * that outlives the call (a request's Stamp). */
+#define PROF_MARK(where)       ((where) = prof_tb())
+#define PROF_SINCE(slot, w, n) prof_add(&net_prof.slot, (w), (n))
 #else
 #define PROF_START(v)          do { } while (0)
 #define PROF_END(slot, v, n)   do { } while (0)
 #define PROF_STAMP()           do { } while (0)
+#define PROF_MARK(where)       do { } while (0)
+#define PROF_SINCE(slot, w, n) do { } while (0)
 #endif
 
 #if XE_PROF

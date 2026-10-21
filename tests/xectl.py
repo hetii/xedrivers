@@ -43,10 +43,10 @@ MODES = {"drop": 0, "standalone": 1, "xnet": 2}
 ADVERT = {"2500": 0x6F, "1000": 0x2F, "100": 0x0F, "default": 0}
 MCU = {"pla": 0x0100, "usb": 0x0000}
 
-PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up']
+PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up', 'tx_wait', 'turnaround']
 
 STRUCTS = {
-    "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls"],
+    "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls", "tx_wait_ticks_hi", "tx_wait_ticks_lo", "tx_wait_bytes_hi", "tx_wait_bytes_lo", "tx_wait_calls", "turnaround_ticks_hi", "turnaround_ticks_lo", "turnaround_bytes_hi", "turnaround_bytes_lo", "turnaround_calls"],
     "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found"],
     "net_state": ["start_result", "start_count", "mode", "xnet_status",
                   "console_mac_status", "console_mac_needed", "console_mac_read0",

@@ -25,6 +25,7 @@
  */
 
 #include "aic.h"
+#include "prof.h"
 
 #define TX_HEADER       4u
 #define HOSTDESC        28u
@@ -66,6 +67,9 @@ static void tx_complete(URB *urb, u32 status)
 {
     AIC *a = (AIC *)urb->Owner;
 
+    PROF_SINCE(tx_wait, urb->Stamp, urb->Length);
+    if (a->nd->st->tx_inflight)
+        a->nd->st->tx_inflight--;
     if (!NT_SUCCESS(status)) {
         a->st->data_tx_errors++;
         a->st->data_tx_last_error = status;
@@ -147,7 +151,10 @@ u32 aic_data_xmit(AIC *a, const u8 *frame, u32 length)
     usb_prepare(&a->data_tx_urb[slot], a->dev, a->ep_data_out, tx_complete, b, total, 0);
     a->st->data_tx_frames++;
     a->nd->st->tx_frames++;
+    a->nd->st->tx_inflight++;
     net_add64(&a->nd->st->tx_bytes, &a->nd->st->tx_bytes_hi, length);
+    PROF_MARK(a->data_tx_urb[slot].Stamp);
+    PROF_SINCE(turnaround, a->last_rx_stamp, length);
     usb_submit(&a->data_tx_urb[slot]);
     return 1;
 }
@@ -213,6 +220,7 @@ static void mpdu_in(AIC *a, u8 *p, u32 length)
     eth = p + strip - ETH_HLEN;
     for (i = 0; i < 2 * ETH_ALEN; i++)
         eth[i] = addresses[i];
+    PROF_MARK(a->last_rx_stamp);
     net_frame_in(a->nd, eth, length - strip + ETH_HLEN);
 }
 
