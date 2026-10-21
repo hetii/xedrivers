@@ -639,7 +639,7 @@ void aic_wifi_tick(AIC *a)
      * worker, so a command may be waited for. */
     if (wpa_apply())
         return;
-    if (a->joined || a->auto_off || !wl_config.ssid_len || a->scanning)
+    if (a->joined || a->auto_off || !wl_config.count || a->scanning)
         return;
     if (a->auto_wait) {
         a->auto_wait--;

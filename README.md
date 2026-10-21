@@ -268,10 +268,11 @@ The two awkward parts are checked on the console against published examples
 (`xectl.py cmd 20`): the key from a passphrase against IEEE 802.11i's worked
 example, and the group key's unwrapping against RFC 3394's.
 
-A network can also be joined by itself: `wifi_ssid = <name>` in `xedrivers.ini`
-beside the plugin (one `key = value` a line, `#` for comments). While the card is
-up and not joined it scans every five seconds and joins that network's strongest
-access point when it sees it open; the same loop brings it back after the access
+A network can also be joined by itself: `wifi_ssid = <name>[, <name>...]` in
+`xedrivers.ini` beside the plugin (one `key = value` a line, `#` for comments).
+While the card is up and not joined it scans every five seconds and joins the
+strongest access point of any name listed -- which covers two routers under one
+name, and the two bands of one router, whose names differ; the same loop brings it back after the access
 point goes away (tried: hostapd stopped, the console told of the loss within five
 seconds, joined again ten seconds after it returned). `xectl.py cmd 32` leaves and
 keeps it off until `cmd 31` joins again.
@@ -296,6 +297,23 @@ frame is answered in 22-69 us and a transmit transfer accepted by the chip in
 saving off, 24 receive requests instead of 8, larger socket buffers (the console
 then offers a 64 KB window) and the firmware's other receive-aggregation setting
 each changed the figure by under a tenth.
+
+What the same console and card carry, by access point. Eight TCP streams, the
+plugin's own server, the card three metres from the console and a floor below the
+house's routers:
+
+| access point | signal | out of the console | into it |
+|---|---|---|---|
+| hostapd, 5 GHz ch 149, nothing else on it | -62 dBm | 6.0 MB/s | 11.0 MB/s |
+| the house's router, 2.4 GHz ch 3 | -64 dBm | 2.9 MB/s | 1.4 MB/s |
+| hostapd, 5 GHz ch 36, beside a neighbour | -71 dBm | 0.8 MB/s | 1.3 MB/s |
+| the house's router, 5 GHz ch 100, a floor up | -73 dBm | 0.5 MB/s | 0.3 MB/s |
+
+Eight decibels and a free channel are worth twenty times the throughput; nothing
+in the driver came close to mattering that much. Which band wins is not obvious
+either -- here 2.4 GHz beats the same router's 5 GHz six times over, because it
+gets through the floor -- so `wifi_ssid` takes a list and the strongest access
+point of any name in it is the one joined.
 
 **A clear channel is worth thirteen times the driver's tuning.** With hostapd on
 5 GHz channel 149, which nothing else here uses, WPA2 and CCMP, the same console

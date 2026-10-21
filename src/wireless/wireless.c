@@ -177,15 +177,27 @@ volatile WL_CONFIG wl_config;
 
 void wl_load_config(void)
 {
-    char value[WL_PASS_MAX + 1];
-    u32 n, i;
+    char value[WL_NAMES_MAX * (WL_SSID_MAX + 2)];
+    u32 n, i, at = 0, k;
 
-    n = file_setting(WL_SETTINGS, "wifi_ssid", value, WL_SSID_MAX + 1);
-    for (i = 0; i < n; i++)
-        wl_config.ssid[i] = value[i];
-    wl_config.ssid[n] = 0;
-    wl_config.ssid_len = n;
-    n = file_setting(WL_SETTINGS, "wifi_pass", value, sizeof(value));
+    n = file_setting(WL_SETTINGS, "wifi_ssid", value, sizeof(value));
+    wl_config.count = 0;
+    while (at < n && wl_config.count < WL_NAMES_MAX) {
+        while (at < n && (value[at] == ' ' || value[at] == ','))
+            at++;
+        for (k = 0; at < n && value[at] != ',' && k < WL_SSID_MAX; k++, at++)
+            wl_config.ssid[wl_config.count][k] = value[at];
+        while (k && (wl_config.ssid[wl_config.count][k - 1] == ' ' ||
+                     wl_config.ssid[wl_config.count][k - 1] == '\t'))
+            k--;
+        wl_config.ssid[wl_config.count][k] = 0;
+        wl_config.ssid_len[wl_config.count] = k;
+        if (k)
+            wl_config.count++;
+        while (at < n && value[at] != ',')
+            at++;
+    }
+    n = file_setting(WL_SETTINGS, "wifi_pass", value, WL_PASS_MAX + 1);
     for (i = 0; i < n; i++)
         wl_config.pass[i] = value[i];
     wl_config.pass[n] = 0;
@@ -193,22 +205,34 @@ void wl_load_config(void)
     wl_config.loaded = 1;
 }
 
+/* Is this one of the networks named? */
+static u32 named(const WL_BSS *b)
+{
+    u32 n, k;
+
+    for (n = 0; n < wl_config.count; n++) {
+        if (b->ssid_len != wl_config.ssid_len[n])
+            continue;
+        for (k = 0; k < b->ssid_len && b->ssid[k] == wl_config.ssid[n][k]; k++)
+            ;
+        if (k == b->ssid_len)
+            return 1;
+    }
+    return 0;
+}
+
 s32 wl_pick(u32 *secured)
 {
     s32 best = -1;
-    u32 i, k;
+    u32 i;
 
     *secured = 0;
-    if (!wl_config.ssid_len)
+    if (!wl_config.count)
         return -1;
     for (i = 0; i < wl_stats.bss_count; i++) {
         const WL_BSS *b = &wl_bss[i];
 
-        if (b->ssid_len != wl_config.ssid_len)
-            continue;
-        for (k = 0; k < b->ssid_len && b->ssid[k] == wl_config.ssid[k]; k++)
-            ;
-        if (k != b->ssid_len)
+        if (!named(b))
             continue;
         if (b->security & ~(u8)WL_SEC_WPA2) {
             *secured = 1;               /* WPA2 with a pre-shared key, or open */

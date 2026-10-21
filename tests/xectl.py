@@ -308,10 +308,18 @@ def status(sym):
                           a["data_rx_unsupported"], a["data_rx_not_from_ds"],
                           a["data_rx_short"], a["data_rx_truncated"]))
     if "wl_config" in sym:
-        raw = read(sym["wl_config"], 8 + 33)
-        loaded, n = struct.unpack(">II", raw[:8])
-        print("wifi cfg loaded=%d ssid=%r" % (loaded, raw[8:8 + min(n, 32)].decode(
-            "utf-8", "replace")))
+        names_max = 4
+        raw = read(sym["wl_config"], 8 + 4 * names_max + names_max * 33 + 4)
+        loaded, count = struct.unpack(">II", raw[:8])
+        lens = struct.unpack(">%dI" % names_max, raw[8:8 + 4 * names_max])
+        base = 8 + 4 * names_max
+        names = [raw[base + i * 33:base + i * 33 + lens[i]].decode("utf-8", "replace")
+                 for i in range(min(count, names_max))]
+        has_pass = struct.unpack(">I", raw[base + names_max * 33:
+                                          base + names_max * 33 + 4])[0]
+        print("wifi cfg loaded=%d ssid=%s pass=%s" % (
+            loaded, ", ".join(repr(n) for n in names) or "none",
+            "set" if has_pass else "none"))
     if "wpa_stats" in sym:
         w = read_struct(sym, "wpa_stats")
         names = {0: "idle", 1: "wait-1", 2: "wait-3", 3: "done", 4: "failed"}

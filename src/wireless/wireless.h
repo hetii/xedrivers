@@ -65,11 +65,17 @@ u32 wl_parse_bss(const u8 *frame, u32 length, WL_BSS *bss);
 /* The network asked for: `wifi_ssid=` in WL_SETTINGS, read once a Wi-Fi card is
  * up. An empty name joins nothing by itself. */
 #define WL_PASS_MAX  63
+#define WL_NAMES_MAX 4          /* networks that may be named at once */
 
+/* The networks asked for: `wifi_ssid =` may name several, separated by commas,
+ * and the strongest access point of any of them is joined. Two routers under one
+ * name are covered by that anyway; two bands are not, since they are two names,
+ * and which of them carries more depends entirely on where the card sits. */
 typedef struct {
     u32  loaded;
-    u32  ssid_len;
-    char ssid[WL_SSID_MAX + 1];
+    u32  count;
+    u32  ssid_len[WL_NAMES_MAX];
+    char ssid[WL_NAMES_MAX][WL_SSID_MAX + 1];
     u32  pass_len;              /* `wifi_pass =`, for a WPA2 network */
     char pass[WL_PASS_MAX + 1];
 } WL_CONFIG;

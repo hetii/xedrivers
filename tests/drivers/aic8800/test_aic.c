@@ -413,7 +413,7 @@ static void test_wifi(void)
     {
         u32 secured;
 
-        CHECK(wl_config.loaded && wl_config.ssid_len == 0);
+        CHECK(wl_config.loaded && wl_config.count == 0);
         CHECK(wl_pick(&secured) == -1 && !secured);
         setting_ssid = "net-axxxxxx";
         wl_load_config();
@@ -421,6 +421,12 @@ static void test_wifi(void)
         setting_ssid = "nowhere";
         wl_load_config();
         CHECK(wl_pick(&secured) == -1 && !secured);
+        /* Several names, the strongest of any of them taken. */
+        setting_ssid = " nowhere , net-axxxxxx ,net-cxxxxxxx";
+        wl_load_config();
+        CHECK(wl_config.count == 3 && wl_config.ssid_len[1] == 11);
+        CHECK(!strcmp(wl_config.ssid[1], "net-axxxxxx"));
+        CHECK(!strcmp(wl_config.ssid[2], "net-cxxxxxxx"));
         for (i = 0; i < wl_stats.bss_count && strcmp(wl_bss[i].ssid, "net-bx"); i++)
             ;
         CHECK(i < wl_stats.bss_count);
