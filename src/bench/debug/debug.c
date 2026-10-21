@@ -77,3 +77,85 @@ u32 debug_thread_priority(u32 id, u32 priority)
     ObDereferenceObject(thread);
     return old;
 }
+
+/* --- the kernel's cryptography, against known answers -------------------------
+ * Three checks, so a wrong calling convention cannot pass unnoticed:
+ *   1  SHA-1 of "abc" = a9993e364706816aba3e25717850c26c9cd0d89d (FIPS 180-2).
+ *   2  HMAC-SHA1 with a 20-byte key of 0x0b over "Hi There" (RFC 2202 case 1),
+ *      given as three pieces, which is how the key derivation uses it.
+ *   4  AES-128 of the FIPS-197 block under its key, and the same back again.
+ */
+
+volatile u32 debug_crypto_out[12];
+
+static u32 same(const u8 *a, const u8 *b, u32 n)
+{
+    while (n--)
+        if (*a++ != *b++)
+            return 0;
+    return 1;
+}
+
+static void keep(u32 slot, const u8 *p, u32 n)
+{
+    u32 i;
+
+    for (i = 0; i < n && i < 16; i++)
+        debug_crypto_out[slot + i / 4] |= (u32)p[i] << (24 - 8 * (i % 4));
+}
+
+u32 debug_crypto(void)
+{
+    static const u8 sha_abc[20] = {
+        0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e,
+        0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d };
+    static const u8 hmac_want[20] = {
+        0xb6, 0x17, 0x31, 0x86, 0x55, 0x05, 0x72, 0x64, 0xe2, 0x8b,
+        0xc0, 0xb6, 0xfb, 0x37, 0x8c, 0x8e, 0xf1, 0x46, 0xbe, 0x00 };
+    static const u8 aes_key[16] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
+    static const u8 aes_in[16] = {
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff };
+    static const u8 aes_want[16] = {
+        0x69, 0xc4, 0xe0, 0xd8, 0x6a, 0x7b, 0x04, 0x30,
+        0xd8, 0xcd, 0xb7, 0x80, 0x70, 0xb4, 0xc5, 0x5a };
+    static XE_SHA_STATE sha;
+    static XE_HMAC_STATE hmac;
+    static XE_AES_STATE aes;
+    u8 out[20], back[16], key[20];
+    u32 passed = 0, i;
+
+    for (i = 0; i < 12; i++)
+        debug_crypto_out[i] = 0;
+
+    XeCryptShaInit(&sha);
+    XeCryptShaUpdate(&sha, (const u8 *)"abc", 3);
+    XeCryptShaFinal(&sha, out, 20);
+    keep(0, out, 16);
+    if (same(out, sha_abc, 20))
+        passed |= 1;
+
+    for (i = 0; i < 20; i++)
+        key[i] = 0x0B;
+    for (i = 0; i < 20; i++)
+        out[i] = 0;
+    XeCryptHmacShaInit(&hmac, key, 20);
+    XeCryptHmacShaUpdate(&hmac, (const u8 *)"Hi ", 3);
+    XeCryptHmacShaUpdate(&hmac, (const u8 *)"The", 3);
+    XeCryptHmacShaUpdate(&hmac, (const u8 *)"re", 2);
+    XeCryptHmacShaFinal(&hmac, out, 20);
+    keep(4, out, 16);
+    if (same(out, hmac_want, 20))
+        passed |= 2;
+
+    XeCryptAesKey(&aes, aes_key);
+    XeCryptAesEcb(&aes, aes_in, out, 1);
+    keep(8, out, 16);
+    XeCryptAesEcb(&aes, out, back, 0);
+    if (same(out, aes_want, 16) && same(back, aes_in, 16))
+        passed |= 4;
+
+    return passed;
+}

@@ -26,6 +26,8 @@
 #define CMD_POKE       17u  /* [1] address, [2] 1 = little-endian, [3] word */
 #define CMD_CONFIG     18u  /* [1] category, [2] setting -> size, bytes in
                              * debug_config_value */
+#define CMD_CRYPTO     19u  /* the kernel's SHA-1, HMAC-SHA1 and AES, checked
+                             * against known answers -> a bitmap, 7 for all */
 
 void bench_init(void)
 {
@@ -58,6 +60,9 @@ u32 bench_command(u32 what, volatile u32 *args)
         return 1;
     case CMD_CONFIG:
         args[5] = debug_config(args[1], args[2]);
+        return 1;
+    case CMD_CRYPTO:
+        args[5] = debug_crypto();
         return 1;
     case CMD_POKE:
         args[5] = debug_poke(args[1], args[2], args[3]);

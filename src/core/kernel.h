@@ -231,6 +231,39 @@ extern int   KeInsertQueueDpc(KDPC *dpc, void *arg1, void *arg2);
 extern u32   ExGetXConfigSetting(u16 category, u16 setting, void *buffer, u16 size,
                                  u16 *needed);
 
+/* --- the console's own cryptography ------------------------------------------
+ * Ordinals 383-386 and 399-402 (HMAC-SHA1 and SHA-1) and 345-346 (AES), which is
+ * everything WPA2-Personal needs on the host, so none of it is written here. The
+ * states are opaque: the sizes below are generous on purpose, since only the
+ * kernel looks inside them. xebuild's XeCrypt headers give the shapes;
+ * src/bench/debug checks them against known answers on the console itself.
+ *
+ * XeCryptHmacSha takes the key and up to three pieces of data, which is what the
+ * EAPOL-Key check value, PBKDF2 and the 802.11 key derivation all need. Its key is
+ * truncated at 64 bytes rather than hashed, unlike RFC 2104; every key here is 32
+ * bytes or less, so that difference never shows. */
+typedef struct { u8 opaque[128]; } __attribute__((aligned(8))) XE_SHA_STATE;
+typedef struct { u8 opaque[512]; } __attribute__((aligned(8))) XE_HMAC_STATE;
+typedef struct { u8 opaque[1024]; } __attribute__((aligned(8))) XE_AES_STATE;
+
+extern void XeCryptShaInit(XE_SHA_STATE *state);
+extern void XeCryptShaUpdate(XE_SHA_STATE *state, const u8 *in, u32 length);
+extern void XeCryptShaFinal(XE_SHA_STATE *state, u8 *out, u32 out_length);
+/* The incremental form, three arguments a call: the one-shot XeCryptHmacSha takes
+ * ten, and gcc puts the ninth and tenth where this console does not read them
+ * (kit/kcall.S), so it writes no output at all -- checked. */
+extern void XeCryptHmacShaInit(XE_HMAC_STATE *state, const u8 *key, u32 key_length);
+extern void XeCryptHmacShaUpdate(XE_HMAC_STATE *state, const u8 *in, u32 length);
+extern void XeCryptHmacShaFinal(XE_HMAC_STATE *state, u8 *out, u32 out_length);
+
+extern void XeCryptHmacSha(const u8 *key, u32 key_length,
+                           const u8 *in1, u32 length1,
+                           const u8 *in2, u32 length2,
+                           const u8 *in3, u32 length3,
+                           u8 *out, u32 out_length);
+extern void XeCryptAesKey(XE_AES_STATE *state, const u8 *key);
+extern void XeCryptAesEcb(XE_AES_STATE *state, const u8 *in, u8 *out, u32 encrypt);
+
 /* --- files ---------------------------------------------------------------------
  * Object names are ANSI on this kernel. NtCreateFile (210) takes nine arguments, so
  * it is called through kcall9 (kit/kcall.S), which puts the ninth where the console
