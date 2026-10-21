@@ -184,13 +184,15 @@ $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c 
 	    src/drivers/rndis/rndis.c
 
 $(BUILD)/test_aic: tests/drivers/aic8800/test_aic.c src/drivers/aic8800/aic_fw.c \
-                   src/drivers/aic8800/aic_wifi.c src/wireless/wireless.c \
+                   src/drivers/aic8800/aic_wifi.c src/drivers/aic8800/aic_data.c \
+                   src/wireless/wireless.c \
                    tests/drivers/aic8800/wifi-8d81.txt \
                    src/drivers/aic8800/aic_cmd.c tests/drivers/aic8800/load-8d80.txt $(HEADERS)
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/drivers/aic8800 -o $@ tests/drivers/aic8800/test_aic.c \
 	    src/drivers/aic8800/aic_fw.c src/drivers/aic8800/aic_cmd.c \
-	    src/drivers/aic8800/aic_wifi.c src/wireless/wireless.c
+	    src/drivers/aic8800/aic_wifi.c src/drivers/aic8800/aic_data.c \
+	    src/wireless/wireless.c
 
 lint:
 	@command -v cppcheck >/dev/null && cppcheck --std=c99 --enable=warning,style \

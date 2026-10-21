@@ -7,7 +7,6 @@
 
 #define CFM_TIMEOUT_MS   4000   /* Linux allows 2000; RF calibration takes 1400 */
 #define TX_TIMEOUT_MS    1000
-#define RX_ERROR_LIMIT   64
 
 static void rx_complete(URB *urb, u32 status);
 
@@ -17,12 +16,15 @@ static void rx_queue(AIC *a, URB *urb)
     usb_submit(urb);
 }
 
-/* One message of a transfer: the confirm awaited, or an indication for a->ind. */
-static void message(AIC *a, const u8 *m, u32 length)
+/* One message of a transfer: the confirm awaited, or an indication for a->ind.
+ * `packet` is its four-byte header, `length` what that header says follows it;
+ * both endpoints' parsers come here, since either transfer may carry one. */
+void aic_message_in(AIC *a, const u8 *packet, u32 length)
 {
+    const u8 *m = packet + 4;
     u32 id, params;
 
-    if (length < AIC_CFM_HEADER - 4)
+    if ((packet[2] & 0x7F) != AIC_TYPE_CMD_RSP || length < AIC_CFM_HEADER - 4)
         return;
     id = (u32)(m[0] | m[1] << 8);
     params = (u32)(m[6] | m[7] << 8);
@@ -57,9 +59,9 @@ static void parse(AIC *a, const u8 *p, u32 total)
         if (!length)
             break;
         if (p[at + 2] & AIC_TYPE_CFG) {
-            if ((p[at + 2] & 0x7F) == AIC_TYPE_CMD_RSP && at + 4 + length <= total)
-                message(a, p + at + 4, length);
             size = ((length + 3) & ~3u) + 4;
+            if (at + size <= total)
+                aic_message_in(a, p + at, length);
         } else {
             a->st->rx_data++;
             size = (length + AIC_RX_HW_HEADER + 3) & ~3u;
@@ -78,7 +80,7 @@ static void rx_complete(URB *urb, u32 status)
     if (!NT_SUCCESS(status)) {
         a->st->rx_errors++;
         a->st->rx_last_error = status;
-        if (++a->rx_consecutive_errors >= RX_ERROR_LIMIT)
+        if (++a->rx_consecutive_errors >= AIC_RX_ERROR_LIMIT)
             return;                             /* the device is going */
         rx_queue(a, urb);
         return;
@@ -114,8 +116,7 @@ u32 aic_open(AIC *a, u32 ep_out, u32 ep_in)
         a->tx_buf = (u8 *)net_dma_scratch(AIC_TX_SIZE);
         a->file_buf = (u8 *)net_dma_scratch(AIC_BLOCK);
     }
-    if (!a->tx_buf || !a->file_buf ||
-        !net_dma_begin(a->nd, AIC_RX_COUNT * AIC_RX_SIZE + 2048))
+    if (!a->tx_buf || !a->file_buf || !net_dma_begin(a->nd, AIC_DMA_BYTES))
         return AIC_STEP_DMA;
     for (i = 0; i < AIC_RX_COUNT; i++) {
         a->rx_buf[i] = (u8 *)net_dma_alloc(a->nd, AIC_RX_SIZE);

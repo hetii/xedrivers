@@ -28,6 +28,8 @@ volatile NET_RX net_rx;
 volatile NET_LINK net_link_cb;
 volatile NET_TX_IDLE net_tx_idle;
 u8 net_mac[ETH_ALEN];
+u8 net_console_mac[ETH_ALEN];
+volatile u32 net_console_mac_known;
 NET_DEV net_devs[NET_MAX];
 volatile NET_STATS net_stats[NET_MAX];
 volatile u32 net_active;
@@ -41,6 +43,41 @@ void net_add64(volatile u32 *lo, volatile u32 *hi, u32 n)
     if (v < n)
         (*hi)++;
     *lo = v;
+}
+
+/* The secured category, and the address in it: found by reading every setting of
+ * every category off the bench console and recognising the one that held its known
+ * address (tests/xectl.py cmd 18, src/bench/debug). Whatever comes back is only
+ * taken if it is six bytes and could be an address at all -- a unicast one that is
+ * not all zeroes -- so a build against another kernel, numbering its settings
+ * differently, is left no worse off than before, with xnet's own first frame still
+ * to learn the address from (xnet.c). */
+#define XCONFIG_SECURED         2u
+#define XCONFIG_SECURED_MAC     1u
+
+void net_learn_console_mac(void)
+{
+    u8 mac[ETH_ALEN];
+    u16 needed = 0;
+    u32 status, i, bits = 0;
+
+    for (i = 0; i < ETH_ALEN; i++)
+        mac[i] = 0;
+    status = ExGetXConfigSetting(XCONFIG_SECURED, XCONFIG_SECURED_MAC, mac,
+                                 ETH_ALEN, &needed);
+    net_state.console_mac_status = status;
+    net_state.console_mac_needed = needed;
+    for (i = 0; i < ETH_ALEN; i++) {
+        net_state.console_mac_read[i / 4] |= (u32)mac[i] << (24 - 8 * (i % 4));
+        bits |= mac[i];
+    }
+    if (!NT_SUCCESS(status) || needed != ETH_ALEN || !bits || (mac[0] & 1))
+        return;
+    for (i = 0; i < ETH_ALEN; i++)
+        net_console_mac[i] = mac[i];
+    mem_sync();
+    net_console_mac_known = 1;
+    net_state.console_mac_from_config = 1;
 }
 
 static NET_DEV *uplink(void)

@@ -16,11 +16,41 @@
 #include "file.h"
 #include "wireless.h"
 
-#define EP_IN  ((void *)1)
-#define EP_OUT ((void *)2)
+#define EP_IN       ((void *)1)     /* 0x82, confirms and indications */
+#define EP_OUT      ((void *)2)     /* 0x02, commands */
+#define EP_DATA_IN  ((void *)3)     /* 0x81 */
+#define EP_DATA_OUT ((void *)4)     /* 0x01 */
 
 volatile FILE_STATS file_stats;
 volatile USB_STATS usb_stats;
+u8 net_console_mac[ETH_ALEN];
+volatile u32 net_console_mac_known;
+
+/* What the network layer saw: the last frame handed up, and the link reports. */
+static volatile NET_STATS net_counters;
+static u8 up_frame[2048];
+static u32 up_length, up_frames, link_reports, last_link;
+
+void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
+{
+    (void)nd;
+    up_length = length < sizeof(up_frame) ? length : sizeof(up_frame);
+    memcpy(up_frame, frame, up_length);
+    up_frames++;
+}
+
+void net_link_report(NET_DEV *nd, u32 up) { (void)nd; link_reports++; last_link = up; }
+
+void net_add64(volatile u32 *lo, volatile u32 *hi, u32 n)
+{
+    u32 v = *lo + n;
+
+    if (v < n)
+        (*hi)++;
+    *lo = v;
+}
+void net_speed_report(NET_DEV *nd, u32 mbps) { (void)nd; (void)mbps; }
+void net_tx_done(NET_DEV *nd) { (void)nd; }
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
@@ -28,9 +58,13 @@ static int failures;
 
 /* --- the recording --------------------------------------------------------------- */
 
+static u32 dma_used;        /* each test carves the DMA block for itself */
+
 typedef struct { int out; u32 length; u32 crc; u8 *data; } STEP;
 static URB *rx_waiting[AIC_RX_COUNT];
 static u32 rx_waiting_count;
+static URB *data_rx_waiting[16];
+static u32 data_rx_count;
 static STEP steps[2048];
 static u32 step_count, next_step, outs_matched, first_mismatch = 0xFFFFFFFFu;
 
@@ -54,6 +88,8 @@ static int load_recording(const char *path)
     step_count = next_step = outs_matched = 0;
     first_mismatch = 0xFFFFFFFFu;
     rx_waiting_count = 0;
+    data_rx_count = 0;
+    dma_used = 0;
     if (!f)
         return 0;
     while (fgets(line, sizeof(line), f) && step_count < 2048) {
@@ -117,8 +153,26 @@ static void deliver_answers(void)
     }
 }
 
+/* The data endpoints: a transmit is kept for the test to look at, a receive is
+ * parked until the test feeds it a frame. */
+static u8 sent[4096];
+static u32 sent_length, sent_count;
+
 void usb_submit(URB *urb)
 {
+    if (urb->Endpoint == EP_DATA_OUT) {
+        sent_length = urb->Length < sizeof(sent) ? urb->Length : sizeof(sent);
+        memcpy(sent, urb->Buffer, sent_length);
+        sent_count++;
+        urb->Actual = urb->Length;
+        urb->Routine(urb, 0);
+        return;
+    }
+    if (urb->Endpoint == EP_DATA_IN) {
+        if (data_rx_count < 16)
+            data_rx_waiting[data_rx_count++] = urb;
+        return;
+    }
     if (urb->Endpoint == EP_IN) {
         rx_waiting[rx_waiting_count++] = urb;
         return;
@@ -150,18 +204,42 @@ void usb_submit(URB *urb)
     deliver_answers();
 }
 
+/* Which phase the chip is in, because endpoint 0x01 is the boot ROM's command
+ * channel and the Wi-Fi firmware's data channel. */
+static u32 wifi_phase;
+
 void *usb_open(USB_DEV *dev, u32 type, u32 address, u32 max_packet, u32 interval)
 {
     (void)dev; (void)type; (void)max_packet; (void)interval;
+    if (address == 0x81)
+        return EP_DATA_IN;
+    if (address == 0x01 && wifi_phase)
+        return EP_DATA_OUT;
     return address & 0x80 ? EP_IN : EP_OUT;
+}
+
+/* Hand one transfer to the parked receive request, as the chip would. */
+static void feed_rx(AIC *a, const u8 *buffer, u32 length)
+{
+    URB *urb;
+
+    (void)a;
+    if (!data_rx_count) {
+        printf("FAIL: no receive request parked\n");
+        failures++;
+        return;
+    }
+    urb = data_rx_waiting[--data_rx_count];
+    memcpy(urb->Buffer, buffer, length);
+    urb->Actual = length;
+    urb->Routine(urb, 0);
 }
 
 void usb_wait(u32 ms) { (void)ms; }
 void usb_wake(void) { }
 void usb_sleep(u32 ms) { (void)ms; }
 
-static u8 dma[64 * 1024];
-static u32 dma_used;
+static u8 dma[128 * 1024];
 
 static void *carve(u32 bytes)
 {
@@ -230,8 +308,10 @@ static void test_load(void)
         return;
     }
     outs = count_outs();
+    wifi_phase = 0;
     dev.active = 1;
     nd.usb = &dev;
+    nd.st = &net_counters;
     a.nd = &nd;
     a.dev = &dev;
     a.st = &st;
@@ -266,8 +346,10 @@ static void test_wifi(void)
         return;
     }
     outs = count_outs();
+    wifi_phase = 1;
     dev.active = 1;
     nd.usb = &dev;
+    nd.st = &net_counters;
     a.nd = &nd;
     a.dev = &dev;
     a.st = &st;
@@ -297,12 +379,164 @@ static void test_wifi(void)
            wl_stats.bss_count);
 }
 
+/* --- the frames ------------------------------------------------------------------- */
+
+static const u8 console_mac[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 };
+static const u8 sender_mac[6]  = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 };
+static const u8 bssid_mac[6]   = { 0x68, 0x8f, 0xc9, 0x33, 0x7a, 0xc7 };
+
+/* One received packet as the chip delivers it: the 60-byte hardware header whose
+ * first 16 bits are the MPDU's length and whose byte 36 carries the decryption
+ * status in bits 2-4, then an 802.11 from-DS data frame with its LLC/SNAP. */
+static u32 build_rx(u8 *b, u32 qos, u32 decr, const u8 *payload, u32 payload_len)
+{
+    u32 hdr_len = qos ? 26 : 24, security = decr ? 8 : 0, at, i;
+    u8 *mpdu = b + 60;
+
+    memset(b, 0, 60);
+    b[36] = (u8)(decr << 2);
+    memset(mpdu, 0, 64);
+    mpdu[0] = qos ? 0x88 : 0x08;            /* data, QoS data when asked */
+    mpdu[1] = 0x02;                         /* from DS */
+    for (i = 0; i < 6; i++) {
+        mpdu[4 + i] = console_mac[i];       /* address 1: the destination */
+        mpdu[10 + i] = bssid_mac[i];        /* address 2: the BSSID */
+        mpdu[16 + i] = sender_mac[i];       /* address 3: the source */
+    }
+    at = hdr_len + security;
+    mpdu[at] = 0xAA; mpdu[at + 1] = 0xAA; mpdu[at + 2] = 0x03;
+    mpdu[at + 6] = 0x08; mpdu[at + 7] = 0x00;       /* ethertype IPv4 */
+    at += 8;
+    for (i = 0; i < payload_len; i++)
+        mpdu[at + i] = payload[i];
+    at += payload_len;
+    b[0] = (u8)at;
+    b[1] = (u8)(at >> 8);
+    return 60 + at;
+}
+
+static void check_received(const char *what, const u8 *payload, u32 payload_len)
+{
+    u32 i, bad = 0;
+
+    if (up_length != ETH_HLEN + payload_len) {
+        printf("FAIL %s: length %u, wanted %u\n", what, up_length,
+               ETH_HLEN + payload_len);
+        failures++;
+        return;
+    }
+    for (i = 0; i < 6; i++) {
+        bad |= up_frame[i] != console_mac[i];
+        bad |= up_frame[6 + i] != sender_mac[i];
+    }
+    bad |= up_frame[12] != 0x08 || up_frame[13] != 0x00;
+    for (i = 0; i < payload_len; i++)
+        bad |= up_frame[ETH_HLEN + i] != payload[i];
+    if (bad) {
+        printf("FAIL %s: header or payload wrong:", what);
+        for (i = 0; i < 20 && i < up_length; i++)
+            printf(" %02x", up_frame[i]);
+        printf("\n");
+        failures++;
+    }
+}
+
+static void test_frames(void)
+{
+    static USB_DEV dev;
+    static NET_DEV nd;
+    static AIC a;
+    static volatile AIC_STATS st;
+    static u8 buffer[4096];
+    static const u8 payload[] = { 0x45, 0x00, 0x00, 0x1c, 0xde, 0xad, 0xbe, 0xef };
+    u8 frame[64];
+    u32 n, i;
+
+    wifi_phase = 1;
+    dev.active = 1;
+    nd.usb = &dev;
+    nd.st = &net_counters;
+    a.nd = &nd;
+    a.dev = &dev;
+    a.st = &st;
+    a.vif = 0;
+    a.ap_sta = 3;
+    data_rx_count = 0;
+    dma_used = 0;
+    CHECK(aic_data_open(&a) == 0);
+    a.joined = 1;
+
+    /* Received: the plain case, where the Ethernet header being written overlaps
+     * the addresses it is built from, and the QoS and encrypted case. */
+    n = build_rx(buffer, 0, 0, payload, sizeof(payload));
+    up_frames = 0;
+    feed_rx(&a, buffer, n);
+    CHECK(up_frames == 1);
+    check_received("plain receive", payload, sizeof(payload));
+
+    n = build_rx(buffer, 1, 3, payload, sizeof(payload));
+    up_frames = 0;
+    feed_rx(&a, buffer, n);
+    CHECK(up_frames == 1);
+    check_received("QoS encrypted receive", payload, sizeof(payload));
+    CHECK(st.data_rx_frames == 2);
+    CHECK(st.data_rx_short == 0 && st.data_rx_truncated == 0);
+    CHECK(st.data_rx_not_from_ds == 0 && st.data_rx_unsupported == 0);
+
+    /* A frame nobody can take apart yet is counted, not mangled. */
+    n = build_rx(buffer, 1, 3, payload, sizeof(payload));
+    buffer[48] = 0x01;                          /* an aggregated MSDU */
+    up_frames = 0;
+    feed_rx(&a, buffer, n);
+    CHECK(up_frames == 0 && st.data_rx_unsupported == 1);
+
+    /* Sent: the four header bytes, then the descriptor, then the payload with the
+     * Ethernet header taken off. */
+    for (i = 0; i < 6; i++) {
+        frame[i] = sender_mac[i];
+        frame[6 + i] = console_mac[i];
+    }
+    frame[12] = 0x08;
+    frame[13] = 0x00;
+    for (i = 0; i < sizeof(payload); i++)
+        frame[ETH_HLEN + i] = payload[i];
+    sent_count = 0;
+    CHECK(aic_data_xmit(&a, frame, ETH_HLEN + sizeof(payload)) == 1);
+    CHECK(sent_count == 1);
+    CHECK(sent_length == 4 + 28 + sizeof(payload));
+    CHECK(sent[0] == 4 + 28 + sizeof(payload) && sent[1] == 0);
+    CHECK(sent[2] == 0x01 && sent[3] == 0);
+    /* The descriptor sits behind the four header bytes, so its own offsets -- the
+     * payload length at 0, the addresses at 8 and 14, the ethertype at 20 -- all
+     * land four bytes further into the transfer. */
+    CHECK(sent[4] == sizeof(payload) && sent[5] == 0);     /* payload length */
+    CHECK(sent[12] == sender_mac[0] && sent[17] == sender_mac[5]);
+    CHECK(sent[18] == console_mac[0] && sent[23] == console_mac[5]);
+    CHECK(sent[24] == 0x08 && sent[25] == 0x00);           /* ethertype, wire order */
+    CHECK(sent[26] == AIC_AC_BE && sent[27] == 0);         /* best effort, TID 0 */
+    CHECK(sent[28] == 0 && sent[29] == 3);                 /* interface, AP station */
+    CHECK(sent[32] == payload[0] && sent[39] == payload[sizeof(payload) - 1]);
+
+    /* No slot free: counted and refused, not queued twice. */
+    for (i = 0; i < AIC_DATA_TX_COUNT; i++)
+        a.data_tx_urb[i].Busy = 1;
+    CHECK(aic_data_xmit(&a, frame, ETH_HLEN + sizeof(payload)) == 0);
+    CHECK(st.data_tx_full == 1);
+    CHECK(!aic_data_tx_space(&a));
+    a.data_tx_urb[0].Busy = 0;
+    CHECK(aic_data_tx_space(&a));
+
+    if (!failures)
+        printf("aic frames: receive and transmit as the chip wants them\n");
+}
+
 int main(void)
 {
     char probe[512];
     FILE *f;
 
     test_wifi();
+    test_frames();
     fw_dir = getenv("AIC_FW") ? getenv("AIC_FW") : "/lib/firmware/aic8800D80";
     snprintf(probe, sizeof(probe), "%s/fmacfw_8800d80_u02.bin", fw_dir);
     f = fopen(probe, "rb");

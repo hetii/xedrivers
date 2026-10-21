@@ -133,6 +133,7 @@ static void worker(void *parameter)
     (void)parameter;
     away_from_the_usb_processor();
     bench_init();
+    net_learn_console_mac();            /* before any device is brought up */
     net_layer_init();
 
     for (tick = 0;; tick++) {

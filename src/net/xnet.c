@@ -217,8 +217,16 @@ static void xq_flush(void)
 static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
                           void *cookie)
 {
-    u32 irql, depth;
+    u32 irql, depth, i;
 
+    /* The address xnet sends from is the console's own: a Wi-Fi card has to
+     * associate on it (aic_wifi.c), a wired one only passes it through. */
+    if (user == title_user && !net_console_mac_known && length >= ETH_HLEN) {
+        for (i = 0; i < ETH_ALEN; i++)
+            net_console_mac[i] = ((const u8 *)frame)[ETH_ALEN + i];
+        mem_sync();
+        net_console_mac_known = 1;
+    }
     if (user != title_user || !net_link_up()) {
         xnet_stats.xmit_fallback++;
         NicXmit(user, queue, frame, length, cookie);

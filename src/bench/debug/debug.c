@@ -45,6 +45,26 @@ u32 debug_poke(u32 address, u32 little, u32 value)
     return 0;
 }
 
+volatile u32 debug_config_value[2];
+
+u32 debug_config(u32 category, u32 setting)
+{
+    u8 buffer[32];
+    u16 needed = 0;
+    u32 status, i;
+
+    for (i = 0; i < sizeof(buffer); i++)
+        buffer[i] = 0;
+    debug_config_value[0] = debug_config_value[1] = 0;
+    status = ExGetXConfigSetting((u16)category, (u16)setting, buffer,
+                                 (u16)sizeof(buffer), &needed);
+    if (!NT_SUCCESS(status))
+        return 0;
+    for (i = 0; i < 8; i++)
+        debug_config_value[i / 4] |= (u32)buffer[i] << (24 - 8 * (i % 4));
+    return needed;
+}
+
 u32 debug_thread_priority(u32 id, u32 priority)
 {
     void *thread = 0;

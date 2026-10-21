@@ -18,6 +18,7 @@
 #include "kernel.h"
 #include "usb.h"
 #include "net.h"
+#include "wireless.h"
 
 #define AIC_VENDOR          0xA69Cu
 #define AIC_PRODUCT_D80     0x8D80u     /* boot ROM, waiting for firmware */
@@ -113,6 +114,40 @@ typedef struct {
     u32 rx_first[8];            /* the first 32 bytes of the first transfer received */
     u32 scan_results;
     u32 fw_text[12];            /* MM_GET_FW_VERSION's text, bytes in order */
+
+    u32 connects;               /* SM_CONNECT_REQ sent */
+    u32 connect_status;         /* its confirm */
+    u32 connect_result;         /* SM_CONNECT_IND's status_code */
+    u32 joined;
+    u32 disconnects;            /* SM_DISCONNECT_IND */
+    u32 disconnect_reason;
+    u32 ap_sta;
+    u32 aid;
+    u32 join_freq;
+    u32 join_refused_security;  /* a secured network asked for, which needs keys */
+    u32 vif;                    /* the interface index the firmware gave us */
+    u32 if_adds;
+    u32 if_add_status;
+    u32 if_removes;
+    u32 if_remove_status;
+    u32 if_mac[2];              /* the address it was added on, bytes in order */
+    u32 join_index;             /* the scan table entry asked for */
+    u32 join_freq_asked;
+    u32 ps_off_status;          /* of ME_SET_PS_MODE at join */
+    u32 bssid[2];               /* the BSSID joined, bytes in order */
+    u32 data_tx_frames;
+    u32 data_tx_full;           /* no free transmit slot */
+    u32 data_tx_errors;
+    u32 data_tx_last_error;
+    u32 data_rx_transfers;
+    u32 data_rx_frames;
+    u32 data_rx_errors;
+    u32 data_rx_last_error;
+    u32 data_rx_not_data;       /* a management or control frame came up here */
+    u32 data_rx_unsupported;    /* aggregated MSDU or four-address */
+    u32 data_rx_not_from_ds;
+    u32 data_rx_short;
+    u32 data_rx_truncated;      /* a length that overran the transfer */
 } AIC_STATS;
 
 extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
@@ -121,6 +156,26 @@ extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
 #define AIC_RX_SIZE     4096
 #define AIC_TX_SIZE     2048
 #define AIC_CFM_MAX     64      /* parameter bytes of a confirm we keep */
+#define AIC_RX_ERROR_LIMIT 64
+
+/* The data rings (aic_data.c), modest on purpose: more outstanding requests buy
+ * nothing on this console and too many hang it (the RTL8156 learned that at
+ * RX64+TX128). A receive buffer takes a frame at MTU with its 60-byte header and
+ * leaves room for a second small packet behind it. */
+#define AIC_DATA_RX_COUNT 24
+#define AIC_DATA_RX_SIZE  4096
+#define AIC_DATA_TX_COUNT 16
+#define AIC_DATA_TX_SIZE  2048
+
+/* One DMA block for the slot, carved once: both rings and nothing that grows. */
+#define AIC_DMA_BYTES   (AIC_RX_COUNT * AIC_RX_SIZE + \
+                         AIC_DATA_RX_COUNT * AIC_DATA_RX_SIZE + \
+                         AIC_DATA_TX_COUNT * AIC_DATA_TX_SIZE + 4096)
+
+#define AIC_AC_BK       0u      /* access categories, as the firmware numbers them */
+#define AIC_AC_BE       1u
+#define AIC_AC_VI       2u
+#define AIC_AC_VO       3u
 #define AIC_DESC_SIZE   64      /* control buffer: the device descriptor */
 
 typedef struct AIC {
@@ -148,6 +203,19 @@ typedef struct AIC {
     u32 (*ind)(struct AIC *a, u32 id, const u8 *params, u32 length);
     volatile u32 scanning;
     u32 vif;                    /* the station interface's index */
+
+    /* Joined, and carrying frames (aic_data.c). */
+    volatile u32 joined;
+    volatile u32 data_running;
+    u32 ap_sta;                 /* the AP's station index, from SM_CONNECT_IND */
+    u8 if_mac[6];               /* the address the station interface was added on */
+    void *ep_data_out;
+    void *ep_data_in;
+    URB data_rx_urb[AIC_DATA_RX_COUNT];
+    u8 *data_rx_buf[AIC_DATA_RX_COUNT];
+    u32 data_rx_consecutive_errors;
+    URB data_tx_urb[AIC_DATA_TX_COUNT];
+    u8 *data_tx_buf[AIC_DATA_TX_COUNT];
 } AIC;
 
 /* aic_cmd.c: the message channel, on bulk `ep_out` and `ep_in` (512 bytes). */
@@ -163,13 +231,31 @@ u32 aic_start_app(AIC *a, u32 address, u32 type);
 /* aic_fw.c: loading the firmware into a chip in boot ROM. Returns 0 or a step. */
 u32 aic_load_firmware(AIC *a);
 
-/* aic_wifi.c: the Wi-Fi firmware brought up, and a scan started. */
+/* aic_wifi.c: the Wi-Fi firmware brought up, a scan started, a network joined
+ * (by its index in the scan table, wl_bss). */
 u32 aic_wifi_start(AIC *a);
 u32 aic_wifi_scan(AIC *a);
+u32 aic_wifi_join(AIC *a, u32 index);
+u32 aic_wifi_disconnect(AIC *a);
+
+/* aic_data.c: the data endpoints and the frames on them. */
+u32 aic_data_open(AIC *a);
+u32 aic_data_xmit(AIC *a, const u8 *frame, u32 length);
+u32 aic_data_tx_space(AIC *a);
+
+/* aic_cmd.c: one message of a transfer, for whichever endpoint it arrived on.
+ * `packet` points at its four-byte header. */
+void aic_message_in(AIC *a, const u8 *packet, u32 length);
 
 static inline u32 aic_le32(const u8 *p)
 {
     return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24;
+}
+
+static inline void aic_put16(u8 *p, u32 v)
+{
+    p[0] = (u8)v;
+    p[1] = (u8)(v >> 8);
 }
 
 static inline void aic_put32(u8 *p, u32 v)

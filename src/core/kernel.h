@@ -224,6 +224,12 @@ extern void  KeReleaseSpinLockFromRaisedIrql(KSPIN_LOCK *lock);
 extern void  KeInitializeDpc(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *context);
 extern int   KeInsertQueueDpc(KDPC *dpc, void *arg1, void *arg2);
 
+/* One setting of the console's own configuration: (category, setting, buffer,
+ * size, bytes needed) -> NTSTATUS. Ordinal 16. The console's MAC address is
+ * setting 2 of the secured category (net.c, which checks what comes back). */
+extern u32   ExGetXConfigSetting(u16 category, u16 setting, void *buffer, u16 size,
+                                 u16 *needed);
+
 /* --- files ---------------------------------------------------------------------
  * Object names are ANSI on this kernel. NtCreateFile (210) takes nine arguments, so
  * it is called through kcall9 (kit/kcall.S), which puts the ninth where the console

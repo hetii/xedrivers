@@ -42,6 +42,10 @@ typedef struct {
     u32 start_count;
     u32 mode;               /* the mode actually in force */
     u32 xnet_status;
+    u32 console_mac_status;         /* of ExGetXConfigSetting */
+    u32 console_mac_needed;         /* the size it says the setting has */
+    u32 console_mac_read[2];        /* what it gave, bytes in order */
+    u32 console_mac_from_config;    /* 1 if that was taken as the address */
 } NET_STATE;
 
 extern volatile NET_STATE net_state;
@@ -124,6 +128,16 @@ typedef void (*NET_TX_IDLE)(void);
 extern volatile NET_TX_IDLE net_tx_idle;
 
 extern u8 net_mac[ETH_ALEN];        /* the uplink's own address */
+
+/* The console's own address, as xnet sends from it: known once xnet has sent a
+ * frame (xnet.c). */
+extern u8 net_console_mac[ETH_ALEN];
+extern volatile u32 net_console_mac_known;
+
+/* Ask the console for its own address, before any device is brought up: a card
+ * that has to carry it (a Wi-Fi station associates on it) cannot wait for xnet to
+ * send its first frame. Thread-only; what it found is in net_state. */
+void net_learn_console_mac(void);
 
 /* Queue one frame on the uplink. Any IRQL up to DISPATCH. 1 if queued, 0 if
  * dropped. */

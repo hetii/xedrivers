@@ -48,7 +48,9 @@ PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up']
 STRUCTS = {
     "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls"],
     "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found"],
-    "net_state": ["start_result", "start_count", "mode", "xnet_status"],
+    "net_state": ["start_result", "start_count", "mode", "xnet_status",
+                  "console_mac_status", "console_mac_needed", "console_mac_read0",
+                  "console_mac_read1", "console_mac_from_config"],
     "xe_config": ["magic", "mode", "advertise", "ip", "transport"],
     "net_stats": ["driver", "step", "step_status", "ready", "link", "speed_mbps",
                   "rx_frames", "rx_bytes", "rx_bytes_hi", "rx_errors", "rx_last_error",
@@ -68,12 +70,28 @@ STRUCTS = {
                     "rx_bad", "intr_events", "intr_errors", "tx_too_big",
                     "tx_transfers"],
     "aic_stats": ["product", "step", "step_status", "chip_word", "chip_id", "mcu_id",
-                  "fw_version", "bytes_loaded", "files_loaded", "file_status",
-                  "commands", "timeouts", "tx_errors", "tx_last_error", "rx_transfers",
-                  "rx_errors", "rx_last_error", "rx_messages", "rx_unexpected",
-                  "rx_last_id", "rx_data", "last_cfm_id"] + ["rx_first%d" % i
-                                                            for i in range(8)] +
-                 ["scan_results"] + ["fw_text%d" % i for i in range(12)],
+                  "fw_version", "bytes_loaded", "files_loaded",
+                  "file_status", "commands", "timeouts", "tx_errors",
+                  "tx_last_error", "rx_transfers", "rx_errors",
+                  "rx_last_error", "rx_messages", "rx_unexpected",
+                  "rx_last_id", "rx_data", "last_cfm_id", "rx_first0",
+                  "rx_first1", "rx_first2", "rx_first3", "rx_first4",
+                  "rx_first5", "rx_first6", "rx_first7", "scan_results",
+                  "fw_text0", "fw_text1", "fw_text2", "fw_text3",
+                  "fw_text4", "fw_text5", "fw_text6", "fw_text7",
+                  "fw_text8", "fw_text9", "fw_text10", "fw_text11",
+                  "connects", "connect_status", "connect_result",
+                  "joined", "disconnects", "disconnect_reason", "ap_sta",
+                  "aid", "join_freq", "join_refused_security", "vif",
+                  "if_adds", "if_add_status", "if_removes",
+                  "if_remove_status", "if_mac0", "if_mac1", "join_index",
+                  "join_freq_asked", "ps_off_status", "bssid0", "bssid1",
+                  "data_tx_frames", "data_tx_full", "data_tx_errors",
+                  "data_tx_last_error", "data_rx_transfers",
+                  "data_rx_frames", "data_rx_errors",
+                  "data_rx_last_error", "data_rx_not_data",
+                  "data_rx_unsupported", "data_rx_not_from_ds",
+                  "data_rx_short", "data_rx_truncated"],
     "wl_stats": ["scans", "scans_done", "results", "bad_frames", "table_full",
                  "bss_count", "last_scan_status"],
     "file_stats": ["opens", "found", "last_status", "read_errors",
@@ -200,6 +218,10 @@ def status(sym):
         names.get(nst["mode"], nst["mode"]), nst["start_count"], nst["start_result"],
         st["claim_found"], st["claim_attempts"], nst["xnet_status"],
         "slot %d" % up if up is not None else "onboard", mac.hex(":")))
+    cm = struct.pack(">II", nst["console_mac_read0"], nst["console_mac_read1"])[:6]
+    print("console  mac=%s from_config=%d status=%#x size=%d" % (
+        cm.hex(":"), nst["console_mac_from_config"], nst["console_mac_status"],
+        nst["console_mac_needed"]))
     for i in range(NET_MAX):
         ns = read_struct(sym, "net_stats", i)
         if not ns["driver"]:
@@ -248,6 +270,27 @@ def status(sym):
             if a["product"] == 0x8D81:
                 print("aic fw   %r scan_results=%d" % (
                     text.split(b"\0")[0].decode("ascii", "replace"), a["scan_results"]))
+                bssid = struct.pack(">II", a["bssid0"], a["bssid1"])[:6].hex(":")
+                print("aic join connects=%d cfm=%#x result=%#x joined=%d "
+                      "disconnects=%d/%#x refused_security=%d bssid=%s sta=%d aid=%d "
+                      "freq=%d" % (
+                          a["connects"], a["connect_status"], a["connect_result"],
+                          a["joined"], a["disconnects"], a["disconnect_reason"],
+                          a["join_refused_security"], bssid, a["ap_sta"], a["aid"],
+                          a["join_freq"]))
+                mac = struct.pack(">II", a["if_mac0"], a["if_mac1"])[:6].hex(":")
+                print("aic if   vif=%d adds=%d/%#x removes=%d/%#x on %s | asked index=%d "
+                      "freq=%d" % (a["vif"], a["if_adds"], a["if_add_status"],
+                                   a["if_removes"], a["if_remove_status"], mac,
+                                   a["join_index"], a["join_freq_asked"]))
+                print("aic data tx=%d full=%d err=%d/%#x | rx=%d frames=%d err=%d/%#x "
+                      "not_data=%d unsupported=%d not_from_ds=%d short=%d trunc=%d" % (
+                          a["data_tx_frames"], a["data_tx_full"], a["data_tx_errors"],
+                          a["data_tx_last_error"], a["data_rx_transfers"],
+                          a["data_rx_frames"], a["data_rx_errors"],
+                          a["data_rx_last_error"], a["data_rx_not_data"],
+                          a["data_rx_unsupported"], a["data_rx_not_from_ds"],
+                          a["data_rx_short"], a["data_rx_truncated"]))
     if "wl_stats" in sym:
         w = read_struct(sym, "wl_stats")
         print("wireless scans=%d/%d results=%d bad=%d full=%d networks=%d status=%#x" % (

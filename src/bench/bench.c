@@ -24,6 +24,8 @@
 #define CMD_THREAD_PRIO 15u /* [1] thread id (xerunner console list-threads), [2] prio */
 #define CMD_PEEK       16u  /* [1] address, [2] 1 = little-endian (MMIO) -> word */
 #define CMD_POKE       17u  /* [1] address, [2] 1 = little-endian, [3] word */
+#define CMD_CONFIG     18u  /* [1] category, [2] setting -> size, bytes in
+                             * debug_config_value */
 
 void bench_init(void)
 {
@@ -53,6 +55,9 @@ u32 bench_command(u32 what, volatile u32 *args)
         return 1;
     case CMD_PEEK:
         args[5] = debug_peek(args[1], args[2]);
+        return 1;
+    case CMD_CONFIG:
+        args[5] = debug_config(args[1], args[2]);
         return 1;
     case CMD_POKE:
         args[5] = debug_poke(args[1], args[2], args[3]);

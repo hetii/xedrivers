@@ -101,16 +101,31 @@ static u32 aic8800_start(NET_DEV *nd)
     return step;
 }
 
-#define CMD_SCAN 30u    /* xectl.py cmd 30: scan again */
+/* xectl.py cmd 30: scan again; 31 [1]: join the network at that index of the scan
+ * table; 32: leave it. */
+#define CMD_SCAN       30u
+#define CMD_JOIN       31u
+#define CMD_DISCONNECT 32u
 
 static u32 aic8800_command(NET_DEV *nd, u32 what, volatile u32 *args)
 {
     AIC *a = (AIC *)nd->priv;
 
-    if (what != CMD_SCAN || !a || a->st->product != AIC_PRODUCT_D81)
+    if (!a || a->st->product != AIC_PRODUCT_D81)
         return 0;
-    args[5] = aic_wifi_scan(a);
-    return 1;
+    switch (what) {
+    case CMD_SCAN:
+        args[5] = aic_wifi_scan(a);
+        return 1;
+    case CMD_JOIN:
+        args[5] = aic_wifi_join(a, args[1]);
+        return 1;
+    case CMD_DISCONNECT:
+        args[5] = aic_wifi_disconnect(a);
+        return 1;
+    default:
+        return 0;
+    }
 }
 
 static void aic8800_detached(NET_DEV *nd)
@@ -121,21 +136,23 @@ static void aic8800_detached(NET_DEV *nd)
         return;
     a->in_use = 0;
     a->running = 0;
+    a->data_running = 0;
+    a->joined = 0;
     mem_sync();
 }
 
 static u32 aic8800_xmit(NET_DEV *nd, const u8 *frame, u32 length)
 {
-    (void)nd;
-    (void)frame;
-    (void)length;
-    return 0;
+    AIC *a = (AIC *)nd->priv;
+
+    return a ? aic_data_xmit(a, frame, length) : 0;
 }
 
 static u32 aic8800_tx_space(NET_DEV *nd)
 {
-    (void)nd;
-    return 0;
+    AIC *a = (AIC *)nd->priv;
+
+    return a ? aic_data_tx_space(a) : 0;
 }
 
 const XE_DRIVER xe_driver_aic8800 = {
