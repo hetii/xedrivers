@@ -85,10 +85,11 @@ STRUCTS = {
                   "aid", "join_freq", "join_refused_security", "vif",
                   "if_adds", "if_add_status", "if_removes",
                   "if_remove_status", "if_mac0", "if_mac1", "join_index",
-                  "join_freq_asked", "ps_off_status", "bssid0", "bssid1",
-                  "data_tx_frames", "data_tx_full", "data_tx_errors",
-                  "data_tx_last_error", "data_rx_transfers",
-                  "data_rx_frames", "data_rx_errors",
+                  "join_freq_asked", "ps_off_status", "auto_scans",
+                  "auto_joins", "auto_missed", "auto_secured", "bssid0",
+                  "bssid1", "data_tx_frames", "data_tx_full",
+                  "data_tx_errors", "data_tx_last_error",
+                  "data_rx_transfers", "data_rx_frames", "data_rx_errors",
                   "data_rx_last_error", "data_rx_not_data",
                   "data_rx_unsupported", "data_rx_not_from_ds",
                   "data_rx_short", "data_rx_truncated"],
@@ -283,6 +284,9 @@ def status(sym):
                       "freq=%d" % (a["vif"], a["if_adds"], a["if_add_status"],
                                    a["if_removes"], a["if_remove_status"], mac,
                                    a["join_index"], a["join_freq_asked"]))
+                print("aic auto scans=%d joins=%d missed=%d secured=%d" % (
+                    a["auto_scans"], a["auto_joins"], a["auto_missed"],
+                    a["auto_secured"]))
                 print("aic data tx=%d full=%d err=%d/%#x | rx=%d frames=%d err=%d/%#x "
                       "not_data=%d unsupported=%d not_from_ds=%d short=%d trunc=%d" % (
                           a["data_tx_frames"], a["data_tx_full"], a["data_tx_errors"],
@@ -291,6 +295,11 @@ def status(sym):
                           a["data_rx_last_error"], a["data_rx_not_data"],
                           a["data_rx_unsupported"], a["data_rx_not_from_ds"],
                           a["data_rx_short"], a["data_rx_truncated"]))
+    if "wl_config" in sym:
+        raw = read(sym["wl_config"], 8 + 33)
+        loaded, n = struct.unpack(">II", raw[:8])
+        print("wifi cfg loaded=%d ssid=%r" % (loaded, raw[8:8 + min(n, 32)].decode(
+            "utf-8", "replace")))
     if "wl_stats" in sym:
         w = read_struct(sym, "wl_stats")
         print("wireless scans=%d/%d results=%d bad=%d full=%d networks=%d status=%#x" % (

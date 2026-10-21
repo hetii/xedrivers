@@ -58,4 +58,26 @@ void wl_scan_end(u32 status);
  * if the frame is not a beacon or probe response. */
 u32 wl_parse_bss(const u8 *frame, u32 length, WL_BSS *bss);
 
+/* --- which network to join --------------------------------------------------- */
+
+#define WL_SETTINGS "xedrivers.ini"     /* beside the plugin (src/core/file.h) */
+
+/* The network asked for: `wifi_ssid=` in WL_SETTINGS, read once a Wi-Fi card is
+ * up. An empty name joins nothing by itself. */
+typedef struct {
+    u32  loaded;
+    u32  ssid_len;
+    char ssid[WL_SSID_MAX + 1];
+} WL_CONFIG;
+
+extern volatile WL_CONFIG wl_config;
+
+/* Read WL_SETTINGS again. Thread-only. */
+void wl_load_config(void);
+
+/* The entry of the last scan to join: the configured network's strongest access
+ * point. Returns its index, or -1 when it was not seen; *secured is set when it
+ * was, but only with a security this driver cannot join yet. */
+s32 wl_pick(u32 *secured);
+
 #endif /* XE_WIRELESS_H */

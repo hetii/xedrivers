@@ -134,6 +134,10 @@ typedef struct {
     u32 join_index;             /* the scan table entry asked for */
     u32 join_freq_asked;
     u32 ps_off_status;          /* of ME_SET_PS_MODE at join */
+    u32 auto_scans;             /* scans the automatic join started */
+    u32 auto_joins;             /* joins it asked for */
+    u32 auto_missed;            /* scans that did not see the configured network */
+    u32 auto_secured;           /* ... or saw it secured, which needs keys */
     u32 bssid[2];               /* the BSSID joined, bytes in order */
     u32 data_tx_frames;
     u32 data_tx_full;           /* no free transmit slot */
@@ -217,6 +221,9 @@ typedef struct AIC {
     URB data_tx_urb[AIC_DATA_TX_COUNT];
     u8 *data_tx_buf[AIC_DATA_TX_COUNT];
     u32 last_rx_stamp;          /* time base of the last data frame in (prof.h) */
+    u32 auto_wait;              /* worker ticks until the next automatic attempt */
+    u32 auto_scanned;           /* a scan of the automatic join is under way */
+    u32 auto_off;               /* left by command: no automatic join until asked */
 } AIC;
 
 /* aic_cmd.c: the message channel, on bulk `ep_out` and `ep_in` (512 bytes). */
@@ -238,6 +245,7 @@ u32 aic_wifi_start(AIC *a);
 u32 aic_wifi_scan(AIC *a);
 u32 aic_wifi_join(AIC *a, u32 index);
 u32 aic_wifi_disconnect(AIC *a);
+void aic_wifi_tick(AIC *a);
 
 /* aic_data.c: the data endpoints and the frames on them. */
 u32 aic_data_open(AIC *a);

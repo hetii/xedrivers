@@ -118,9 +118,11 @@ static u32 aic8800_command(NET_DEV *nd, u32 what, volatile u32 *args)
         args[5] = aic_wifi_scan(a);
         return 1;
     case CMD_JOIN:
+        a->auto_off = 0;
         args[5] = aic_wifi_join(a, args[1]);
         return 1;
     case CMD_DISCONNECT:
+        a->auto_off = 1;                /* stay off until joined by command again */
         args[5] = aic_wifi_disconnect(a);
         return 1;
     default:
@@ -139,6 +141,14 @@ static void aic8800_detached(NET_DEV *nd)
     a->data_running = 0;
     a->joined = 0;
     mem_sync();
+}
+
+static void aic8800_tick(NET_DEV *nd)
+{
+    AIC *a = (AIC *)nd->priv;
+
+    if (a && a->st->product == AIC_PRODUCT_D81 && a->st->step == AIC_STEP_WIFI_UP)
+        aic_wifi_tick(a);
 }
 
 static u32 aic8800_xmit(NET_DEV *nd, const u8 *frame, u32 length)
@@ -164,4 +174,5 @@ const XE_DRIVER xe_driver_aic8800 = {
     .xmit = aic8800_xmit,
     .tx_space = aic8800_tx_space,
     .command = aic8800_command,
+    .tick = aic8800_tick,
 };

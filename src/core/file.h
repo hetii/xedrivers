@@ -24,6 +24,12 @@ u32 file_read(void *handle, void *buffer, u32 length, u32 offset);
 
 void file_close(void *handle);
 
+/* One setting of a small "key=value" file (xedrivers.ini beside the plugin): the
+ * value of `key`, up to `size` - 1 bytes and terminated, without the spaces around
+ * it. Lines starting with '#' or ';' are comments. Returns its length, or 0 when
+ * the file or the key is not there. Thread-only. */
+u32 file_setting(const char *name, const char *key, char *out, u32 size);
+
 typedef struct {
     u32  opens;
     u32  found;

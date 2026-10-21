@@ -276,6 +276,22 @@ u32 file_read(void *handle, void *buffer, u32 length, u32 offset)
 
 void file_close(void *handle) { fclose((FILE *)handle); }
 
+/* xedrivers.ini, as the test wants it to read. */
+static const char *setting_ssid = "";
+
+u32 file_setting(const char *name, const char *key, char *out, u32 size)
+{
+    u32 n = 0;
+
+    (void)name;
+    if (!strcmp(key, "wifi_ssid"))
+        for (; setting_ssid[n] && n + 1 < size; n++)
+            out[n] = setting_ssid[n];
+    if (size)
+        out[n] = 0;
+    return n;
+}
+
 /* --- the tests ------------------------------------------------------------------ */
 
 static u32 count_outs(void)
@@ -374,6 +390,36 @@ static void test_wifi(void)
                wl_bss[i].ssid);
     }
     CHECK(named >= 1);
+
+    /* Which network the automatic join takes: none when nothing is configured, a
+     * secured one refused but noted, an open one taken -- the strongest of its
+     * name. */
+    {
+        u32 secured;
+
+        CHECK(wl_config.loaded && wl_config.ssid_len == 0);
+        CHECK(wl_pick(&secured) == -1 && !secured);
+        setting_ssid = "net-axxxxxx";
+        wl_load_config();
+        CHECK(wl_pick(&secured) == -1 && secured);
+        setting_ssid = "nowhere";
+        wl_load_config();
+        CHECK(wl_pick(&secured) == -1 && !secured);
+        for (i = 0; i < wl_stats.bss_count && strcmp(wl_bss[i].ssid, "net-bx"); i++)
+            ;
+        CHECK(i < wl_stats.bss_count);
+        if (i < wl_stats.bss_count) {
+            u8 was = wl_bss[i].security;
+
+            wl_bss[i].security = 0;
+            setting_ssid = "net-bx";
+            wl_load_config();
+            CHECK(wl_pick(&secured) == (s32)i && !secured);
+            wl_bss[i].security = was;
+        }
+        setting_ssid = "";
+        wl_load_config();
+    }
     report("wifi", outs, &st);
     printf("aic wifi: %u messages as Linux sent them, %u networks\n", outs_matched,
            wl_stats.bss_count);

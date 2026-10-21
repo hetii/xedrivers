@@ -254,15 +254,24 @@ fill a table of networks (`tests/xectl.py status`); `xectl.py cmd 31 <index>` jo
 one, `cmd 32` leaves. Open networks only so far: a secured one needs the WPA2 key
 exchange, which is not written yet, and is refused.
 
+A network can also be joined by itself: `wifi_ssid = <name>` in `xedrivers.ini`
+beside the plugin (one `key = value` a line, `#` for comments). While the card is
+up and not joined it scans every five seconds and joins that network's strongest
+access point when it sees it open; the same loop brings it back after the access
+point goes away (tried: hostapd stopped, the console told of the loss within five
+seconds, joined again ten seconds after it returned). `xectl.py cmd 32` leaves and
+keeps it off until `cmd 31` joins again.
+
 The station associates on the console's own address, read from its configuration
 (category 2, setting 1) before any device is brought up, because that is what xnet
 sends from and all it takes in. A Wi-Fi link is an uplink like any other, below a
 USB Ethernet card and above the onboard port.
 
 Measured with an open access point on the PC's twin card (Linux's aic8800 driver in
-AP mode, 20 MHz -- NetworkManager 1.46 sets no wider channel, and hostapd is not
-installed), 2.4 GHz channel 6 and 5 GHz channel 36 alike: one TCP stream 0.8 MB/s
-each way, four streams 1.9 MB/s out. The console is not what limits it. Its TCP
+AP mode), 2.4 GHz channel 6 and 5 GHz channel 36 alike, 20 MHz from NetworkManager
+or 40-80 MHz from hostapd: one TCP stream 0.8 MB/s each way, four streams 2.0 MB/s
+out, eight 2.7 MB/s out (22 Mbit/s, the radio at VHT-MCS 2-4 and -73 dBm) and
+1.3 MB/s in. The console is not what limits it. Its TCP
 keeps about four segments in flight, which on the wire (0.3 ms round trip) is
 21.9 MB/s; over this link a round takes about 7 ms, so 4 x 1460 bytes / 7 ms. Of
 those 7 ms, decomposed with usbmon on the access point's own USB: about 4.7 ms the

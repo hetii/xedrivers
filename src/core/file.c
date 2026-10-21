@@ -150,3 +150,61 @@ void file_close(void *handle)
     if (handle)
         NtClose(handle);
 }
+
+#define SETTINGS_MAX 2048
+
+static char settings[SETTINGS_MAX];
+
+static u32 is_space(char c)
+{
+    return c == ' ' || c == '\t' || c == '\r';
+}
+
+u32 file_setting(const char *name, const char *key, char *out, u32 size)
+{
+    void *h = file_open(name);
+    u32 length = 0, got, at = 0, k, end, n;
+
+    if (size)
+        out[0] = 0;
+    if (!h)
+        return 0;
+    do {
+        got = file_read(h, settings + length, SETTINGS_MAX - 1 - length, length);
+        length += got;
+    } while (got && length < SETTINGS_MAX - 1);
+    file_close(h);
+    settings[length] = 0;
+
+    while (at < length) {
+        end = at;
+        while (end < length && settings[end] != '\n')
+            end++;
+        while (at < end && is_space(settings[at]))
+            at++;
+        if (at < end && settings[at] != '#' && settings[at] != ';') {
+            for (k = 0; key[k] && at + k < end && settings[at + k] == key[k]; k++)
+                ;
+            if (!key[k]) {
+                u32 v = at + k;
+
+                while (v < end && is_space(settings[v]))
+                    v++;
+                if (v < end && settings[v] == '=') {
+                    v++;
+                    while (v < end && is_space(settings[v]))
+                        v++;
+                    n = end;
+                    while (n > v && is_space(settings[n - 1]))
+                        n--;
+                    for (k = 0; v + k < n && k + 1 < size; k++)
+                        out[k] = settings[v + k];
+                    out[k] = 0;
+                    return k;
+                }
+            }
+        }
+        at = end + 1;
+    }
+    return 0;
+}

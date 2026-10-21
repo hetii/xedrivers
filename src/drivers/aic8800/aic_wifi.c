@@ -367,6 +367,10 @@ u32 aic_wifi_start(AIC *a)
 
 
     a->st->step = AIC_STEP_WIFI_UP;
+    wl_load_config();
+    a->auto_wait = 0;
+    a->auto_scanned = 0;
+    a->auto_off = 0;
     status = aic_wifi_scan(a);
     if (!NT_SUCCESS(status))
         return fail(a, AIC_STEP_WIFI_SCAN, status);
@@ -493,4 +497,45 @@ u32 aic_wifi_disconnect(AIC *a)
     mem_sync();
     net_link_report(a->nd, 0);
     return status;
+}
+
+/* --- joining by itself ---------------------------------------------------------- */
+
+/* Every five seconds while not joined: scan, then join the configured network's
+ * strongest access point if it was seen (wl_pick). The same loop takes the console
+ * back when the access point goes away (SM_DISCONNECT_IND) or the join fails. The
+ * worker calls it every tick (20 ms) while the card is up. */
+#define AUTO_RETRY_TICKS 250
+
+void aic_wifi_tick(AIC *a)
+{
+    u32 secured;
+    s32 pick;
+
+    if (a->joined || a->auto_off || !wl_config.ssid_len || a->scanning)
+        return;
+    if (a->auto_wait) {
+        a->auto_wait--;
+        return;
+    }
+    if (!a->auto_scanned) {
+        a->auto_scanned = 1;
+        a->st->auto_scans++;
+        if (!NT_SUCCESS(aic_wifi_scan(a))) {
+            a->auto_scanned = 0;
+            a->auto_wait = AUTO_RETRY_TICKS;
+        }
+        return;                         /* the results come in while it runs */
+    }
+    a->auto_scanned = 0;
+    a->auto_wait = AUTO_RETRY_TICKS;
+    pick = wl_pick(&secured);
+    if (pick < 0) {
+        a->st->auto_missed++;
+        if (secured)
+            a->st->auto_secured++;
+        return;
+    }
+    a->st->auto_joins++;
+    aic_wifi_join(a, (u32)pick);
 }

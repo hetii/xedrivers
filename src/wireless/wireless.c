@@ -1,6 +1,7 @@
 /* The wireless layer; see wireless.h. */
 
 #include "wireless.h"
+#include "file.h"
 
 #define FC_BEACON      0x0080u
 #define FC_PROBE_RESP  0x0050u
@@ -168,4 +169,48 @@ void wl_scan_end(u32 status)
 {
     wl_stats.last_scan_status = status;
     wl_stats.scans_done++;
+}
+
+/* --- which network to join --------------------------------------------------- */
+
+volatile WL_CONFIG wl_config;
+
+void wl_load_config(void)
+{
+    char ssid[WL_SSID_MAX + 1];
+    u32 n, i;
+
+    n = file_setting(WL_SETTINGS, "wifi_ssid", ssid, sizeof(ssid));
+    for (i = 0; i < n; i++)
+        wl_config.ssid[i] = ssid[i];
+    wl_config.ssid[n] = 0;
+    wl_config.ssid_len = n;
+    wl_config.loaded = 1;
+}
+
+s32 wl_pick(u32 *secured)
+{
+    s32 best = -1;
+    u32 i, k;
+
+    *secured = 0;
+    if (!wl_config.ssid_len)
+        return -1;
+    for (i = 0; i < wl_stats.bss_count; i++) {
+        const WL_BSS *b = &wl_bss[i];
+
+        if (b->ssid_len != wl_config.ssid_len)
+            continue;
+        for (k = 0; k < b->ssid_len && b->ssid[k] == wl_config.ssid[k]; k++)
+            ;
+        if (k != b->ssid_len)
+            continue;
+        if (b->security) {
+            *secured = 1;               /* open networks only, for now */
+            continue;
+        }
+        if (best < 0 || b->rssi > wl_bss[best].rssi)
+            best = (s32)i;
+    }
+    return best;
 }
