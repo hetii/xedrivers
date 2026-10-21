@@ -460,15 +460,11 @@ u32 aic_wifi_start(AIC *a)
         a->if_mac[i] = join_mac(a)[i];
 
 
-    /* The composite device's Bluetooth interface has its HCI event endpoint at 0x83
-     * (interrupt, 64 bytes, bInterval 4: 1 ms at high speed). Whether the node the
-     * kernel gave this driver reaches it decides how Bluetooth can be driven. */
-    if (usb_open(a->dev, USB_TYPE_INTERRUPT, 0x83, 64, 1)) {
-        a->st->bt_opened = 1;
-        a->st->bt_open_status = usb_stats.last_open_status;
-    } else {
-        a->st->bt_open_status = usb_stats.last_open_status;
-    }
+    /* The other half of the card, through this same node: brought up and asked
+     * who it is, which says whether the console can drive it at all. A failure
+     * there is not the Wi-Fi's business. */
+    a->st->bt_open_status = aic_bt_start(a);
+    a->st->bt_opened = a->st->bt_open_status == 0;
 
     a->st->step = AIC_STEP_WIFI_UP;
     wl_load_config();

@@ -140,6 +140,7 @@ static void aic8800_detached(NET_DEV *nd)
     a->running = 0;
     a->data_running = 0;
     a->joined = 0;
+    aic_bt_stop(a);
     mem_sync();
 }
 

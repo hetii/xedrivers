@@ -20,6 +20,7 @@
 #include "net.h"
 #include "wireless.h"
 #include "wpa.h"
+#include "aic_bt.h"
 
 #define AIC_VENDOR          0xA69Cu
 #define AIC_PRODUCT_D80     0x8D80u     /* boot ROM, waiting for firmware */
@@ -86,6 +87,7 @@ enum {
     AIC_STEP_WIFI_IF,
     AIC_STEP_WIFI_SCAN,
     AIC_STEP_WIFI_UP,           /* not a failure: up, not joined */
+    AIC_STEP_BT_RESET = 40,     /* the Bluetooth controller, aic_bt.c */
 };
 
 /* One device slot's; read by tests/xectl.py. */
@@ -239,6 +241,9 @@ typedef struct AIC {
     u32 auto_off;               /* left by command: no automatic join until asked */
     u32 secured;                /* this join runs the handshake before the link */
     u8 bssid[6];                /* the access point joined, for the EAPOL header */
+    void *ep_bt_event;          /* the Bluetooth controller's event endpoint */
+    volatile u32 bt_running;
+    u32 bt_errors;
     u8 *eapol_buf;              /* DMA, one frame to send */
 } AIC;
 

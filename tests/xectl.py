@@ -99,6 +99,11 @@ STRUCTS = {
     "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
                   "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
                   "no_gtk", "pending", "applied", "psk_ready"],
+    "aic_bt_stats": ["up", "commands", "command_errors", "timeouts", "events",
+                     "event_errors", "last_event", "last_event_error",
+                     "last_opcode", "reset_status", "version_status",
+                     "address_status", "hci_version", "hci_revision",
+                     "lmp_version", "manufacturer", "address0", "address1"],
     "wl_stats": ["scans", "scans_done", "results", "bad_frames", "table_full",
                  "bss_count", "last_scan_status"],
     "file_stats": ["opens", "found", "last_status", "read_errors",
@@ -320,6 +325,16 @@ def status(sym):
         print("wifi cfg loaded=%d ssid=%s pass=%s" % (
             loaded, ", ".join(repr(n) for n in names) or "none",
             "set" if has_pass else "none"))
+    if "aic_bt_stats" in sym:
+        b = read_struct(sym, "aic_bt_stats")
+        addr = struct.pack(">II", b["address0"], b["address1"])[:6].hex(":")
+        print("bt       up=%d addr=%s hci=%d.%d lmp=%d maker=%d | cmds=%d err=%d "
+              "timeouts=%d events=%d/%#x reset=%#x ver=%#x addr_st=%#x" % (
+                  b["up"], addr, b["hci_version"], b["hci_revision"],
+                  b["lmp_version"], b["manufacturer"],
+                  b["commands"], b["command_errors"], b["timeouts"], b["events"],
+                  b["last_event"], b["reset_status"], b["version_status"],
+                  b["address_status"]))
     if "wpa_stats" in sym:
         w = read_struct(sym, "wpa_stats")
         names = {0: "idle", 1: "wait-1", 2: "wait-3", 3: "done", 4: "failed"}

@@ -338,6 +338,22 @@ little air left either. Between the two dongles three metres apart the signal is
 antenna in a USB stick gives. Higher figures need the card within a few metres of
 the access point, or a clear 5 GHz channel -- not another knob in the driver.
 
+## Bluetooth on the same card
+
+The dongle is one composite device: its first interface is standard HCI over USB
+and needs no vendor step once the firmware is in, so the Wi-Fi driver drives it
+too, through the same node the kernel handed it (`src/drivers/aic8800/aic_bt.c`).
+Commands are class control requests, the controller's answers come back on
+interrupt endpoint 0x83. That took one more thing from the core: `USB_DEV` keeps
+eight endpoint slots rather than four, which Wi-Fi and Bluetooth together need.
+
+So far it is brought up and asked who it is -- a reset, its version, its address
+-- which is what settles whether the console can reach this half at all. On the
+bench it answers: address 68:8f:c9:33:9c:7e, one past the Wi-Fi side's, HCI
+version 13 revision 11, three commands and three events with no error or timeout
+(`xectl.py status`, the `bt` line). Nothing is connected or paired yet; headset
+audio would need L2CAP and a codec above this.
+
 ## When the card goes
 
 Unplug the card -- or its cable, or end a phone's tethering -- and the console goes
