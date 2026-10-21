@@ -281,8 +281,21 @@ frame is answered in 22-69 us and a transmit transfer accepted by the chip in
 0.25-0.3 ms (`make bench=prof`, stages `turnaround` and `tx_wait`). Turning power
 saving off, 24 receive requests instead of 8, larger socket buffers (the console
 then offers a 64 KB window) and the firmware's other receive-aggregation setting
-each changed the figure by under a tenth. A real access point, a wider channel and
-a stronger signal (-72 dBm here) are what is left to try.
+each changed the figure by under a tenth.
+
+**The radio is the limit, not this driver.** The same dongle on the PC, driven by
+aicsemi's own Linux driver and associated to the house's router, carries 1.4 MB/s
+up and 0.5 MB/s down -- the console's figures. Both dongles see that router within
+one dB of each other (-65 and -66 dBm), so neither is the weaker part. What the
+rates say is that the link is poor in one direction: the dongle transmits at
+MCS 4 (39 Mbit/s) and the router answers it at 6 Mbit/s, the slowest rate 802.11g
+has, which is 4 Mbit/s of TCP -- exactly what was measured downwards. The dongle
+hears the router at -65 dBm through a floor; the router evidently hears the dongle
+much worse, and with 2.4 GHz channels 1, 3, 9 and 11 all occupied here there is
+little air left either. Between the two dongles three metres apart the signal is
+-67 to -73 dBm, no better than the router a floor away, which is what a chip
+antenna in a USB stick gives. Higher figures need the card within a few metres of
+the access point, or a clear 5 GHz channel -- not another knob in the driver.
 
 ## When the card goes
 

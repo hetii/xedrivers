@@ -86,10 +86,11 @@ STRUCTS = {
                   "if_adds", "if_add_status", "if_removes",
                   "if_remove_status", "if_mac0", "if_mac1", "join_index",
                   "join_freq_asked", "ps_off_status", "auto_scans",
-                  "auto_joins", "auto_missed", "auto_secured", "bssid0",
-                  "bssid1", "data_tx_frames", "data_tx_full",
-                  "data_tx_errors", "data_tx_last_error",
-                  "data_rx_transfers", "data_rx_frames", "data_rx_errors",
+                  "auto_joins", "auto_missed", "auto_secured",
+                  "bt_open_status", "bt_opened", "bssid0", "bssid1",
+                  "data_tx_frames", "data_tx_full", "data_tx_errors",
+                  "data_tx_last_error", "data_rx_transfers",
+                  "data_rx_frames", "data_rx_errors",
                   "data_rx_last_error", "data_rx_not_data",
                   "data_rx_unsupported", "data_rx_not_from_ds",
                   "data_rx_short", "data_rx_truncated"],
@@ -284,9 +285,10 @@ def status(sym):
                       "freq=%d" % (a["vif"], a["if_adds"], a["if_add_status"],
                                    a["if_removes"], a["if_remove_status"], mac,
                                    a["join_index"], a["join_freq_asked"]))
-                print("aic auto scans=%d joins=%d missed=%d secured=%d" % (
+                print("aic auto scans=%d joins=%d missed=%d secured=%d | bt ep 0x83 "
+                      "opened=%d status=%#x" % (
                     a["auto_scans"], a["auto_joins"], a["auto_missed"],
-                    a["auto_secured"]))
+                    a["auto_secured"], a["bt_opened"], a["bt_open_status"]))
                 print("aic data tx=%d full=%d err=%d/%#x | rx=%d frames=%d err=%d/%#x "
                       "not_data=%d unsupported=%d not_from_ds=%d short=%d trunc=%d" % (
                           a["data_tx_frames"], a["data_tx_full"], a["data_tx_errors"],

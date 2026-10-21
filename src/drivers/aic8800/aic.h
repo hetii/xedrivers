@@ -138,6 +138,10 @@ typedef struct {
     u32 auto_joins;             /* joins it asked for */
     u32 auto_missed;            /* scans that did not see the configured network */
     u32 auto_secured;           /* ... or saw it secured, which needs keys */
+    u32 bt_open_status;         /* opening the Bluetooth event endpoint 0x83 from
+                                 * the Wi-Fi interface's node: can one function
+                                 * reach the other's endpoints? */
+    u32 bt_opened;
     u32 bssid[2];               /* the BSSID joined, bytes in order */
     u32 data_tx_frames;
     u32 data_tx_full;           /* no free transmit slot */
