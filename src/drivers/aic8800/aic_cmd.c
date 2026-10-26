@@ -33,8 +33,10 @@ void aic_message_in(AIC *a, const u8 *packet, u32 length)
     if (params > length - (AIC_CFM_HEADER - 4))
         params = length - (AIC_CFM_HEADER - 4);
     if (id != a->wait_id || a->cfm_done) {
-        if (!a->ind || !a->ind(a, id, m + AIC_CFM_HEADER - 4, params))
+        if (!a->ind || !a->ind(a, id, m + AIC_CFM_HEADER - 4, params)) {
+            a->st->rx_unexpected_ids[a->st->rx_unexpected % 4] = id;
             a->st->rx_unexpected++;
+        }
         return;
     }
     if (params > AIC_CFM_MAX)

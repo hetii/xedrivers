@@ -657,6 +657,29 @@ static void test_frames(void)
         }
         CHECK(st.reorder_resyncs == 1);
         CHECK(up_frames == 64 - (AIC_REORDER_RESYNC - 1));
+
+        /* The session ends: a frame of that TID without the flag lets the held
+         * ones go first, then itself. */
+        aic_data_rejoin(&a);
+        up_frames = 0;
+        for (k = 0; k < 3; k++) {
+            static const u32 s3[] = { 10, 12, 13 };
+
+            p[4] = (u8)s3[k];
+            n = build_rx(buffer, 1, 3, p, sizeof(p));
+            buffer[48] = 0x20;
+            buffer[60 + 22] = (u8)(s3[k] << 4);
+            buffer[60 + 23] = 0;
+            feed_rx(&a, buffer, n);
+        }
+        CHECK(up_frames == 1);
+        p[4] = 99;
+        n = build_rx(buffer, 1, 3, p, sizeof(p));
+        buffer[60 + 22] = (u8)(14 << 4);
+        feed_rx(&a, buffer, n);
+        CHECK(up_frames == 4 && up_order[1] == 12 && up_order[2] == 13 &&
+              up_order[3] == 99 && st.reorder_ended == 1);
+        CHECK(a.reorder_free_count == AIC_REORDER_SLOTS);
     }
 
     /* Sent: the four header bytes, then the descriptor, then the payload with the

@@ -172,6 +172,8 @@ typedef struct {
     u32 reorder_timeouts;       /* holes skipped because nothing filled them */
     u32 reorder_full;           /* no room to hold one: everything let go at once */
     u32 reorder_resyncs;        /* the window moved to a sender that started again */
+    u32 reorder_ended;          /* a TID's frames stopped asking to be ordered */
+    u32 rx_unexpected_ids[4];   /* the last unexpected messages, by rx_unexpected % 4 */
 } AIC_STATS;
 
 extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
@@ -182,13 +184,14 @@ extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
 #define AIC_CFM_MAX     64      /* parameter bytes of a confirm we keep */
 #define AIC_RX_ERROR_LIMIT 64
 
-/* The data rings (aic_data.c), modest on purpose: more outstanding requests buy
- * nothing on this console and too many hang it (the RTL8156 learned that at
- * RX64+TX128). The D80's firmware aggregates what it receives into one transfer
+/* The data rings (aic_data.c), modest on purpose: too many outstanding requests
+ * hang this console (the RTL8156 learned that at RX64+TX128), but the firmware
+ * needs somewhere to put what it receives; Linux keeps 20 (AICWF_USB_RX_URBS)
+ * and sixteen here carried six back-to-back runs where eight did not. The D80's firmware aggregates what it receives into one transfer
  * of up to AICWF_USB_AGGR_MAX_PKT_SIZE (20480, aicwf_usb_rx_aggr is on for this
  * chip), so a receive buffer must take that much: a smaller one ends the transfer
  * early and the rest of the aggregate starts the next buffer mid-packet, lost. */
-#define AIC_DATA_RX_COUNT 8
+#define AIC_DATA_RX_COUNT 16
 #define AIC_DATA_RX_SIZE  20480
 #define AIC_DATA_TX_COUNT 16
 #define AIC_DATA_TX_SIZE  2048

@@ -421,10 +421,19 @@ static void mpdu_in(AIC *a, u8 *p, u32 length)
         else
             a->rx_last_seq[tid] = (u16)(0x8000 | seq);
     }
-    if (qos && (header[RX_FLAGS_BYTE] & RX_FLAG_NEED_REORDER))
+    if (qos && (header[RX_FLAGS_BYTE] & RX_FLAG_NEED_REORDER)) {
         reorder_in(a, &a->reorder[tid], seq, eth, length - strip + ETH_HLEN);
-    else
-        deliver(a, eth, length - strip + ETH_HLEN);
+        return;
+    }
+    if (qos && a->reorder_pool && a->reorder[tid].active) {
+        /* A frame of the same TID the firmware no longer asks to be ordered: the
+         * block-ack session is over. What was held goes up first and the window
+         * starts again with the next frame that asks (reord_flush_tid). */
+        reorder_flush(a, &a->reorder[tid]);
+        a->reorder[tid].active = 0;
+        a->st->reorder_ended++;
+    }
+    deliver(a, eth, length - strip + ETH_HLEN);
 }
 
 /* A transfer holds packets back to back: a data packet is its 60-byte header and
