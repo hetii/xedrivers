@@ -23,7 +23,6 @@ static URB *submit_head;
 static URB *submit_tail;
 static KDPC submit_dpc;
 
-#define USB_PROCESSOR 2             /* hardware thread the USB stack runs on */
 
 static u16 le16(const u8 *p)
 {

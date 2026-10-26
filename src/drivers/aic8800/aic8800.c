@@ -148,8 +148,10 @@ static void aic8800_tick(NET_DEV *nd)
 {
     AIC *a = (AIC *)nd->priv;
 
-    if (a && a->st->product == AIC_PRODUCT_D81 && a->st->step == AIC_STEP_WIFI_UP)
+    if (a && a->st->product == AIC_PRODUCT_D81 && a->st->step == AIC_STEP_WIFI_UP) {
         aic_wifi_tick(a);
+        aic_data_tick(a);
+    }
 }
 
 /* The handshake finishes where frames arrive, and the keys it settled have to be

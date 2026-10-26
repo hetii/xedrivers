@@ -48,12 +48,38 @@ static volatile NET_STATS net_counters;
 static u8 up_frame[2048];
 static u32 up_length, up_frames, link_reports, last_link;
 
+static u8 up_order[64];             /* the payload's fifth byte, frame by frame */
+
 void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
 {
     (void)nd;
     up_length = length < sizeof(up_frame) ? length : sizeof(up_frame);
     memcpy(up_frame, frame, up_length);
+    if (up_frames < sizeof(up_order) && length > ETH_HLEN + 4)
+        up_order[up_frames] = frame[ETH_HLEN + 4];
     up_frames++;
+}
+
+static u8 reorder_memory[AIC_REORDER_SLOTS * AIC_REORDER_FRAME];
+void *MmAllocatePhysicalMemory(u32 flags, u32 size, u32 protect)
+{
+    (void)flags; (void)protect;
+    return size <= sizeof(reorder_memory) ? reorder_memory : 0;
+}
+
+void KeInitializeDpc(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *context)
+{
+    dpc->DeferredRoutine = routine;
+    dpc->DeferredContext = context;
+}
+
+/* The reorder timeout's DPC: run on the spot, as if the USB processor took it. */
+static KDPC *queued_dpc;
+int KeInsertQueueDpc(KDPC *dpc, void *a1, void *a2)
+{
+    (void)a1; (void)a2;
+    queued_dpc = dpc;
+    return 1;
 }
 
 void net_link_report(NET_DEV *nd, u32 up) { (void)nd; link_reports++; last_link = up; }
@@ -260,7 +286,7 @@ void usb_wait(u32 ms) { (void)ms; }
 void usb_wake(void) { }
 void usb_sleep(u32 ms) { (void)ms; }
 
-static u8 dma[128 * 1024];
+static u8 dma[512 * 1024];
 
 static void *carve(u32 bytes)
 {
@@ -562,6 +588,49 @@ static void test_frames(void)
     up_frames = 0;
     feed_rx(&a, buffer, n);
     CHECK(up_frames == 0 && st.data_rx_unsupported == 1);
+
+    /* A block ack's frames out of order, as the firmware hands up a retried one
+     * after those behind it: held back and released in order once it comes. */
+    {
+        static const u32 seqs[] = { 100, 102, 103, 101, 104, 104, 99 };
+        u8 p[sizeof(payload)];
+        u32 k;
+
+        up_frames = 0;
+        memcpy(p, payload, sizeof(p));
+        for (k = 0; k < sizeof(seqs) / sizeof(seqs[0]); k++) {
+            p[4] = (u8)seqs[k];
+            n = build_rx(buffer, 1, 3, p, sizeof(p));
+            buffer[48] = 0x20;                  /* needs reordering */
+            buffer[60 + 22] = (u8)(seqs[k] << 4);
+            buffer[60 + 23] = (u8)(seqs[k] >> 4);
+            feed_rx(&a, buffer, n);
+            if (k == 2)
+                CHECK(up_frames == 1 && st.reorder_held == 2);
+        }
+        CHECK(up_frames == 5);
+        CHECK(up_order[0] == 100 && up_order[1] == 101 && up_order[2] == 102 &&
+              up_order[3] == 103 && up_order[4] == 104);
+        CHECK(st.reorder_late == 2);            /* 104 again, and 99 behind it */
+
+        /* A hole nothing fills is given up on after a few worker ticks. */
+        up_frames = 0;
+        p[4] = 107;
+        n = build_rx(buffer, 1, 3, p, sizeof(p));
+        buffer[48] = 0x20;
+        buffer[60 + 22] = (u8)(107 << 4);
+        buffer[60 + 23] = (u8)(107 >> 4);
+        feed_rx(&a, buffer, n);
+        CHECK(up_frames == 0);
+        queued_dpc = 0;
+        for (k = 0; k < AIC_REORDER_TICKS; k++)
+            aic_data_tick(&a);
+        CHECK(queued_dpc != 0);
+        if (queued_dpc)
+            queued_dpc->DeferredRoutine(queued_dpc, queued_dpc->DeferredContext, 0, 0);
+        CHECK(up_frames == 1 && up_order[0] == 107 && st.reorder_timeouts == 1);
+        CHECK(a.reorder_free_count == AIC_REORDER_SLOTS);
+    }
 
     /* Sent: the four header bytes, then the descriptor, then the payload with the
      * Ethernet header taken off. */

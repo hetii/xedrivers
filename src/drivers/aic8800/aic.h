@@ -166,6 +166,11 @@ typedef struct {
     u32 data_rx_not_from_ds;
     u32 data_rx_short;
     u32 data_rx_truncated;      /* a length that overran the transfer */
+    u32 data_rx_out_of_order;   /* a sequence number behind the last one of its TID */
+    u32 reorder_held;           /* frames kept back until the ones before them came */
+    u32 reorder_late;           /* behind the window: a duplicate, or given up on */
+    u32 reorder_timeouts;       /* holes skipped because nothing filled them */
+    u32 reorder_full;           /* no room to hold one: everything let go at once */
 } AIC_STATS;
 
 extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
@@ -178,12 +183,32 @@ extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
 
 /* The data rings (aic_data.c), modest on purpose: more outstanding requests buy
  * nothing on this console and too many hang it (the RTL8156 learned that at
- * RX64+TX128). A receive buffer takes a frame at MTU with its 60-byte header and
- * leaves room for a second small packet behind it. */
-#define AIC_DATA_RX_COUNT 24
-#define AIC_DATA_RX_SIZE  4096
+ * RX64+TX128). The D80's firmware aggregates what it receives into one transfer
+ * of up to AICWF_USB_AGGR_MAX_PKT_SIZE (20480, aicwf_usb_rx_aggr is on for this
+ * chip), so a receive buffer must take that much: a smaller one ends the transfer
+ * early and the rest of the aggregate starts the next buffer mid-packet, lost. */
+#define AIC_DATA_RX_COUNT 8
+#define AIC_DATA_RX_SIZE  20480
 #define AIC_DATA_TX_COUNT 16
 #define AIC_DATA_TX_SIZE  2048
+
+/* Putting a block ack's frames back in order (aic_data.c), as AICWF_RX_REORDER
+ * does: a window of 64 sequence numbers per TID, frames ahead of a hole copied
+ * aside, and a hole given up on after a few worker ticks (Linux waits 50 ms). */
+#define AIC_REORDER_WINDOW 64
+#define AIC_REORDER_SLOTS  64
+#define AIC_REORDER_FRAME  1536     /* an Ethernet frame at MTU, rounded up */
+#define AIC_REORDER_TICKS  2        /* 20 ms ticks a hole may hold the others */
+#define AIC_REORDER_NONE   0xFF
+
+typedef struct {
+    u16 head;                   /* the next sequence number to hand up */
+    u8  active;
+    volatile u8 stalled;        /* worker ticks with frames held and no progress */
+    u8  held;
+    u8  slot[AIC_REORDER_WINDOW];   /* by sequence number mod 64: pool slot or NONE */
+    u16 length[AIC_REORDER_WINDOW];
+} AIC_REORDER;
 
 /* One DMA block for the slot, carved once: both rings and nothing that grows. */
 #define AIC_DMA_BYTES   (AIC_RX_COUNT * AIC_RX_SIZE + \
@@ -236,6 +261,13 @@ typedef struct AIC {
     URB data_tx_urb[AIC_DATA_TX_COUNT];
     u8 *data_tx_buf[AIC_DATA_TX_COUNT];
     u32 last_rx_stamp;          /* time base of the last data frame in (prof.h) */
+    u16 rx_last_seq[8];         /* per TID, 0x8000 + sequence number once seen */
+    AIC_REORDER reorder[8];     /* per TID */
+    u8 *reorder_pool;           /* AIC_REORDER_SLOTS frames, allocated once */
+    u8 reorder_free[AIC_REORDER_SLOTS];
+    u32 reorder_free_count;
+    KDPC reorder_dpc;           /* a timeout's flush, run where receive runs */
+    volatile u32 reorder_dpc_queued;
     u32 auto_wait;              /* worker ticks until the next automatic attempt */
     u32 auto_scanned;           /* a scan of the automatic join is under way */
     u32 auto_off;               /* left by command: no automatic join until asked */
@@ -272,6 +304,7 @@ void aic_wifi_tick(AIC *a);
 u32 aic_data_open(AIC *a);
 u32 aic_data_xmit(AIC *a, const u8 *frame, u32 length);
 u32 aic_data_tx_space(AIC *a);
+void aic_data_tick(AIC *a);
 
 /* aic_cmd.c: one message of a transfer, for whichever endpoint it arrived on.
  * `packet` points at its four-byte header. */

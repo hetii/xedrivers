@@ -52,6 +52,8 @@ typedef struct {
     void (*detached)(USB_DEV *dev);
 } USB_CLIENT;
 
+#define USB_PROCESSOR 2             /* hardware thread the USB stack runs on */
+
 int   usb_register(const USB_CLIENT *client);
 void *usb_open(USB_DEV *dev, u32 type, u32 address, u32 max_packet, u32 interval);
 void  usb_submit(URB *urb);

@@ -324,6 +324,44 @@ MCS 5-6 instead of collapsing to MCS 0. One stream out of the console is still
 1.0 MB/s, because its own stack keeps about four segments in flight and the air
 makes a round trip long; into the console one stream already carries 5.9 MB/s.
 
+**Three things were wrong, and two of them were ours.** Measured again with the
+card a metre from the access point (hostapd on the PC's twin card, 5 GHz ch 149,
+-44 dBm), the 1.0 MB/s out of the console and the losses into it came apart:
+
+- *Receive buffers too small.* The D80's firmware aggregates what it receives into
+  one bulk transfer of up to 20480 bytes (`aicwf_usb_rx_aggr` is on for this chip,
+  `AICWF_USB_AGGR_MAX_PKT_SIZE`). A 4096-byte buffer ended such a transfer early
+  and the rest of it began the next buffer in the middle of a packet: 5381 packets
+  cut off in one run. The ring is now eight buffers of 20 KB.
+- *No reordering.* The firmware hands an A-MPDU's frames up as they decode, so a
+  frame the access point had to retry arrives after the ones behind it -- 3.7% of
+  frames into the console under load. xnet answers each with a duplicate ACK, the
+  sender fast-retransmits and halves its window: 786 retransmissions in five
+  seconds of one stream. `AICWF_RX_REORDER` puts them back in order on Linux, and
+  aic_data.c now does the same (a window of 64 per TID, a hole given up on after
+  two worker ticks). The same stream then has none, and runs into the console's
+  64 KB window instead: 13.0 MB/s, from 7-8.
+- *The access point's ACK filter.* aicsemi's Linux driver is built with
+  `CONFIG_FILTER_TCP_ACK=y` (aicwf_tcp_ack.c): it holds TCP ACKs up to 5 ms and
+  drops the ones a later ACK supersedes -- 331 of 1310 reached the air. A Linux
+  sender with a large window does not notice; the console's stack, with a few
+  segments in flight, waits 5 ms for every round. That was the 1.0 MB/s out of
+  the console, and XBDM's own TCP showed the same 0.8 MB/s. With the module built
+  without it (`tests/pc-run.sh aic-swap`), one stream out of the console carries
+  12.6 MB/s. This is the PC's access point, not the console: a real router has no
+  such filter, but anyone measuring with this card as the access point will hit it.
+
+| plugin's TCP server, MB/s | 1 stream | 4 | 8 | FTP, 64 MB |
+|---|---|---|---|---|
+| into the console, before | 7.3 | 12.3 | 13.8 | 5.9-9.6 |
+| into the console, after | 13.0 (64 KB window) | 13.4-17.5 | 17.4 | 11.1 |
+| out of the console, before | 1.0 | 3.5 | 5.9 | 0.97 |
+| out of the console, after (no ACK filter at the AP) | 12.6 | 13.3 | 14.0 | 11.2 |
+
+What is left is the chip taking one transmit transfer at a time, 0.16-0.3 ms each
+(`tx_wait` busy ~100% with eight streams in): every ACK the console sends is a
+transfer of its own.
+
 **The radio is the limit, not this driver.** The same dongle on the PC, driven by
 aicsemi's own Linux driver and associated to the house's router, carries 1.4 MB/s
 up and 0.5 MB/s down -- the console's figures. Both dongles see that router within
