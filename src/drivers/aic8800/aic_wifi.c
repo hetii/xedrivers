@@ -315,6 +315,27 @@ static u32 wifi_ind(AIC *a, u32 id, const u8 *p, u32 length)
             a->st->aid = (u32)(p[820] | p[821] << 8);
             a->st->join_freq = (u32)(p[824] | p[825] << 8);
         }
+        if (length >= 832) {
+            u32 req = (u32)(p[14] | p[15] << 8), rsp = (u32)(p[16] | p[17] << 8);
+            const u8 *ie = p + 20, *end;
+
+            a->st->join_width = p[826];
+            a->st->join_center1 = (u32)(p[828] | p[829] << 8);
+            /* The association request's elements, then the response's. */
+            if (req + rsp <= 800) {
+                for (end = ie + req; ie + 2 <= end && ie + 2 + ie[1] <= end; ie += 2 + ie[1]) {
+                    if (ie[0] == 45 && ie[1] >= 2)
+                        a->st->assoc_ht_cap = (u32)(ie[2] | ie[3] << 8);
+                    if (ie[0] == 191 && ie[1] >= 4)
+                        a->st->assoc_vht_cap = (u32)(ie[2] | ie[3] << 8 | ie[4] << 16 |
+                                                     (u32)ie[5] << 24);
+                }
+                for (end = p + 20 + req + rsp; ie + 2 <= end && ie + 2 + ie[1] <= end;
+                     ie += 2 + ie[1])
+                    if (ie[0] == 192 && ie[1] >= 3)
+                        a->st->ap_vht_oper = (u32)(ie[2] | ie[3] << 8 | ie[4] << 16);
+            }
+        }
         aic_data_rejoin(a);
         mem_sync();
         a->joined = 1;

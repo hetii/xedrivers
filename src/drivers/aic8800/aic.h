@@ -179,6 +179,11 @@ typedef struct {
     u32 tx_stall_busy;          /* how many were outstanding then */
     u32 tx_stall_rx_frames;     /* data frames received by then, to see if RX lived */
     u32 tx_stall_completions;   /* transmit completions seen by then */
+    u32 join_width;             /* SM_CONNECT_IND: the width settled on (PHY_CHNL_BW_*) */
+    u32 join_center1;
+    u32 assoc_ht_cap;           /* what our association request offered */
+    u32 assoc_vht_cap;
+    u32 ap_vht_oper;            /* the AP's VHT operation: width, centre 1, centre 2 */
 } AIC_STATS;
 
 extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];

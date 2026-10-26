@@ -100,7 +100,8 @@ STRUCTS = {
                   "reorder_timeouts", "reorder_full", "reorder_resyncs",
                   "reorder_ended", "unexp0", "unexp1", "unexp2", "unexp3",
                   "tx_stalls", "tx_stall_busy", "tx_stall_rx_frames",
-                  "tx_stall_completions"],
+                  "tx_stall_completions", "join_width", "join_center1",
+                  "assoc_ht_cap", "assoc_vht_cap", "ap_vht_oper"],
     "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
                   "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
                   "no_gtk", "pending", "applied", "psk_ready"],
@@ -322,6 +323,9 @@ def status(sym):
                           a["reorder_resyncs"], a["reorder_ended"]))
                 print("aic unexpected messages, last four: %s" % " ".join(
                     "%#x" % a["unexp%d" % i] for i in range(4)))
+                print("aic link width=%d center1=%d | our ht_cap=%#06x vht_cap=%#010x | "
+                      "ap vht_oper=%#08x" % (a["join_width"], a["join_center1"],
+                      a["assoc_ht_cap"], a["assoc_vht_cap"], a["ap_vht_oper"]))
                 print("aic tx stalls=%d busy=%d rx_frames_then=%d completions_then=%d" % (
                     a["tx_stalls"], a["tx_stall_busy"], a["tx_stall_rx_frames"],
                     a["tx_stall_completions"]))
