@@ -70,6 +70,7 @@ static void tx_complete(URB *urb, u32 status)
     AIC *a = (AIC *)urb->Owner;
 
     PROF_SINCE(tx_wait, urb->Stamp, urb->Length);
+    a->tx_completions++;
     if (a->nd->st->tx_inflight)
         a->nd->st->tx_inflight--;
     if (!NT_SUCCESS(status)) {
@@ -247,12 +248,15 @@ static void reorder_in(AIC *a, AIC_REORDER *r, u32 seq, u8 *eth, u32 length)
     }
     distance = (seq - r->head) & 0xFFF;
     if (distance >= 0x800) {
-        /* Already handed up or given up on -- unless they keep coming, which
-         * means the sender's numbering started again (a new block-ack session,
-         * a station it forgot): follow it rather than drop everything. */
+        /* Behind the window: already handed up, or given up on. Linux hands it up
+         * all the same (reord_need_check: "no need to reord") -- a duplicate
+         * costs the stack nothing, a frame dropped here costs a retransmission.
+         * Many in a row mean the sender's numbering started again: follow it. */
         a->st->reorder_late++;
-        if (++r->late_run < AIC_REORDER_RESYNC)
+        if (++r->late_run < AIC_REORDER_RESYNC) {
+            deliver(a, eth, length);
             return;
+        }
         a->st->reorder_resyncs++;
         reorder_flush(a, r);
         r->head = (u16)seq;
@@ -260,10 +264,19 @@ static void reorder_in(AIC *a, AIC_REORDER *r, u32 seq, u8 *eth, u32 length)
     }
     r->late_run = 0;
     if (distance >= AIC_REORDER_WINDOW) {
-        /* The sender moved on past the whole window: let it all go and follow. */
-        reorder_flush(a, r);
-        r->head = (u16)seq;
-        distance = 0;
+        /* Past the end of the window: move it just far enough that this frame is
+         * its last, letting go of what falls out of it (as Linux does). */
+        u32 new_head = (seq - (AIC_REORDER_WINDOW - 1)) & 0xFFF;
+
+        a->st->reorder_jumps++;
+        while (r->head != new_head) {
+            index = r->head & (AIC_REORDER_WINDOW - 1);
+            if (r->slot[index] != AIC_REORDER_NONE)
+                reorder_release(a, r, index);
+            r->head = (r->head + 1) & 0xFFF;
+        }
+        reorder_advance(a, r);
+        distance = (seq - r->head) & 0xFFF;
     }
     if (!distance) {
         deliver(a, eth, length);
@@ -311,12 +324,37 @@ static void reorder_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
 
 /* From the worker, every tick: a hole that has held frames back for long enough
  * is let go by the DPC, where the receive path cannot be running at the same time. */
+#define TX_STALL_TICKS 100          /* 2 s of 20 ms worker ticks */
+
 void aic_data_tick(AIC *a)
 {
-    u32 t, due = 0;
+    u32 t, due = 0, busy = 0, oldest = 0;
 
     if (!a->data_running || !a->reorder_pool)
         return;
+
+    /* A transmit the chip has not taken in two seconds. Nothing can leave then,
+     * and the console cannot even be asked why, so the link is reported down:
+     * xnet moves to the onboard port and what was seen is readable. */
+    for (t = 0; t < AIC_DATA_TX_COUNT; t++) {
+        if (a->data_tx_urb[t].Busy) {
+            busy++;
+            if (a->tx_age[t] < 0xFFFF)
+                a->tx_age[t]++;
+            if (a->tx_age[t] > oldest)
+                oldest = a->tx_age[t];
+        } else {
+            a->tx_age[t] = 0;
+        }
+    }
+    if (oldest >= TX_STALL_TICKS && !a->tx_stalled) {
+        a->tx_stalled = 1;
+        a->st->tx_stalls++;
+        a->st->tx_stall_busy = busy;
+        a->st->tx_stall_rx_frames = a->st->data_rx_frames;
+        a->st->tx_stall_completions = a->tx_completions;
+        net_link_report(a->nd, 0);
+    }
     for (t = 0; t < 8; t++)
         if (a->reorder[t].held && ++a->reorder[t].stalled >= AIC_REORDER_TICKS)
             due = 1;
@@ -349,6 +387,7 @@ void aic_data_rejoin(AIC *a)
 {
     if (a->reorder_pool)
         reorder_reset(a);
+    a->tx_stalled = 0;
 }
 
 /* One MPDU, converted to an Ethernet frame where it lies and handed up. The

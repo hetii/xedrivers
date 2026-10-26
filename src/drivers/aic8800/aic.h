@@ -168,12 +168,17 @@ typedef struct {
     u32 data_rx_truncated;      /* a length that overran the transfer */
     u32 data_rx_out_of_order;   /* a sequence number behind the last one of its TID */
     u32 reorder_held;           /* frames kept back until the ones before them came */
-    u32 reorder_late;           /* behind the window: a duplicate, or given up on */
+    u32 reorder_late;           /* behind the window, handed up as it came */
+    u32 reorder_jumps;          /* past the window's end: the window moved up to it */
     u32 reorder_timeouts;       /* holes skipped because nothing filled them */
     u32 reorder_full;           /* no room to hold one: everything let go at once */
     u32 reorder_resyncs;        /* the window moved to a sender that started again */
     u32 reorder_ended;          /* a TID's frames stopped asking to be ordered */
     u32 rx_unexpected_ids[4];   /* the last unexpected messages, by rx_unexpected % 4 */
+    u32 tx_stalls;              /* a transmit transfer left unfinished for 2 s */
+    u32 tx_stall_busy;          /* how many were outstanding then */
+    u32 tx_stall_rx_frames;     /* data frames received by then, to see if RX lived */
+    u32 tx_stall_completions;   /* transmit completions seen by then */
 } AIC_STATS;
 
 extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
@@ -274,6 +279,9 @@ typedef struct AIC {
     u32 reorder_free_count;
     KDPC reorder_dpc;           /* a timeout's flush, run where receive runs */
     volatile u32 reorder_dpc_queued;
+    u16 tx_age[AIC_DATA_TX_COUNT];  /* worker ticks each transmit has been out */
+    u32 tx_stalled;             /* this association's stall is already reported */
+    volatile u32 tx_completions;
     u32 auto_wait;              /* worker ticks until the next automatic attempt */
     u32 auto_scanned;           /* a scan of the automatic join is under way */
     u32 auto_off;               /* left by command: no automatic join until asked */

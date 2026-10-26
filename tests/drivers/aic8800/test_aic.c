@@ -608,10 +608,13 @@ static void test_frames(void)
             if (k == 2)
                 CHECK(up_frames == 1 && st.reorder_held == 2);
         }
-        CHECK(up_frames == 5);
+        /* In order, then the two behind the window handed up as they came, as
+         * Linux does: 104 again and 99. */
+        CHECK(up_frames == 7);
         CHECK(up_order[0] == 100 && up_order[1] == 101 && up_order[2] == 102 &&
               up_order[3] == 103 && up_order[4] == 104);
-        CHECK(st.reorder_late == 2);            /* 104 again, and 99 behind it */
+        CHECK(up_order[5] == 104 && up_order[6] == 99);
+        CHECK(st.reorder_late == 2);
 
         /* A hole nothing fills is given up on after a few worker ticks. */
         up_frames = 0;
@@ -656,7 +659,7 @@ static void test_frames(void)
             feed_rx(&a, buffer, n);
         }
         CHECK(st.reorder_resyncs == 1);
-        CHECK(up_frames == 64 - (AIC_REORDER_RESYNC - 1));
+        CHECK(up_frames == 64);                 /* none lost while it caught up */
 
         /* The session ends: a frame of that TID without the flag lets the held
          * ones go first, then itself. */
@@ -680,6 +683,33 @@ static void test_frames(void)
         CHECK(up_frames == 4 && up_order[1] == 12 && up_order[2] == 13 &&
               up_order[3] == 99 && st.reorder_ended == 1);
         CHECK(a.reorder_free_count == AIC_REORDER_SLOTS);
+    }
+
+    /* A frame past the window's end moves it only so far that it is the last in
+     * it, letting go of what falls out. */
+    {
+        u8 p[sizeof(payload)];
+
+        aic_data_rejoin(&a);
+        memcpy(p, payload, sizeof(p));
+        up_frames = 0;
+        {
+            static const u32 s4[] = { 500, 502, 600 };
+            u32 k;
+
+            for (k = 0; k < 3; k++) {
+                p[4] = (u8)k;
+                n = build_rx(buffer, 1, 3, p, sizeof(p));
+                buffer[48] = 0x20;
+                buffer[60 + 22] = (u8)(s4[k] << 4);
+                buffer[60 + 23] = (u8)(s4[k] >> 4);
+                feed_rx(&a, buffer, n);
+            }
+        }
+        /* 500 up, 502 held; 600 moves the head to 537: 502 let go, 600 held. */
+        CHECK(up_frames == 2 && up_order[1] == 1 && st.reorder_jumps == 1);
+        CHECK(a.reorder[0].head == 537 && a.reorder[0].held == 1);
+        aic_data_rejoin(&a);
     }
 
     /* Sent: the four header bytes, then the descriptor, then the payload with the

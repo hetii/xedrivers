@@ -96,9 +96,11 @@ STRUCTS = {
                   "data_rx_last_error", "data_rx_not_data",
                   "data_rx_unsupported", "data_rx_not_from_ds",
                   "data_rx_short", "data_rx_truncated",
-                  "data_rx_out_of_order", "reorder_held", "reorder_late",
+                  "data_rx_out_of_order", "reorder_held", "reorder_late", "reorder_jumps",
                   "reorder_timeouts", "reorder_full", "reorder_resyncs",
-                  "reorder_ended", "unexp0", "unexp1", "unexp2", "unexp3"],
+                  "reorder_ended", "unexp0", "unexp1", "unexp2", "unexp3",
+                  "tx_stalls", "tx_stall_busy", "tx_stall_rx_frames",
+                  "tx_stall_completions"],
     "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
                   "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
                   "no_gtk", "pending", "applied", "psk_ready"],
@@ -308,7 +310,7 @@ def status(sym):
                     a["auto_scans"], a["auto_joins"], a["auto_missed"],
                     a["auto_secured"], a["bt_opened"], a["bt_open_status"]))
                 print("aic data tx=%d full=%d err=%d/%#x | rx=%d frames=%d err=%d/%#x "
-                      "not_data=%d unsupported=%d not_from_ds=%d short=%d trunc=%d ooo=%d | reorder held=%d late=%d timeouts=%d full=%d resyncs=%d ended=%d" % (
+                      "not_data=%d unsupported=%d not_from_ds=%d short=%d trunc=%d ooo=%d | reorder held=%d late=%d jumps=%d timeouts=%d full=%d resyncs=%d ended=%d" % (
                           a["data_tx_frames"], a["data_tx_full"], a["data_tx_errors"],
                           a["data_tx_last_error"], a["data_rx_transfers"],
                           a["data_rx_frames"], a["data_rx_errors"],
@@ -316,10 +318,13 @@ def status(sym):
                           a["data_rx_unsupported"], a["data_rx_not_from_ds"],
                           a["data_rx_short"], a["data_rx_truncated"],
                           a["data_rx_out_of_order"], a["reorder_held"],
-                          a["reorder_late"], a["reorder_timeouts"], a["reorder_full"],
+                          a["reorder_late"], a["reorder_jumps"], a["reorder_timeouts"], a["reorder_full"],
                           a["reorder_resyncs"], a["reorder_ended"]))
                 print("aic unexpected messages, last four: %s" % " ".join(
                     "%#x" % a["unexp%d" % i] for i in range(4)))
+                print("aic tx stalls=%d busy=%d rx_frames_then=%d completions_then=%d" % (
+                    a["tx_stalls"], a["tx_stall_busy"], a["tx_stall_rx_frames"],
+                    a["tx_stall_completions"]))
     if "wl_config" in sym:
         names_max = 4
         raw = read(sym["wl_config"], 8 + 4 * names_max + names_max * 33 + 4)
