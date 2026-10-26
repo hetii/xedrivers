@@ -360,7 +360,25 @@ card a metre from the access point (hostapd on the PC's twin card, 5 GHz ch 149,
 
 What is left is the chip taking one transmit transfer at a time, 0.16-0.3 ms each
 (`tx_wait` busy ~100% with eight streams in): every ACK the console sends is a
-transfer of its own.
+transfer of its own. Two ways round it were tried and dropped: several frames
+in one transfer stops the firmware transmitting at all (it has a TX_AGGR mode,
+but its patch settings exist only for the 8800DC), and merging queued pure ACKs
+behind a cap on transfers in flight gained 13% with eight streams and lost the
+link with the cap at two.
+
+**Against a real access point it holds.** The PC's card as an access point
+degrades under a long load towards the station -- its firmware hung outright
+three times with Linux on both ends -- so the last measurements are against an
+OpenWrt router (ZBT-WE1326, MT7612 2x2, 5 GHz ch 120 VHT80, wired at 1 Gbit/s)
+a metre from the console, signal -25 dBm, VHT-MCS 8-9 at 40 MHz (the station
+side settles on 40 MHz under Linux too):
+
+| out of the console | into it | FTP 64 MB, out / in |
+|---|---|---|
+| 12.9 MB/s one stream, 17.6 four | 8.1 one stream, 13.2 four | 10.8 / 11.2 MB/s |
+
+Twelve back-to-back runs of four streams each way did not move by more than
+0.5 MB/s, and three FTP rounds each way came back identical.
 
 **The radio is the limit, not this driver.** The same dongle on the PC, driven by
 aicsemi's own Linux driver and associated to the house's router, carries 1.4 MB/s
