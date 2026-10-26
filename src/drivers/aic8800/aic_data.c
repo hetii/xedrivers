@@ -247,9 +247,18 @@ static void reorder_in(AIC *a, AIC_REORDER *r, u32 seq, u8 *eth, u32 length)
     }
     distance = (seq - r->head) & 0xFFF;
     if (distance >= 0x800) {
-        a->st->reorder_late++;              /* already handed up or given up on */
-        return;
+        /* Already handed up or given up on -- unless they keep coming, which
+         * means the sender's numbering started again (a new block-ack session,
+         * a station it forgot): follow it rather than drop everything. */
+        a->st->reorder_late++;
+        if (++r->late_run < AIC_REORDER_RESYNC)
+            return;
+        a->st->reorder_resyncs++;
+        reorder_flush(a, r);
+        r->head = (u16)seq;
+        distance = 0;
     }
+    r->late_run = 0;
     if (distance >= AIC_REORDER_WINDOW) {
         /* The sender moved on past the whole window: let it all go and follow. */
         reorder_flush(a, r);
@@ -323,6 +332,7 @@ static void reorder_reset(AIC *a)
         a->reorder[t].active = 0;
         a->reorder[t].held = 0;
         a->reorder[t].stalled = 0;
+        a->reorder[t].late_run = 0;
         for (i = 0; i < AIC_REORDER_WINDOW; i++)
             a->reorder[t].slot[i] = AIC_REORDER_NONE;
         a->rx_last_seq[t] = 0;
@@ -330,6 +340,15 @@ static void reorder_reset(AIC *a)
     for (i = 0; i < AIC_REORDER_SLOTS; i++)
         a->reorder_free[i] = (u8)i;
     a->reorder_free_count = AIC_REORDER_SLOTS;
+}
+
+/* A new association: the access point numbers its frames afresh, so whatever the
+ * last one left behind is dropped and the window starts with the next frame. From
+ * the indications, which arrive on the USB processor like the frames do. */
+void aic_data_rejoin(AIC *a)
+{
+    if (a->reorder_pool)
+        reorder_reset(a);
 }
 
 /* One MPDU, converted to an Ethernet frame where it lies and handed up. The

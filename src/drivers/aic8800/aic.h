@@ -171,6 +171,7 @@ typedef struct {
     u32 reorder_late;           /* behind the window: a duplicate, or given up on */
     u32 reorder_timeouts;       /* holes skipped because nothing filled them */
     u32 reorder_full;           /* no room to hold one: everything let go at once */
+    u32 reorder_resyncs;        /* the window moved to a sender that started again */
 } AIC_STATS;
 
 extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
@@ -200,12 +201,14 @@ extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
 #define AIC_REORDER_FRAME  1536     /* an Ethernet frame at MTU, rounded up */
 #define AIC_REORDER_TICKS  2        /* 20 ms ticks a hole may hold the others */
 #define AIC_REORDER_NONE   0xFF
+#define AIC_REORDER_RESYNC 32       /* that many behind in a row: the sender restarted */
 
 typedef struct {
     u16 head;                   /* the next sequence number to hand up */
     u8  active;
     volatile u8 stalled;        /* worker ticks with frames held and no progress */
     u8  held;
+    u8  late_run;               /* frames in a row behind the window */
     u8  slot[AIC_REORDER_WINDOW];   /* by sequence number mod 64: pool slot or NONE */
     u16 length[AIC_REORDER_WINDOW];
 } AIC_REORDER;
@@ -305,6 +308,7 @@ u32 aic_data_open(AIC *a);
 u32 aic_data_xmit(AIC *a, const u8 *frame, u32 length);
 u32 aic_data_tx_space(AIC *a);
 void aic_data_tick(AIC *a);
+void aic_data_rejoin(AIC *a);
 
 /* aic_cmd.c: one message of a transfer, for whichever endpoint it arrived on.
  * `packet` points at its four-byte header. */

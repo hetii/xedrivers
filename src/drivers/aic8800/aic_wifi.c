@@ -315,6 +315,7 @@ static u32 wifi_ind(AIC *a, u32 id, const u8 *p, u32 length)
             a->st->aid = (u32)(p[820] | p[821] << 8);
             a->st->join_freq = (u32)(p[824] | p[825] << 8);
         }
+        aic_data_rejoin(a);
         mem_sync();
         a->joined = 1;
         a->st->joined++;
@@ -338,6 +339,7 @@ static u32 wifi_ind(AIC *a, u32 id, const u8 *p, u32 length)
         return 1;
     case SM_DISCONNECT_IND:
         a->joined = 0;
+        aic_data_rejoin(a);
         a->st->disconnects++;
         a->st->disconnect_reason = length >= 2 ? (u32)(p[0] | p[1] << 8) : 0;
         mem_sync();

@@ -630,6 +630,33 @@ static void test_frames(void)
             queued_dpc->DeferredRoutine(queued_dpc, queued_dpc->DeferredContext, 0, 0);
         CHECK(up_frames == 1 && up_order[0] == 107 && st.reorder_timeouts == 1);
         CHECK(a.reorder_free_count == AIC_REORDER_SLOTS);
+
+        /* Joined again: the access point numbers from scratch, and so must we. */
+        aic_data_rejoin(&a);
+        up_frames = 0;
+        p[4] = 3;
+        n = build_rx(buffer, 1, 3, p, sizeof(p));
+        buffer[48] = 0x20;
+        buffer[60 + 22] = (u8)(3 << 4);
+        buffer[60 + 23] = 0;
+        feed_rx(&a, buffer, n);
+        CHECK(up_frames == 1 && up_order[0] == 3);
+
+        /* A sender that restarts without a new association is followed once it
+         * has stayed behind the window long enough. */
+        up_frames = 0;
+        for (k = 0; k < 64; k++) {
+            u32 sq = 3900 + k;              /* behind 4, the way sequence numbers wrap */
+
+            p[4] = (u8)k;
+            n = build_rx(buffer, 1, 3, p, sizeof(p));
+            buffer[48] = 0x20;
+            buffer[60 + 22] = (u8)(sq << 4);
+            buffer[60 + 23] = (u8)(sq >> 4);
+            feed_rx(&a, buffer, n);
+        }
+        CHECK(st.reorder_resyncs == 1);
+        CHECK(up_frames == 64 - (AIC_REORDER_RESYNC - 1));
     }
 
     /* Sent: the four header bytes, then the descriptor, then the payload with the
