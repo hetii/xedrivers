@@ -70,6 +70,12 @@ STRUCTS = {
                     "keepalives", "indications", "last_indication", "rx_transfers",
                     "rx_bad", "intr_events", "intr_errors", "tx_too_big",
                     "tx_transfers"],
+    "rtw_stats": ["step", "step_status", "chip_version", "cut", "reg_reads", "reg_writes",
+                  "reg_errors", "reg_last_error", "reg_last_address", "fw_size",
+                  "fw_version", "fw_h2c_version", "fw_ctrl", "poll_timeouts",
+                  "last_poll_address", "bulk_out", "bulk_errors", "bulk_last_error",
+                  "rfe_option", "crystal_cap", "mac_lo", "mac_hi", "out_ep0", "out_ep1",
+                  "out_ep2", "out_ep3", "in_ep", "int_ep"],
     "aic_stats": ["product", "step", "step_status", "chip_word", "chip_id", "mcu_id",
                   "fw_version", "bytes_loaded", "files_loaded",
                   "file_status", "commands", "timeouts", "tx_errors",
@@ -275,6 +281,24 @@ def status(sym):
                       i, rs["init_status"], rs["max_packets"], rs["max_transfer"],
                       rs["alignment"], rs["media_status"], rs["rx_transfers"],
                       rs["rx_bad"], rs["tx_transfers"]))
+    if "rtw_stats" in sym:
+        for i in range(NET_MAX):
+            r = read_struct(sym, "rtw_stats", i)
+            if not r["reg_reads"]:
+                continue
+            mac = struct.pack(">IH", r["mac_lo"], r["mac_hi"]).hex(":")
+            print("rtw slot %d step=%d/%#x chip=%08x cut=%d regs r=%d w=%d err=%d/%#x@%#x "
+                  "fw=%dB v%d.%d.%d h2c=%d ctrl=%#06x polls_lost=%d@%#x bulk=%d err=%d/%#x" % (
+                      i, r["step"], r["step_status"], r["chip_version"], r["cut"],
+                      r["reg_reads"], r["reg_writes"], r["reg_errors"], r["reg_last_error"],
+                      r["reg_last_address"], r["fw_size"], r["fw_version"] >> 16,
+                      (r["fw_version"] >> 8) & 255, r["fw_version"] & 255,
+                      r["fw_h2c_version"], r["fw_ctrl"], r["poll_timeouts"],
+                      r["last_poll_address"], r["bulk_out"], r["bulk_errors"],
+                      r["bulk_last_error"]))
+            print("rtw efuse mac=%s rfe=%d xtal=%#x eps out=%02x/%02x/%02x in=%02x int=%02x" % (
+                mac, r["rfe_option"], r["crystal_cap"], r["out_ep0"], r["out_ep1"],
+                r["out_ep2"], r["in_ep"], r["int_ep"]))
     if "aic_stats" in sym:
         for i in range(NET_MAX):
             a = read_struct(sym, "aic_stats", i)
