@@ -25,4 +25,20 @@ extern volatile u32 debug_crypto_out[12];
  * examples in IEEE 802.11i and RFC 3394. 3 when both pass. */
 u32 debug_wpa(void);
 
+/* A transmit that never finishes: for every network device whose driver keeps
+ * NET_STATS.tx_inflight, transfers outstanding with neither that count nor
+ * tx_frames moving for two seconds. What was seen then is kept, and the link is
+ * reported down so that xnet moves to another uplink -- on the bench the onboard
+ * port is cabled, and the console can still be asked about it. Every worker tick. */
+typedef struct {
+    u32 stalls;
+    u32 inflight;           /* outstanding when it was seen */
+    u32 tx_frames;
+    u32 rx_frames;
+    u32 tick;               /* the worker's tick count then */
+} DEBUG_TX_STALL;
+
+extern volatile DEBUG_TX_STALL debug_tx_stall[];
+void debug_tick(u32 tick);
+
 #endif /* XE_DEBUG_CMDS_H */

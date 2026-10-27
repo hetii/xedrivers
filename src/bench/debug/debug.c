@@ -6,6 +6,7 @@
  */
 
 #include "debug.h"
+#include "net.h"
 #include "wpa.h"
 
 /* (thread id, &thread) -> NTSTATUS, a referenced KTHREAD; read off ordinals 267,
@@ -200,4 +201,36 @@ u32 debug_wpa(void)
             passed |= 2;
     }
     return passed;
+}
+
+/* --- a transmit that never finishes ------------------------------------------- */
+
+#define STALL_TICKS 100             /* 2 s of 20 ms worker ticks */
+
+volatile DEBUG_TX_STALL debug_tx_stall[NET_MAX];
+static u32 last_inflight[NET_MAX], last_frames[NET_MAX], still[NET_MAX];
+
+void debug_tick(u32 tick)
+{
+    u32 i, inflight, frames;
+
+    for (i = 0; i < NET_MAX; i++) {
+        volatile NET_STATS *st = &net_stats[i];
+
+        inflight = st->tx_inflight;
+        frames = st->tx_frames;
+        if (!st->ready || !st->link || !inflight ||
+            inflight != last_inflight[i] || frames != last_frames[i]) {
+            still[i] = 0;
+        } else if (++still[i] == STALL_TICKS) {
+            debug_tx_stall[i].stalls++;
+            debug_tx_stall[i].inflight = inflight;
+            debug_tx_stall[i].tx_frames = frames;
+            debug_tx_stall[i].rx_frames = st->rx_frames;
+            debug_tx_stall[i].tick = tick;
+            net_link_report(&net_devs[i], 0);
+        }
+        last_inflight[i] = inflight;
+        last_frames[i] = frames;
+    }
 }

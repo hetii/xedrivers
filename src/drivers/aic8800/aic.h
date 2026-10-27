@@ -175,10 +175,6 @@ typedef struct {
     u32 reorder_resyncs;        /* the window moved to a sender that started again */
     u32 reorder_ended;          /* a TID's frames stopped asking to be ordered */
     u32 rx_unexpected_ids[4];   /* the last unexpected messages, by rx_unexpected % 4 */
-    u32 tx_stalls;              /* a transmit transfer left unfinished for 2 s */
-    u32 tx_stall_busy;          /* how many were outstanding then */
-    u32 tx_stall_rx_frames;     /* data frames received by then, to see if RX lived */
-    u32 tx_stall_completions;   /* transmit completions seen by then */
     u32 join_width;             /* SM_CONNECT_IND: the width settled on (PHY_CHNL_BW_*) */
     u32 join_center1;
     u32 assoc_ht_cap;           /* what our association request offered */
@@ -284,9 +280,6 @@ typedef struct AIC {
     u32 reorder_free_count;
     KDPC reorder_dpc;           /* a timeout's flush, run where receive runs */
     volatile u32 reorder_dpc_queued;
-    u16 tx_age[AIC_DATA_TX_COUNT];  /* worker ticks each transmit has been out */
-    u32 tx_stalled;             /* this association's stall is already reported */
-    volatile u32 tx_completions;
     u32 auto_wait;              /* worker ticks until the next automatic attempt */
     u32 auto_scanned;           /* a scan of the automatic join is under way */
     u32 auto_off;               /* left by command: no automatic join until asked */

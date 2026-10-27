@@ -42,6 +42,9 @@ void bench_tick(u32 tick)
 #if XE_BENCH_HISTORY
     history_tick(tick);
 #endif
+#if XE_BENCH_DEBUG
+    debug_tick(tick);
+#endif
     (void)tick;
 }
 

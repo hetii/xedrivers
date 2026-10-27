@@ -98,9 +98,7 @@ STRUCTS = {
                   "data_rx_short", "data_rx_truncated",
                   "data_rx_out_of_order", "reorder_held", "reorder_late", "reorder_jumps",
                   "reorder_timeouts", "reorder_full", "reorder_resyncs",
-                  "reorder_ended", "unexp0", "unexp1", "unexp2", "unexp3",
-                  "tx_stalls", "tx_stall_busy", "tx_stall_rx_frames",
-                  "tx_stall_completions", "join_width", "join_center1",
+                  "reorder_ended", "unexp0", "unexp1", "unexp2", "unexp3", "join_width", "join_center1",
                   "assoc_ht_cap", "assoc_vht_cap", "ap_vht_oper"],
     "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
                   "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
@@ -121,6 +119,7 @@ STRUCTS = {
                   "sent_lo", "sent_hi", "recv_lo", "recv_hi", "send_errors",
                   "recv_errors", "last_send_error", "last_recv_error", "sndbuf_result",
                   "rcvbuf_result"],
+    "debug_tx_stall": ["stalls", "inflight", "tx_frames", "rx_frames", "tick"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
@@ -326,9 +325,6 @@ def status(sym):
                 print("aic link width=%d center1=%d | our ht_cap=%#06x vht_cap=%#010x | "
                       "ap vht_oper=%#08x" % (a["join_width"], a["join_center1"],
                       a["assoc_ht_cap"], a["assoc_vht_cap"], a["ap_vht_oper"]))
-                print("aic tx stalls=%d busy=%d rx_frames_then=%d completions_then=%d" % (
-                    a["tx_stalls"], a["tx_stall_busy"], a["tx_stall_rx_frames"],
-                    a["tx_stall_completions"]))
     if "wl_config" in sym:
         names_max = 4
         raw = read(sym["wl_config"], 8 + 4 * names_max + names_max * 33 + 4)
@@ -402,6 +398,13 @@ def status(sym):
               xs["link_notifies"], xs["flags_before"], xs["flags_after"]))
     print("xnet tx  queued_high=%d dropped=%d link_fallback=%d" % (
         xs["xq_high"], xs["xmit_dropped"], xs["link_fallback"]))
+    if "debug_tx_stall" in sym:
+        for i in range(NET_MAX):
+            d = read_struct(sym, "debug_tx_stall", i)
+            if d["stalls"]:
+                print("tx stall slot %d: %d time(s), last at tick %d with %d outstanding, "
+                      "tx=%d rx=%d" % (i, d["stalls"], d["tick"], d["inflight"],
+                                       d["tx_frames"], d["rx_frames"]))
     try:
         ts = read_struct(sym, "tcp_stats")
     except KeyError:

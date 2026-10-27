@@ -70,7 +70,6 @@ static void tx_complete(URB *urb, u32 status)
     AIC *a = (AIC *)urb->Owner;
 
     PROF_SINCE(tx_wait, urb->Stamp, urb->Length);
-    a->tx_completions++;
     if (a->nd->st->tx_inflight)
         a->nd->st->tx_inflight--;
     if (!NT_SUCCESS(status)) {
@@ -324,37 +323,13 @@ static void reorder_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
 
 /* From the worker, every tick: a hole that has held frames back for long enough
  * is let go by the DPC, where the receive path cannot be running at the same time. */
-#define TX_STALL_TICKS 100          /* 2 s of 20 ms worker ticks */
-
 void aic_data_tick(AIC *a)
 {
-    u32 t, due = 0, busy = 0, oldest = 0;
+    u32 t, due = 0;
 
     if (!a->data_running || !a->reorder_pool)
         return;
 
-    /* A transmit the chip has not taken in two seconds. Nothing can leave then,
-     * and the console cannot even be asked why, so the link is reported down:
-     * xnet moves to the onboard port and what was seen is readable. */
-    for (t = 0; t < AIC_DATA_TX_COUNT; t++) {
-        if (a->data_tx_urb[t].Busy) {
-            busy++;
-            if (a->tx_age[t] < 0xFFFF)
-                a->tx_age[t]++;
-            if (a->tx_age[t] > oldest)
-                oldest = a->tx_age[t];
-        } else {
-            a->tx_age[t] = 0;
-        }
-    }
-    if (oldest >= TX_STALL_TICKS && !a->tx_stalled) {
-        a->tx_stalled = 1;
-        a->st->tx_stalls++;
-        a->st->tx_stall_busy = busy;
-        a->st->tx_stall_rx_frames = a->st->data_rx_frames;
-        a->st->tx_stall_completions = a->tx_completions;
-        net_link_report(a->nd, 0);
-    }
     for (t = 0; t < 8; t++)
         if (a->reorder[t].held && ++a->reorder[t].stalled >= AIC_REORDER_TICKS)
             due = 1;
@@ -387,7 +362,6 @@ void aic_data_rejoin(AIC *a)
 {
     if (a->reorder_pool)
         reorder_reset(a);
-    a->tx_stalled = 0;
 }
 
 /* One MPDU, converted to an Ethernet frame where it lies and handed up. The
