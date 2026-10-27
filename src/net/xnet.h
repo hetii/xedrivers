@@ -28,6 +28,9 @@ u32  xnet_enable(void);
 /* Restore every thunk this patched. Safe to call when not enabled. */
 void xnet_disable(void);
 
+/* Have the title's xnet ask for the link again, as on a change of it. */
+void xnet_link_changed(void);
+
 enum {
     XNET_OK = 0,
     XNET_ERR_XMIT_THUNK = 1,

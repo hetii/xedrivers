@@ -41,4 +41,26 @@ typedef struct {
 extern volatile DEBUG_TX_STALL debug_tx_stall[];
 void debug_tick(u32 tick);
 
+/* The wireless-card probe (omni_probe.c): every option query (op 0), setting (op 1)
+ * and link poll (op 2) the kernel passes to a registered wireless card. */
+#define DEBUG_OMNI_LOG 128
+typedef struct {
+    u32 seq;
+    u32 op;
+    u32 option;
+    u32 length;             /* the buffer's length as asked */
+    u32 result;
+    u32 repeats;            /* the same call again, right after, not recorded apart */
+    u8  data[80];           /* its first bytes after the call */
+} DEBUG_OMNI_CALL;
+
+extern volatile DEBUG_OMNI_CALL debug_omni_log[DEBUG_OMNI_LOG];
+extern volatile u32 debug_omni_calls;
+extern volatile u32 debug_omni_state;
+u32 debug_omni_register(void);
+u32 debug_omni_unregister(void);
+extern volatile u32 debug_omni_wired_hidden;
+u32 debug_omni_wired_off(u32 seconds);
+void debug_omni_tick(void);
+
 #endif /* XE_DEBUG_CMDS_H */

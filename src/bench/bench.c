@@ -28,6 +28,10 @@
                              * debug_config_value */
 #define CMD_CRYPTO     19u  /* the kernel's SHA-1, HMAC-SHA1 and AES, checked
                              * against known answers -> a bitmap, 7 for all */
+#define CMD_OMNI_ON    21u  /* register as a wireless card that records what it is
+                             * asked (debug_omni_log) */
+#define CMD_OMNI_OFF   22u
+#define CMD_WIRED_OFF  23u  /* [1] seconds without xnet, then back */
 #define CMD_WPA        20u  /* WPA2's key derivation and group-key unwrapping,
                              * likewise -> a bitmap, 3 for both */
 
@@ -44,6 +48,7 @@ void bench_tick(u32 tick)
 #endif
 #if XE_BENCH_DEBUG
     debug_tick(tick);
+    debug_omni_tick();
 #endif
     (void)tick;
 }
@@ -72,6 +77,15 @@ u32 bench_command(u32 what, volatile u32 *args)
     case CMD_WPA:
         args[5] = debug_wpa();
         return 1;
+    case CMD_OMNI_ON:
+        args[5] = debug_omni_register();
+        return 1;
+    case CMD_OMNI_OFF:
+        args[5] = debug_omni_unregister();
+        return 1;
+    case CMD_WIRED_OFF:
+        args[5] = debug_omni_wired_off(args[1]);
+        return 1;
     case CMD_POKE:
         args[5] = debug_poke(args[1], args[2], args[3]);
         return 1;
@@ -85,6 +99,15 @@ u32 bench_command(u32 what, volatile u32 *args)
         (void)args;
         return 0;
     }
+}
+
+u32 bench_wired_hidden(void)
+{
+#if XE_BENCH_DEBUG
+    return debug_omni_wired_hidden;
+#else
+    return 0;
+#endif
 }
 
 BENCH_RX bench_mode(u32 mode)

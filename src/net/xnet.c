@@ -3,6 +3,7 @@
  */
 
 #include "xnet.h"
+#include "bench.h"
 #include "net.h"
 
 volatile XNET_STATS xnet_stats;
@@ -263,6 +264,8 @@ static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
 static u32 nic_link_state_hook(u32 device_flags)
 {
     xnet_stats.link_polls++;
+    if (bench_wired_hidden())
+        return NicGetLinkState(device_flags & ~(NIC_IFACE_USBENET | NIC_IFACE_EMAC));
     if ((device_flags & NIC_IFACE_USBENET) && net_link_up())
         return LINK_UP_VALUE;
     if ((device_flags & NIC_IFACE_USBENET) && net_switching)
@@ -326,6 +329,11 @@ static void notify_link(void)
     cb(*(void **)(user + USER_CTX_OFF));
     if (old != 0xFFu)
         KfLowerIrql(old);
+}
+
+void xnet_link_changed(void)
+{
+    notify_link();
 }
 
 static void link_changed(u32 up)

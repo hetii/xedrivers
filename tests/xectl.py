@@ -16,6 +16,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py reg pla|usb 0xe610 [value] read/write a MAC register word
     xectl.py blast COUNT [PAYLOAD] [PORT]
     xectl.py cmd N [a1 a2 a3]           any raw command
+    xectl.py omni                       what a wireless card registered by cmd 21 was asked
     xectl.py prof [SECONDS]             where a frame's time goes (bench=prof)
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
 
@@ -119,6 +120,8 @@ STRUCTS = {
                   "recv_errors", "last_send_error", "last_recv_error", "sndbuf_result",
                   "rcvbuf_result"],
     "wl_bridge_stats": ["scans", "joins", "missed", "secured"],
+    "debug_omni_log": ["seq", "op", "option", "length", "result", "repeats",
+                       "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7"],
     "debug_tx_stall": ["stalls", "inflight", "tx_frames", "rx_frames", "tick"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
@@ -422,6 +425,27 @@ def status(sym):
                                                            ts["rcvbuf_result"]))
 
 
+def omni_log(sym):
+    """What a wireless card registered by cmd 21 was asked, oldest first."""
+    if "debug_omni_log" not in sym:
+        print("this build has no probe; make bench=debug")
+        return
+    state = struct.unpack(">I", read(sym["debug_omni_state"], 4))[0]
+    calls = struct.unpack(">I", read(sym["debug_omni_calls"], 4))[0]
+    print("probe state=%#x calls=%d" % (state, calls))
+    raw = read(sym["debug_omni_log"], 104 * 128)
+    rows = []
+    for k in range(128):
+        e = raw[104 * k:104 * (k + 1)]
+        seq, op, opt, length, res, rep = struct.unpack(">6I", e[:24])
+        if seq:
+            rows.append((seq, op, opt, length, res, rep, e[24:104]))
+    for seq, op, opt, length, res, rep, data in sorted(rows):
+        print("%5d x%-5d %-4s %#010x (%5d) len=%-4d -> %#010x  %s" % (seq, rep + 1,
+            ("get", "set", "link", "attach", "detach", "final")[op] if op < 6 else op, opt,
+            opt if opt < 0x10000 else 0, length, res, data[:min(80, max(length, 0))].hex()))
+
+
 def prof(sym, seconds):
     """Two snapshots of net_prof, and what each stage cost between them."""
     if "net_prof" not in sym:
@@ -528,6 +552,8 @@ def main(argv):
                                   wait=600)[0])
     elif what == "history":
         history(sym, int(rest[0]) if rest else 512)
+    elif what == "omni":
+        omni_log(sym)
     elif what == "prof":
         prof(sym, float(rest[0]) if rest else 5.0)
     elif what == "cmd":

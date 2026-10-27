@@ -5,7 +5,7 @@
  * thread-priority commands, the TCP server -- lives under src/bench/<tool>/ and is
  * built only when named: `make bench=history,stack`, `make bench=all`. A plain
  * `make` is the plugin for people and has none of it. The core reaches it through
- * these four calls; without any tool every one is an empty inline the compiler
+ * these five calls; without any tool every one is an empty inline the compiler
  * drops, so that build carries none of the code, data or cycles.
  */
 
@@ -36,6 +36,11 @@ u32    bench_command(u32 what, volatile u32 *args);
 /* The receiver for a mode only the bench has (XE_MODE_STANDALONE), set up for it;
  * 0 for any other mode. */
 BENCH_RX bench_mode(u32 mode);
+
+/* Non-zero while the console is to be told that no cable is plugged in -- neither
+ * the card nor the onboard port -- so that the dashboard turns to a wireless card
+ * (the omni probe). Asked on every link poll. */
+u32    bench_wired_hidden(void);
 #else
 static inline void   bench_init(void) { }
 static inline void   bench_tick(u32 tick) { (void)tick; }
@@ -46,6 +51,7 @@ static inline u32    bench_command(u32 what, volatile u32 *args)
     return 0;
 }
 static inline BENCH_RX bench_mode(u32 mode) { (void)mode; return 0; }
+static inline u32    bench_wired_hidden(void) { return 0; }
 #endif
 
 #endif /* XE_BENCH_H */
