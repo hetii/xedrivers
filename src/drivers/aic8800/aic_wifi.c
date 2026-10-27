@@ -491,7 +491,10 @@ u32 aic_wifi_start(AIC *a)
     a->st->bt_opened = a->st->bt_open_status == 0;
 
     a->st->step = AIC_STEP_WIFI_UP;
-    wl_bridge_start(&a->bridge, &a->card);
+    wl_load_config();
+    a->link.card = &a->card;
+    a->link.mode = wl_mode_pick();
+    a->link.mode->start(&a->link, a->nd);
     status = aic_wifi_scan(a);
     if (!NT_SUCCESS(status))
         return fail(a, AIC_STEP_WIFI_SCAN, status);

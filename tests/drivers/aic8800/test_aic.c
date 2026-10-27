@@ -95,6 +95,10 @@ void net_add64(volatile u32 *lo, volatile u32 *hi, u32 n)
 void net_speed_report(NET_DEV *nd, u32 mbps) { (void)nd; (void)mbps; }
 void net_tx_done(NET_DEV *nd) { (void)nd; }
 
+/* The dashboard's mode (src/wireless/omni.c) is not this test's: the settings
+ * here never name it. */
+const WL_MODE wl_omni_mode;
+
 static int failures;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
                       failures++; } } while (0)

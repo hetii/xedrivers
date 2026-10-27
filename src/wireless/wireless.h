@@ -10,6 +10,7 @@
 #define XE_WIRELESS_H
 
 #include "kernel.h"
+#include "net.h"
 
 #define WL_SSID_MAX  32
 #define WL_BSS_MAX   24
@@ -80,6 +81,7 @@ typedef struct {
     char ssid[WL_NAMES_MAX][WL_SSID_MAX + 1];
     u32  pass_len;              /* `wifi_pass =`, for a WPA2 network */
     char pass[WL_PASS_MAX + 1];
+    u32  dashboard;             /* `wifi_mode = dashboard`, else ethernet */
 } WL_CONFIG;
 
 extern volatile WL_CONFIG wl_config;
@@ -97,8 +99,8 @@ s32 wl_pick(u32 *secured);
 #define WL_CARD_JOINED   0x1u   /* associated (and, if secured, the handshake begun) */
 #define WL_CARD_SCANNING 0x2u
 
-/* What a driver can do, and nothing about when to do it: that is the policy's,
- * bridge.c's now and a dashboard's later. Every call is from the worker thread. */
+/* What a driver can do, and nothing about when to do it: that is the mode's
+ * (WL_MODE below). Every call is from the worker thread. */
 typedef struct {
     void *context;
     /* Start a scan; its results go to wl_scan_result and wl_scan_end. */
@@ -108,5 +110,46 @@ typedef struct {
     u32 (*leave)(void *context);
     u32 (*state)(void *context);            /* WL_CARD_* */
 } WL_CARD;
+
+/* --- which way a card serves the console ---------------------------------------- *
+ * `wifi_mode =` in WL_SETTINGS: `ethernet` (the default) -- the card joins the
+ * network the file names and is one more cable for xnet (bridge.c); `dashboard` --
+ * it is the console's wireless adapter and the dashboard chooses and joins
+ * (omni.c). The driver keeps a WL_LINK per card, takes the mode wl_mode_pick
+ * names when the card is up, and calls only through it. */
+
+/* The ethernet mode's state for one card (bridge.c). */
+typedef struct {
+    u32 wait;               /* worker ticks until the next automatic attempt */
+    u32 scanned;            /* a scan of the automatic join is under way */
+    u32 off;                /* left by command: no automatic join until asked */
+} WL_BRIDGE;
+
+typedef struct WL_LINK WL_LINK;
+
+typedef struct {
+    /* The card is up (the settings read). Thread. */
+    void (*start)(WL_LINK *l, NET_DEV *nd);
+    /* Every worker tick while it is up. */
+    void (*tick)(WL_LINK *l);
+    /* The card is gone. Any IRQL up to DISPATCH. */
+    void (*gone)(WL_LINK *l);
+    /* By command (tests/xectl.py): join the scan table's entry `index`, or leave;
+     * a mode in which the dashboard decides refuses both. */
+    u32  (*join)(WL_LINK *l, u32 index);
+    u32  (*leave)(WL_LINK *l);
+} WL_MODE;
+
+struct WL_LINK {
+    const WL_MODE *mode;
+    const WL_CARD *card;
+    WL_BRIDGE bridge;
+};
+
+extern const WL_MODE wl_bridge_mode;    /* bridge.c */
+extern const WL_MODE wl_omni_mode;      /* omni.c */
+
+/* The mode the settings name. After wl_load_config. */
+const WL_MODE *wl_mode_pick(void);
 
 #endif /* XE_WIRELESS_H */

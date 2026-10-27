@@ -19,7 +19,6 @@ volatile WL_BRIDGE_STATS wl_bridge_stats;
 void wl_bridge_start(WL_BRIDGE *b, const WL_CARD *card)
 {
     (void)card;
-    wl_load_config();
     b->wait = 0;
     b->scanned = 0;
     b->off = 0;
@@ -76,3 +75,33 @@ u32 wl_bridge_leave(WL_BRIDGE *b, const WL_CARD *card)
     b->off = 1;
     return card->leave(card->context);
 }
+
+/* --- as a WL_MODE (wireless.h) -------------------------------------------------- */
+
+static void mode_start(WL_LINK *l, NET_DEV *nd)
+{
+    (void)nd;
+    wl_bridge_start(&l->bridge, l->card);
+}
+
+static void mode_tick(WL_LINK *l)
+{
+    wl_bridge_tick(&l->bridge, l->card);
+}
+
+static void mode_gone(WL_LINK *l)
+{
+    (void)l;
+}
+
+static u32 mode_join(WL_LINK *l, u32 index)
+{
+    return wl_bridge_join(&l->bridge, l->card, index);
+}
+
+static u32 mode_leave(WL_LINK *l)
+{
+    return wl_bridge_leave(&l->bridge, l->card);
+}
+
+const WL_MODE wl_bridge_mode = { mode_start, mode_tick, mode_gone, mode_join, mode_leave };

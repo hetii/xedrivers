@@ -202,7 +202,16 @@ void wl_load_config(void)
         wl_config.pass[i] = value[i];
     wl_config.pass[n] = 0;
     wl_config.pass_len = n;
+    n = file_setting(WL_SETTINGS, "wifi_mode", value, sizeof(value));
+    for (i = 0; i < 9 && i < n && value[i] == "dashboard"[i]; i++)
+        ;
+    wl_config.dashboard = n == 9 && i == 9;
     wl_config.loaded = 1;
+}
+
+const WL_MODE *wl_mode_pick(void)
+{
+    return wl_config.dashboard ? &wl_omni_mode : &wl_bridge_mode;
 }
 
 /* Is this one of the networks named? */

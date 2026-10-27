@@ -291,5 +291,9 @@ extern void  NicDetach(void *user);                                 /* 515 */
 extern void  NicXmit(void *user, u32 queue, void *frame, u32 length,
                      void *cookie);                                 /* 516 */
 extern u32   NicGetLinkState(u32 interfaces);                       /* 520 */
+/* A wireless device (kind 2) for the kernel's NIC layer: its first two words a
+ * list entry, +0x08 its type, +0x0C its services table. 0 when taken. */
+extern s32   NicRegisterDevice(u32 kind, void *device);              /* 739 */
+extern void  NicUnregisterDevice(u32 kind, void *device);            /* 771 */
 
 #endif /* XE_KERNEL_H */

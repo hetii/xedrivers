@@ -138,7 +138,7 @@ static void choose(void)
     for (i = 0; i < NET_MAX; i++) {
         NET_DEV *nd = &net_devs[i];
 
-        if (!nd->drv || !nd->st->ready || !nd->st->link)
+        if (!nd->drv || !nd->st->ready || !nd->st->link || nd->claim)
             continue;
         if (!best || better(nd, best, current))
             best = nd;
@@ -173,6 +173,10 @@ static void set_link(NET_DEV *nd, u32 up)
     nd->st->link = up;
     if (up)
         nd->up_order = ++up_counter;
+    if (nd->claim) {
+        nd->claim->link(nd->claim->context, up);
+        return;
+    }
     choose();
 }
 
@@ -188,6 +192,10 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
      * arriving is as good a sign of link as any. */
     if (!nd->st->link && !nd->link_down_seen)
         set_link(nd, 1);
+    if (nd->claim) {
+        nd->claim->rx(nd->claim->context, frame, length);
+        return;
+    }
     if (uplink() != nd) {
         nd->st->rx_not_uplink++;
         return;
@@ -216,8 +224,20 @@ void net_speed_report(NET_DEV *nd, u32 mbps)
 
 void net_tx_done(NET_DEV *nd)
 {
+    if (nd->claim) {
+        if (nd->claim->tx_idle)
+            nd->claim->tx_idle(nd->claim->context);
+        return;
+    }
     if (net_tx_idle && uplink() == nd)
         net_tx_idle();
+}
+
+void net_claim(NET_DEV *nd, const NET_CLAIM *claim)
+{
+    nd->claim = claim;
+    mem_sync();
+    choose();
 }
 
 u32 net_link_up(void)
@@ -296,6 +316,7 @@ static u32 net_start(NET_DEV *nd)
     nd->st->link = 0;
     nd->st->tx_inflight = 0;
     nd->link_down_seen = 0;
+    nd->claim = 0;
     if (!nd->drv)
         return 0xFFFFFFFFu;
 
@@ -323,8 +344,23 @@ static void net_detached(USB_DEV *dev)
     if (nd->drv)
         nd->drv->detached(nd);
     nd->st->speed_mbps = 0;
-    nd->st->link = 0;
+    set_link(nd, 0);
     choose();
+}
+
+u32 net_dev_tx(NET_DEV *nd, const u8 *frame, u32 length)
+{
+    if (!nd->drv || !nd->st->ready || !nd->usb->active || length < ETH_HLEN ||
+        length > ETH_FRAME_MAX) {
+        nd->st->tx_drops++;
+        return 0;
+    }
+    return nd->drv->xmit(nd, frame, length);
+}
+
+u32 net_dev_tx_space(NET_DEV *nd)
+{
+    return nd->drv && nd->st->ready && nd->drv->tx_space(nd);
 }
 
 u32 net_tx(const u8 *frame, u32 length)

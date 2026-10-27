@@ -31,9 +31,6 @@
 #define OID_BSSID_LIST_SCAN 0x0D01021Au
 #define OID_BSSID_LIST      0x0D010217u
 
-extern s32 NicRegisterDevice(u32 kind, void *device);
-extern void NicUnregisterDevice(u32 kind, void *device);
-
 typedef s32 (*GET_OPT)(void *user, u32 option, u8 *buffer, u32 *length, u32 *flag);
 typedef u32 (*LINK_STATE)(void);
 

@@ -33,6 +33,8 @@ u32 file_setting(const char *name, const char *key, char *out, u32 size)
 static u32 keys_waiting;
 u32 wpa_apply(void) { u32 w = keys_waiting; keys_waiting = 0; return w; }
 
+const WL_MODE wl_omni_mode;            /* not this test's (omni.c) */
+
 /* --- the card -------------------------------------------------------------------- */
 
 static u32 scans, joins, leaves, joined, scanning;
@@ -80,6 +82,7 @@ int main(void)
     WL_BRIDGE b;
     u32 i;
 
+    wl_load_config();
     wl_bridge_start(&b, &card);
     CHECK(wl_config.count == 2 && wl_config.pass_len == 11);
 

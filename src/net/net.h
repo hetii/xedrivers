@@ -81,6 +81,17 @@ typedef struct {
     u32 where;              /* the USB node's controller/port byte */
 } NET_STATS;
 
+/* A device taken out of the uplink choice by a consumer of its own -- a wireless
+ * card the dashboard drives (src/wireless/omni.c) is not a cable for xnet. Its
+ * frames, link changes and freed transmit slots go there instead. Called as
+ * net_rx, net_link_cb and net_tx_idle are. */
+typedef struct {
+    void *context;
+    void (*rx)(void *context, const u8 *frame, u32 length);
+    void (*link)(void *context, u32 up);
+    void (*tx_idle)(void *context);
+} NET_CLAIM;
+
 /* One network device, a USB slot's. */
 typedef struct NET_DEV {
     USB_DEV *usb;
@@ -93,6 +104,7 @@ typedef struct NET_DEV {
     u8 *rings;
     u32 rings_size;
     u32 rings_used;
+    const NET_CLAIM *claim; /* 0 while it is a candidate for the uplink */
 } NET_DEV;
 
 extern NET_DEV net_devs[NET_MAX];
@@ -163,6 +175,15 @@ void net_speed_report(NET_DEV *nd, u32 mbps);
 /* A transmit completed and its slot is free: wakes net_tx_idle if `nd` is the
  * uplink. */
 void net_tx_done(NET_DEV *nd);
+
+/* Take `nd` for `claim` (see NET_CLAIM), or give it back with 0. Until the next
+ * bring-up, which gives every device back. Thread-only. */
+void net_claim(NET_DEV *nd, const NET_CLAIM *claim);
+
+/* Queue one frame on this device rather than the uplink, and whether it has a free
+ * slot: for its claimant. As net_tx and net_tx_space. */
+u32  net_dev_tx(NET_DEV *nd, const u8 *frame, u32 length);
+u32  net_dev_tx_space(NET_DEV *nd);
 
 /* DMA memory. The scratch block is allocated once and never moves -- for control
  * and register buffers a driver keeps across bring-ups; each caller takes its

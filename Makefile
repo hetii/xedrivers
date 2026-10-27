@@ -155,7 +155,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
 test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis \
       $(BUILD)/test_aic $(BUILD)/test_wpa $(BUILD)/test_reorder \
-      $(BUILD)/test_bridge
+      $(BUILD)/test_bridge $(BUILD)/test_omni
 	@$(BUILD)/test_cdc
 	@$(BUILD)/test_stack
 	@$(BUILD)/test_rtl
@@ -164,6 +164,7 @@ test: $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndi
 	@$(BUILD)/test_wpa
 	@$(BUILD)/test_reorder
 	@$(BUILD)/test_bridge
+	@$(BUILD)/test_omni
 
 HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core -I src/net -I src/wireless
 
@@ -206,6 +207,11 @@ $(BUILD)/test_bridge: tests/wireless/test_bridge.c src/wireless/bridge.c \
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -o $@ tests/wireless/test_bridge.c src/wireless/bridge.c \
 	    src/wireless/wireless.c
+
+$(BUILD)/test_omni: tests/wireless/test_omni.c src/wireless/omni.c src/net/txq.c \
+                    src/wireless/wireless.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -o $@ tests/wireless/test_omni.c src/net/txq.c src/wireless/wireless.c
 
 $(BUILD)/test_reorder: tests/wireless/test_reorder.c src/wireless/reorder.c $(HEADERS)
 	@mkdir -p $(BUILD)

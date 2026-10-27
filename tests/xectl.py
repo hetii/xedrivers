@@ -120,6 +120,10 @@ STRUCTS = {
                   "recv_errors", "last_send_error", "last_recv_error", "sndbuf_result",
                   "rcvbuf_result"],
     "wl_bridge_stats": ["scans", "joins", "missed", "secured"],
+    "wl_omni_stats": ["registered", "attached", "present", "link", "gets", "sets",
+                      "unknown_gets", "unknown_sets", "last_unknown", "scans", "joins",
+                      "missed", "leaves", "rejoins", "rx", "tx", "tx_dropped", "tx_high",
+                      "security"],
     "debug_omni_log": ["seq", "op", "option", "length", "result", "repeats",
                        "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7"],
     "debug_tx_stall": ["stalls", "inflight", "tx_frames", "rx_frames", "tick"],
@@ -362,6 +366,18 @@ def status(sym):
         b = read_struct(sym, "wl_bridge_stats")
         print("bridge   auto scans=%d joins=%d missed=%d secured=%d" % (
             b["scans"], b["joins"], b["missed"], b["secured"]))
+    if "wl_omni_stats" in sym:
+        o = read_struct(sym, "wl_omni_stats")
+        if o["registered"]:
+            print("omni     registered=%#x attached=%d present=%d link=%d security=%d "
+                  "gets=%d sets=%d unknown=%d/%d last=%#x" % (
+                      o["registered"], o["attached"], o["present"], o["link"],
+                      o["security"], o["gets"], o["sets"], o["unknown_gets"],
+                      o["unknown_sets"], o["last_unknown"]))
+            print("omni     scans=%d joins=%d missed=%d leaves=%d rejoins=%d rx=%d tx=%d "
+                  "dropped=%d queue_high=%d" % (
+                      o["scans"], o["joins"], o["missed"], o["leaves"], o["rejoins"],
+                      o["rx"], o["tx"], o["tx_dropped"], o["tx_high"]))
     if "wl_stats" in sym:
         w = read_struct(sym, "wl_stats")
         print("wireless scans=%d/%d results=%d bad=%d full=%d networks=%d status=%#x" % (

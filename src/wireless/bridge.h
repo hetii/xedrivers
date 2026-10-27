@@ -7,13 +7,6 @@
 
 #include "wireless.h"
 
-/* One card's place in the policy; the driver keeps it beside its WL_CARD. */
-typedef struct {
-    u32 wait;               /* worker ticks until the next automatic attempt */
-    u32 scanned;            /* a scan of the automatic join is under way */
-    u32 off;                /* left by command: no automatic join until asked */
-} WL_BRIDGE;
-
 /* Read by tests/xectl.py. */
 typedef struct {
     u32 scans;              /* scans the automatic join started */
@@ -24,7 +17,7 @@ typedef struct {
 
 extern volatile WL_BRIDGE_STATS wl_bridge_stats;
 
-/* The card is up: read the settings, and join at the next tick. */
+/* The card is up (the settings read): join at the next tick. */
 void wl_bridge_start(WL_BRIDGE *b, const WL_CARD *card);
 
 /* Every worker tick while the card is up. */

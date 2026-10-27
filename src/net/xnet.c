@@ -5,6 +5,7 @@
 #include "xnet.h"
 #include "bench.h"
 #include "net.h"
+#include "txq.h"
 
 volatile XNET_STATS xnet_stats;
 
@@ -110,35 +111,7 @@ static void *find_title_user(void)
 
 /* --- the hooks --------------------------------------------------------------- */
 
-/* --- transmit with backpressure ----------------------------------------------
- *
- * A NIC tells its user a frame is sent when it is, and xnet does not reuse the
- * buffer before. Completing every frame on the spot and dropping it when the USB
- * ring was full lost ~0.3% of frames under load (1918 of 576638 in four parallel
- * FTP downloads) and TCP spent the rest of the run in retransmission timeouts:
- * one stream 157 Mbit/s, four streams 14 between them.
- *
- * So frames queue here, in order, with the buffer and cookie xnet gave us, and
- * leave for the ring as slots free up; each is completed to xnet only once it has
- * been copied into a transfer buffer. One drainer at a time, chosen by a
- * test-and-set flag rather than a spin lock: completing a frame re-enters xnet,
- * which may call NicXmit straight back into us, and a completion of our own
- * transfer runs the drain from the USB processor. Whoever finds the flag taken
- * leaves the work to its holder, who looks again after letting go. */
-
-#define XQ_SIZE 512
-
-typedef struct {
-    void *user;
-    void *frame;
-    u32   length;
-    void *cookie;
-} XQ_ENTRY;
-
-static XQ_ENTRY xq[XQ_SIZE];
-static u32 xq_head, xq_tail;
-static KSPIN_LOCK xq_lock;
-static volatile u32 xq_draining;
+/* --- transmit: through the queue (txq.h), to the uplink ------------------- */
 
 static void xmit_done(void *user, void *cookie)
 {
@@ -150,67 +123,37 @@ static void xmit_done(void *user, void *cookie)
         done(*(void **)(u + USER_CTX_OFF), cookie);
 }
 
-static u32 xq_count(void)
+static u32 xq_send(void *owner, const u8 *frame, u32 length)
 {
-    return (xq_tail + XQ_SIZE - xq_head) % XQ_SIZE;
+    (void)owner;
+    return net_tx(frame, length);
 }
+
+static u32 xq_space(void *owner)
+{
+    (void)owner;
+    return net_tx_space();
+}
+
+static u32 xq_keep(void *owner)
+{
+    (void)owner;
+    return net_link_up();
+}
+
+static void xq_done(void *owner, void *user, void *cookie)
+{
+    (void)owner;
+    xmit_done(user, cookie);
+}
+
+static NET_TXQ xq = { .send = xq_send, .space = xq_space, .keep = xq_keep,
+                      .done = xq_done, .dropped = &xnet_stats.xmit_dropped,
+                      .high = &xnet_stats.xq_high };
 
 static void xq_drain(void)
 {
-    XQ_ENTRY e;
-    u32 irql, sent;
-
-    for (;;) {
-        if (__sync_lock_test_and_set(&xq_draining, 1))
-            return;
-        for (;;) {
-            irql = KfAcquireSpinLock(&xq_lock);
-            if (xq_head == xq_tail || !net_tx_space()) {
-                KfReleaseSpinLock(&xq_lock, irql);
-                break;
-            }
-            e = xq[xq_head];
-            xq_head = (xq_head + 1) % XQ_SIZE;
-            KfReleaseSpinLock(&xq_lock, irql);
-
-            sent = net_tx((const u8 *)e.frame, e.length);
-            if (!sent && net_link_up()) {
-                /* The space hint raced a fill: put it back where it was. Only
-                 * the drainer takes from the head, so this cannot reorder. */
-                irql = KfAcquireSpinLock(&xq_lock);
-                xq_head = (xq_head + XQ_SIZE - 1) % XQ_SIZE;
-                xq[xq_head] = e;
-                KfReleaseSpinLock(&xq_lock, irql);
-                break;
-            }
-            if (!sent)
-                xnet_stats.xmit_dropped++;
-            xmit_done(e.user, e.cookie);
-        }
-        __sync_lock_release(&xq_draining);
-        if (xq_head == xq_tail || !net_tx_space())
-            break;
-    }
-}
-
-/* Everything still waiting, completed unsent: the link went away. */
-static void xq_flush(void)
-{
-    XQ_ENTRY e;
-    u32 irql;
-
-    for (;;) {
-        irql = KfAcquireSpinLock(&xq_lock);
-        if (xq_head == xq_tail) {
-            KfReleaseSpinLock(&xq_lock, irql);
-            return;
-        }
-        e = xq[xq_head];
-        xq_head = (xq_head + 1) % XQ_SIZE;
-        KfReleaseSpinLock(&xq_lock, irql);
-        xnet_stats.xmit_dropped++;
-        xmit_done(e.user, e.cookie);
-    }
+    net_txq_drain(&xq);
 }
 
 /* xam -> NicXmit(user, queue, frame, length, cookie). Queue for the card when this
@@ -218,7 +161,7 @@ static void xq_flush(void)
 static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
                           void *cookie)
 {
-    u32 irql, depth, i;
+    u32 i;
 
     /* The address xnet sends from is the console's own: a Wi-Fi card has to
      * associate on it (aic_wifi.c), a wired one only passes it through. */
@@ -235,23 +178,7 @@ static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
     }
 
     xnet_stats.xmit_usb++;
-    irql = KfAcquireSpinLock(&xq_lock);
-    if ((xq_tail + 1) % XQ_SIZE == xq_head) {
-        KfReleaseSpinLock(&xq_lock, irql);
-        xnet_stats.xmit_dropped++;
-        xmit_done(user, cookie);
-        return;
-    }
-    xq[xq_tail].user = user;
-    xq[xq_tail].frame = frame;
-    xq[xq_tail].length = length;
-    xq[xq_tail].cookie = cookie;
-    xq_tail = (xq_tail + 1) % XQ_SIZE;
-    depth = xq_count();
-    if (depth > xnet_stats.xq_high)
-        xnet_stats.xq_high = depth;
-    KfReleaseSpinLock(&xq_lock, irql);
-    xq_drain();
+    net_txq_put(&xq, user, frame, length, cookie);
 }
 
 /* xam -> NicGetLinkState(deviceFlags). The card's link while it has one; without
@@ -339,7 +266,7 @@ void xnet_link_changed(void)
 static void link_changed(u32 up)
 {
     if (!up)
-        xq_flush();
+        net_txq_flush(&xq);
     notify_link();
 }
 
@@ -398,7 +325,7 @@ void xnet_disable(void)
     net_link_cb = 0;
     net_tx_idle = 0;
     mem_sync();
-    xq_flush();
+    net_txq_flush(&xq);
 
     thunk_restore(THUNK_XMIT, saved_xmit_lis, saved_xmit_addi);
     thunk_restore(THUNK_LINK_STATE, saved_link_lis, saved_link_addi);
