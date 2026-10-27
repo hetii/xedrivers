@@ -218,7 +218,15 @@ knows the product (VID:PID) wins over one that only knows the class.
 | `cdc` | class: a CDC ECM or NCM interface in the current configuration | the frame transport, ECM or NCM (`cdc.c` parses, `cdc_net.c` runs it) |
 | `rtl8156` | `0bda:8156` | `cdc` plus the Realtek part: 2.5G advertisement, registers, PHY, chip version |
 | `rndis` | class: an RNDIS control interface (E0/01/03, 02/02/FF, EF/04/01) | Remote NDIS, the way Android phones tether (`rndis.c` the messages, `rndis_net.c` the driver) |
-| `aic8800` | `a69c:8d80`, then `a69c:8d81` | AIC8800D80 USB Wi-Fi 6: firmware load (`aic_fw.c`), the Wi-Fi firmware's bring-up, scan and join (`aic_wifi.c`), frames (`aic_data.c`); the networks found go to `src/wireless/` |
+| `aic8800` | `a69c:8d80`, then `a69c:8d81` | AIC8800D80 USB Wi-Fi 6: firmware load (`aic_fw.c`), the Wi-Fi firmware's bring-up, scan and join (`aic_wifi.c`), frames (`aic_data.c`); offered to `src/wireless/` as a `WL_CARD` |
+
+What every Wi-Fi card shares is in `src/wireless/`, and a driver keeps only what is
+its chip's: `wireless.c` the networks a scan found and which to pick, and the
+`WL_CARD` a driver fills in (scan, join, leave, state); `wpa.c` the WPA2
+handshake; `reorder.c` putting a block ack's frames back in order (mac80211's
+agg-rx, with the driver saying which frames need it and running the timeout in
+its own receive context); `bridge.c` the policy, the only one so far (a `wifi_mode = dashboard` beside it is planned):
+the card as a cable that joins the network `xedrivers.ini` names by itself.
 
 `rndis` was first run on a Xiaomi phone tethering over USB (2717:ff80): INITIALIZE,
 MAC, filter and link state answered at the first try, the phone packs several
