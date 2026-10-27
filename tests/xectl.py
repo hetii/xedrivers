@@ -75,7 +75,10 @@ STRUCTS = {
                   "fw_version", "fw_h2c_version", "fw_ctrl", "poll_timeouts",
                   "last_poll_address", "bulk_out", "bulk_errors", "bulk_last_error",
                   "rfe_option", "crystal_cap", "mac_lo", "mac_hi", "out_ep0", "out_ep1",
-                  "out_ep2", "out_ep3", "in_ep", "int_ep"],
+                  "out_ep2", "out_ep3", "in_ep", "int_ep", "channel", "h2c_packets",
+                  "rx_transfers", "rx_frames", "rx_bad", "rx_c2h", "rx_crc_errors",
+                  "rx_errors", "rx_last_error", "rx_beacons", "rx_mgmt", "rx_data",
+                  "last_signal", "scans"],
     "aic_stats": ["product", "step", "step_status", "chip_word", "chip_id", "mcu_id",
                   "fw_version", "bytes_loaded", "files_loaded",
                   "file_status", "commands", "timeouts", "tx_errors",
@@ -299,6 +302,13 @@ def status(sym):
             print("rtw efuse mac=%s rfe=%d xtal=%#x eps out=%02x/%02x/%02x in=%02x int=%02x" % (
                 mac, r["rfe_option"], r["crystal_cap"], r["out_ep0"], r["out_ep1"],
                 r["out_ep2"], r["in_ep"], r["int_ep"]))
+            sig = r["last_signal"] - (1 << 32) if r["last_signal"] & 0x80000000 else r["last_signal"]
+            print("rtw rx   ch=%d h2c=%d xfers=%d frames=%d bad=%d c2h=%d crc=%d err=%d/%#x "
+                  "beacons=%d mgmt=%d data=%d signal=%d scans=%d" % (
+                      r["channel"], r["h2c_packets"], r["rx_transfers"], r["rx_frames"],
+                      r["rx_bad"], r["rx_c2h"], r["rx_crc_errors"], r["rx_errors"],
+                      r["rx_last_error"], r["rx_beacons"], r["rx_mgmt"], r["rx_data"],
+                      sig, r["scans"]))
     if "aic_stats" in sym:
         for i in range(NET_MAX):
             a = read_struct(sym, "aic_stats", i)

@@ -95,5 +95,43 @@ typedef struct {
 
 """ + "".join("extern const RTW_PWR_CMD *const %s[];\n" % n for n, _ in flows) + "\n#endif\n")
 open(os.path.join(out, "rtw8822b_table.h"), "w").write(h)
+# The constants rtw8822b.c, rtw8822b.h and mac.h define for themselves: plain
+# values and expressions of them, continuation lines kept; macros that take
+# arguments or reach into the driver's structures are left out.
+def defines(text):
+    out = []
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        l = lines[i]
+        if l.startswith("#define "):
+            block = [l]
+            while block[-1].rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1
+                block.append(lines[i])
+            name = l.split()[1]
+            body = "\n".join(block)
+            if "(" not in name and "rtwdev" not in body and "struct" not in body:
+                out.append(body)
+        i += 1
+    return out
+
+defs = []
+for fn in ("mac.h", "bf.h", "rtw8822b.h", "rtw8822b.c"):
+    for d in defines(open(os.path.join(rtw, fn)).read()):
+        if not re.match(r"#define (__|_RTW|RTW8822B_H)", d):
+            defs.append((fn, d))
+with open(os.path.join(out, "rtw8822b_defs.h"), "w") as f:
+    f.write(HEAD % ("mac.h, bf.h, rtw8822b.h and rtw8822b.c", rev))
+    f.write("#ifndef XE_RTW8822B_DEFS_H\n#define XE_RTW8822B_DEFS_H\n\n")
+    f.write('#include "rtw_reg.h"\n\n')
+    last = None
+    for fn, d in defs:
+        if fn != last:
+            f.write("/* %s */\n" % fn)
+            last = fn
+        f.write(d + "\n")
+    f.write("\n#endif\n")
 print("%d tables, %d power sequences in %d flows, reg.h %d lines, from %s"
       % (len(arrays), len(seqs), len(flows), len(lines), rev))
+print("%d constants" % len(defs))

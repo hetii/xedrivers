@@ -4,6 +4,7 @@
 
 #include "rtw.h"
 #include "file.h"
+#include "rtw8822b_defs.h"
 
 #define PWR_POLL_READS      2000    /* RTW_PWR_POLLING_CNT reads 50 us apart: 1 s */
 #define RTW_PWR_CMD_WRITE   0x01
@@ -16,8 +17,6 @@
 #define FW_HDR_SIZE         64
 #define FW_HDR_CHKSUM_SIZE  8
 #define FW_PKT_MAX          0x1000      /* download_firmware_to_mem's max_size */
-#define OCPBASE_TXBUF_88XX  0x18780000u
-#define OCPBASE_DMEM_88XX   0x00200000u
 #define RTW_DMA_MAPPING_HIGH 3
 #define BIT_H2CQ_FULL_      BIT(31)
 
@@ -433,5 +432,169 @@ u32 rtw_download_firmware(RTW *r)
         return RTW_STEP_FW_READY;
     }
     r->st->fw_ctrl = rtw_read16(r, REG_MCUFW_CTRL);
+    return 0;
+}
+
+/* --- after the firmware: rtw_mac_init ------------------------------------------- */
+
+/* The 8822B over three bulk OUT endpoints: rqpn_table_8822b[3] and
+ * page_table_8822b[3]. */
+#define MAP_NORMAL          1
+#define MAP_LOW             2
+#define MAP_HIGH            3
+#define TXFF_PAGES          (262144 / 128)
+#define RSVD_PAGES          (8 + RSVD_PG_H2C_EXTRAINFO_NUM + RSVD_PG_H2C_STATICINFO_NUM + \
+                             RSVD_PG_H2CQ_NUM + RSVD_PG_CPU_INSTRUCTION_NUM + \
+                             RSVD_PG_FW_TXBUF_NUM)
+#define PAGES_HQ            64
+#define PAGES_NQ            64
+#define PAGES_LQ            64
+#define PAGES_EXQ           0
+#define PAGES_GAP           1
+#define RXFF_SIZE           24576
+#define C2H_PKT_BUF         256
+#define USB_TX_AGG_DESC     3
+
+/* txdma_queue_mapping */
+static void txdma_queue_mapping(RTW *r)
+{
+    u16 map = (u16)(BIT_TXDMA_HIQ_MAP(MAP_HIGH) | BIT_TXDMA_MGQ_MAP(MAP_HIGH) |
+                    BIT_TXDMA_BKQ_MAP(MAP_LOW) | BIT_TXDMA_BEQ_MAP(MAP_LOW) |
+                    BIT_TXDMA_VIQ_MAP(MAP_NORMAL) | BIT_TXDMA_VOQ_MAP(MAP_NORMAL));
+
+    rtw_write16(r, REG_TXDMA_PQ_MAP, map);
+    rtw_write8(r, REG_CR, 0);
+    rtw_write8(r, REG_CR, MAC_TRX_ENABLE);
+    rtw_write32(r, REG_H2CQ_CSR, BIT_H2CQ_FULL_);
+    rtw_write8_set(r, REG_TXDMA_PQ_MAP, BIT_RXDMA_ARBBW_EN);
+}
+
+/* rtw_set_trx_fifo_info and __priority_queue_cfg */
+static u32 priority_queue_cfg(RTW *r)
+{
+    u32 pubq = TXFF_PAGES - RSVD_PAGES - PAGES_HQ - PAGES_LQ - PAGES_NQ - PAGES_EXQ -
+               PAGES_GAP;
+
+    r->rsvd_boundary = TXFF_PAGES - RSVD_PAGES;
+    r->rsvd_h2cq_addr = TXFF_PAGES - RSVD_PG_FW_TXBUF_NUM - RSVD_PG_CPU_INSTRUCTION_NUM -
+                        RSVD_PG_H2CQ_NUM;
+
+    rtw_write16(r, REG_FIFOPAGE_INFO_1, PAGES_HQ);
+    rtw_write16(r, REG_FIFOPAGE_INFO_2, PAGES_LQ);
+    rtw_write16(r, REG_FIFOPAGE_INFO_3, PAGES_NQ);
+    rtw_write16(r, REG_FIFOPAGE_INFO_4, PAGES_EXQ);
+    rtw_write16(r, REG_FIFOPAGE_INFO_5, (u16)pubq);
+    rtw_write32_set(r, REG_RQPN_CTRL_2, BIT_LD_RQPN);
+
+    rtw_write16(r, REG_FIFOPAGE_CTRL_2, (u16)r->rsvd_boundary);
+    rtw_write8_set(r, REG_FWHW_TXQ_CTRL + 2, BIT_EN_WR_FREE_TAIL >> 16);
+    rtw_write16(r, REG_BCNQ_BDNY_V1, (u16)r->rsvd_boundary);
+    rtw_write16(r, REG_FIFOPAGE_CTRL_2 + 2, (u16)r->rsvd_boundary);
+    rtw_write16(r, REG_BCNQ1_BDNY_V1, (u16)r->rsvd_boundary);
+    rtw_write32(r, REG_RXFF_BNDY, RXFF_SIZE - C2H_PKT_BUF - 1);
+
+    rtw_write8_mask(r, REG_AUTO_LLT_V1, BIT_MASK_BLK_DESC_NUM, USB_TX_AGG_DESC);
+    rtw_write8(r, REG_AUTO_LLT_V1 + 3, USB_TX_AGG_DESC);
+    rtw_write8_set(r, REG_TXDMA_OFFSET_CHK + 1, BIT(1));
+
+    rtw_write8_set(r, REG_AUTO_LLT_V1, BIT_AUTO_INIT_LLT_V1);
+    if (!rtw_check_hw_ready(r, REG_AUTO_LLT_V1, BIT_AUTO_INIT_LLT_V1, 0))
+        return RTW_STEP_LLT;
+    rtw_write8(r, REG_CR + 3, 0);
+    return 0;
+}
+
+/* init_h2c: the firmware's command queue in the reserved pages. */
+static u32 init_h2c(RTW *r)
+{
+    u32 addr = r->rsvd_h2cq_addr << 7, size = RSVD_PG_H2CQ_NUM << 7, v, wp, rp, free;
+
+    v = rtw_read32(r, REG_H2C_HEAD);
+    rtw_write32(r, REG_H2C_HEAD, (v & 0xFFFC0000) | addr);
+    v = rtw_read32(r, REG_H2C_READ_ADDR);
+    rtw_write32(r, REG_H2C_READ_ADDR, (v & 0xFFFC0000) | addr);
+    v = rtw_read32(r, REG_H2C_TAIL);
+    rtw_write32(r, REG_H2C_TAIL, (v & 0xFFFC0000) | (addr + size));
+    rtw_write8(r, REG_H2C_INFO, (u8)((rtw_read8(r, REG_H2C_INFO) & 0xFC) | 0x01));
+    rtw_write8(r, REG_H2C_INFO, (u8)((rtw_read8(r, REG_H2C_INFO) & 0xFB) | 0x04));
+    rtw_write8(r, REG_TXDMA_OFFSET_CHK + 1,
+               (u8)((rtw_read8(r, REG_TXDMA_OFFSET_CHK + 1) & 0x7F) | 0x80));
+
+    wp = rtw_read32(r, REG_H2C_PKT_WRITEADDR) & 0x3FFFF;
+    rp = rtw_read32(r, REG_H2C_PKT_READADDR) & 0x3FFFF;
+    free = wp >= rp ? size - (wp - rp) : rp - wp;
+    return free == size ? 0 : RTW_STEP_H2C_QUEUE;
+}
+
+/* rtw8822b_mac_init */
+static void mac_init_8822b(RTW *r)
+{
+    /* protocol configuration */
+    rtw_write8_clr(r, REG_SW_AMPDU_BURST_MODE_CTRL, BIT_PRE_TX_CMD);
+    rtw_write8(r, REG_AMPDU_MAX_TIME_V1, WLAN_AMPDU_MAX_TIME);
+    rtw_write8_set(r, REG_TX_HANG_CTRL, BIT_EN_EOF_V1);
+    rtw_write32(r, REG_PROT_MODE_CTRL, WLAN_RTS_LEN_TH | (WLAN_RTS_TX_TIME_TH << 8) |
+                (WLAN_MAX_AGG_PKT_LIMIT << 16) | (WLAN_RTS_MAX_AGG_PKT_LIMIT << 24));
+    rtw_write16(r, REG_BAR_MODE_CTRL + 2,
+                WLAN_BAR_RETRY_LIMIT | WLAN_RA_TRY_RATE_AGG_LIMIT << 8);
+    rtw_write8(r, REG_FAST_EDCA_VOVI_SETTING, FAST_EDCA_VO_TH);
+    rtw_write8(r, REG_FAST_EDCA_VOVI_SETTING + 2, FAST_EDCA_VI_TH);
+    rtw_write8(r, REG_FAST_EDCA_BEBK_SETTING, FAST_EDCA_BE_TH);
+    rtw_write8(r, REG_FAST_EDCA_BEBK_SETTING + 2, FAST_EDCA_BK_TH);
+    /* EDCA configuration */
+    rtw_write8_clr(r, REG_TIMER0_SRC_SEL, BIT_TSFT_SEL_TIMER0);
+    rtw_write16(r, REG_TXPAUSE, 0x0000);
+    rtw_write8(r, REG_SLOT, WLAN_SLOT_TIME);
+    rtw_write8(r, REG_PIFS, WLAN_PIFS_TIME);
+    rtw_write32(r, REG_SIFS, WLAN_SIFS_CFG);
+    rtw_write16(r, REG_EDCA_VO_PARAM + 2, WLAN_VO_TXOP_LIMIT);
+    rtw_write16(r, REG_EDCA_VI_PARAM + 2, WLAN_VI_TXOP_LIMIT);
+    rtw_write32(r, REG_RD_NAV_NXT, WLAN_NAV_CFG);
+    rtw_write16(r, REG_RXTSF_OFFSET_CCK, WLAN_RX_TSF_CFG);
+    /* beacon control: TSF and the functions around it */
+    rtw_write8_set(r, REG_BCN_CTRL, BIT_EN_BCN_FUNCTION);
+    rtw_write32(r, REG_TBTT_PROHIBIT, WLAN_TBTT_TIME);
+    rtw_write8(r, REG_DRVERLYINT, WLAN_DRV_EARLY_INT);
+    rtw_write8(r, REG_BCNDMATIM, WLAN_BCN_DMA_TIME);
+    rtw_write8_clr(r, REG_TX_PTCL_CTRL + 1, BIT_SIFS_BK_EN >> 8);
+    /* WMAC configuration */
+    rtw_write16(r, REG_RXFLTMAP0, WLAN_RX_FILTER0);
+    rtw_write16(r, REG_RXFLTMAP1, WLAN_RX_FILTER1);
+    rtw_write16(r, REG_RXFLTMAP2, WLAN_RX_FILTER2);
+    rtw_write32(r, REG_RCR, WLAN_RCR_CFG);
+    rtw_write8(r, REG_RX_PKT_LIMIT, WLAN_RXPKT_MAX_SZ_512);
+    rtw_write8(r, REG_TCR + 2, WLAN_TX_FUNC_CFG2);
+    rtw_write8(r, REG_TCR + 1, WLAN_TX_FUNC_CFG1);
+    rtw_write32(r, REG_WMAC_OPTION_FUNCTION + 8, WLAN_MAC_OPT_FUNC2);
+    rtw_write8(r, REG_WMAC_OPTION_FUNCTION + 4, WLAN_MAC_OPT_NORM_FUNC1);
+    rtw_write8_set(r, REG_SND_PTCL_CTRL, BIT_DIS_CHK_VHTSIGB_CRC);
+}
+
+u32 rtw_mac_init(RTW *r)
+{
+    u32 step;
+    u8 v;
+
+    /* rtw_init_trx_cfg */
+    txdma_queue_mapping(r);
+    step = priority_queue_cfg(r);
+    if (!step)
+        step = init_h2c(r);
+    if (step)
+        return step;
+
+    mac_init_8822b(r);
+
+    /* rtw_drv_info_cfg */
+    rtw_write8(r, REG_RX_DRVINFO_SZ, PHY_STATUS_SIZE);
+    v = rtw_read8(r, REG_TRXFF_BNDY + 1);
+    rtw_write8(r, REG_TRXFF_BNDY + 1, (u8)((v & 0xF0) | 0xF));    /* rxdesc len = 0 issue */
+    rtw_write32_set(r, REG_RCR, BIT_APP_PHYSTS);
+    rtw_write32_clr(r, REG_WMAC_OPTION_FUNCTION + 4, BIT(8) | BIT(9));
+
+    /* rtw_usb_interface_cfg: a high-speed bus */
+    rtw_write8(r, REG_RXDMA_MODE, (u8)(BIT_DMA_BURST_CNT | BIT_DMA_MODE |
+                                       (BIT_DMA_BURST_SIZE_512 << 4)));
+    rtw_write16_set(r, REG_TXDMA_OFFSET_CHK, BIT_DROP_DATA_EN);
     return 0;
 }

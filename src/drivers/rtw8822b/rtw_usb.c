@@ -89,6 +89,11 @@ void rtw_write8_clr(RTW *r, u32 address, u8 bits)
     rtw_write8(r, address, rtw_read8(r, address) & (u8)~bits);
 }
 
+void rtw_write16_set(RTW *r, u32 address, u16 bits)
+{
+    rtw_write16(r, address, rtw_read16(r, address) | bits);
+}
+
 void rtw_write16_clr(RTW *r, u32 address, u16 bits)
 {
     rtw_write16(r, address, rtw_read16(r, address) & (u16)~bits);
@@ -121,6 +126,14 @@ void rtw_write32_mask(RTW *r, u32 address, u32 mask, u32 value)
     u32 old = rtw_read32(r, address);
 
     rtw_write32(r, address, (old & ~mask) | ((value << shift_of(mask)) & mask));
+}
+
+void rtw_write8_mask(RTW *r, u32 address, u32 mask, u8 value)
+{
+    u8 old = rtw_read8(r, address);
+
+    mask &= 0xFF;
+    rtw_write8(r, address, (u8)((old & ~mask) | ((value << shift_of(mask)) & mask)));
 }
 
 u32 rtw_read32_mask(RTW *r, u32 address, u32 mask)

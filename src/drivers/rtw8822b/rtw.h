@@ -46,6 +46,8 @@
 #define RTW_EP_NORMAL       1                   /* voice, video */
 #define RTW_EP_LOW          2                   /* best effort, background */
 #define RTW_OUT_MAX         4
+#define RTW_RX_COUNT        8
+#define RTW_RX_SIZE         20480       /* rtw88 takes 32 KB; one EHCI qTD carries 20 */
 
 /* Steps of the bring-up, kept in the stats when one fails. */
 enum {
@@ -58,6 +60,10 @@ enum {
     RTW_STEP_FW_DOWNLOAD,
     RTW_STEP_FW_READY,
     RTW_STEP_EFUSE,
+    RTW_STEP_MAC_INIT,
+    RTW_STEP_LLT,               /* the chip's own linked list of pages */
+    RTW_STEP_H2C_QUEUE,
+    RTW_STEP_RF_MODE,           /* the radio's mode table did not take */
     RTW_STEP_UP,                /* not a failure: powered, firmware running */
 };
 
@@ -88,6 +94,20 @@ typedef struct {
     u32 out_ep[RTW_OUT_MAX];
     u32 in_ep;
     u32 int_ep;
+    u32 channel;
+    u32 h2c_packets;
+    u32 rx_transfers;
+    u32 rx_frames;
+    u32 rx_bad;
+    u32 rx_c2h;
+    u32 rx_crc_errors;
+    u32 rx_errors;
+    u32 rx_last_error;
+    u32 rx_beacons;
+    u32 rx_mgmt;
+    u32 rx_data;
+    s32 last_signal;
+    u32 scans;
 } RTW_STATS;
 
 extern volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
@@ -105,6 +125,9 @@ typedef struct RTW {
     u8 *fw;                     /* the firmware image, kept for a later bring-up */
     u32 fw_size;
     u32 rsvd_boundary;          /* the reserved pages' first, once the queues are set */
+    u32 rsvd_h2cq_addr;         /* the firmware's command queue's first page */
+    u32 channel;                /* tuned to, 0 before the first */
+    u32 igi;                    /* the gain the tables left, for the DIG */
 
     void *ep_out[RTW_OUT_MAX];  /* high, normal, low priority (rtw_usb_parse) */
     u32 out_count;
@@ -114,6 +137,15 @@ typedef struct RTW {
     URB tx_urb;
     volatile u32 tx_done;
     volatile u32 tx_status;
+    u32 h2c_seq;
+
+    u8 *rx_buf[RTW_RX_COUNT];
+    URB rx_urb[RTW_RX_COUNT];
+    volatile u32 rx_running;
+
+    u32 scan_index;             /* the channel being listened on, while scanning */
+    u32 scan_ticks;
+    u32 scan_wait;              /* worker ticks until the next scan */
 } RTW;
 
 /* --- registers (rtw_usb.c) -------------------------------------------------------- */
@@ -128,10 +160,12 @@ void rtw_write32(RTW *r, u32 address, u32 value);
 /* rtw88's helpers over those, same names. */
 void rtw_write8_set(RTW *r, u32 address, u8 bits);
 void rtw_write8_clr(RTW *r, u32 address, u8 bits);
+void rtw_write16_set(RTW *r, u32 address, u16 bits);
 void rtw_write16_clr(RTW *r, u32 address, u16 bits);
 void rtw_write32_set(RTW *r, u32 address, u32 bits);
 void rtw_write32_clr(RTW *r, u32 address, u32 bits);
 void rtw_write32_mask(RTW *r, u32 address, u32 mask, u32 value);
+void rtw_write8_mask(RTW *r, u32 address, u32 mask, u8 value);
 u32  rtw_read32_mask(RTW *r, u32 address, u32 mask);
 
 /* Poll `address` until (value & mask) is `target`, 1000 times 10 us apart as
@@ -149,6 +183,38 @@ u32  rtw_usb_open(RTW *r);
 u32  rtw_mac_power_on(RTW *r);
 void rtw_mac_power_off(RTW *r);
 u32  rtw_download_firmware(RTW *r);
+
+/* rtw_mac_init with the 8822B's mac_init and the USB interface's: the queues,
+ * the reserved pages, the H2C queue, protocol timing and the receive filters.
+ * 0, or the step that failed. */
+u32  rtw_mac_init(RTW *r);
+
+/* --- baseband and radio (rtw_phy.c) ---------------------------------------------- */
+
+u32  rtw_read_rf(RTW *r, u32 path, u32 addr, u32 mask);
+void rtw_write_rf(RTW *r, u32 path, u32 addr, u32 mask, u32 data);
+
+/* rtw8822b_phy_set_param: BB and RF powered, their tables loaded, both paths.
+ * 0, or the step that failed. */
+u32  rtw_phy_set_param(RTW *r);
+
+/* rtw8822b_set_channel: `bw` 0 20 MHz, 1 40, 2 80; `primary` RTW_SC_* of the
+ * 20 MHz channel in it, 0 at 20 MHz. */
+void rtw_set_channel(RTW *r, u32 channel, u32 bw, u32 primary);
+
+/* --- firmware commands (rtw_fw.c) -------------------------------------------------- */
+
+u32  rtw_fw_send_general_info(RTW *r);
+u32  rtw_fw_send_phydm_info(RTW *r);
+
+/* --- receive (rtw_rx.c) ------------------------------------------------------------ */
+
+/* Queue every receive buffer. Thread. */
+void rtw_rx_start(RTW *r);
+
+/* One received 802.11 frame without its FCS, the signal in dBm and the
+ * descriptor's encryption type; rtw8822b.c's. DISPATCH_LEVEL. */
+void rtw_rx_frame(RTW *r, const u8 *frame, u32 length, s32 signal, u32 enc);
 
 /* --- the efuse (rtw_efuse.c) ------------------------------------------------------- */
 
