@@ -1,0 +1,78 @@
+/* The card as a cable: it joins the network xedrivers.ini names, by itself, and the
+ * network layer sees an Ethernet uplink like any other.
+ *
+ * Every five seconds while not joined: scan, then join the configured network's
+ * strongest access point if it was seen (wl_pick). The same loop takes the console
+ * back when the access point goes away or the join fails. Whatever the WPA2
+ * handshake settled is handed to the card first, here, because installing a key
+ * is a command the firmware confirms and the worker is where that may be waited
+ * for.
+ */
+
+#include "bridge.h"
+#include "wpa.h"
+
+#define RETRY_TICKS 250             /* 5 s of 20 ms worker ticks */
+
+volatile WL_BRIDGE_STATS wl_bridge_stats;
+
+void wl_bridge_start(WL_BRIDGE *b, const WL_CARD *card)
+{
+    (void)card;
+    wl_load_config();
+    b->wait = 0;
+    b->scanned = 0;
+    b->off = 0;
+}
+
+void wl_bridge_tick(WL_BRIDGE *b, const WL_CARD *card)
+{
+    u32 secured, state;
+    s32 pick;
+
+    if (wpa_apply())
+        return;
+    state = card->state(card->context);
+    if ((state & (WL_CARD_JOINED | WL_CARD_SCANNING)) || b->off || !wl_config.count)
+        return;
+    if (b->wait) {
+        b->wait--;
+        return;
+    }
+    if (!b->scanned) {
+        b->scanned = 1;
+        wl_bridge_stats.scans++;
+        if (!NT_SUCCESS(card->scan(card->context))) {
+            b->scanned = 0;
+            b->wait = RETRY_TICKS;
+        }
+        return;                         /* the results come in while it runs */
+    }
+    b->scanned = 0;
+    b->wait = RETRY_TICKS;
+    pick = wl_pick(&secured);
+    if (pick < 0) {
+        wl_bridge_stats.missed++;
+        if (secured)
+            wl_bridge_stats.secured++;
+        return;
+    }
+    wl_bridge_stats.joins++;
+    card->join(card->context, &wl_bss[pick], (const char *)wl_config.pass,
+               wl_config.pass_len);
+}
+
+u32 wl_bridge_join(WL_BRIDGE *b, const WL_CARD *card, u32 index)
+{
+    b->off = 0;
+    if (index >= wl_stats.bss_count)
+        return STATUS_UNSUCCESSFUL;
+    return card->join(card->context, &wl_bss[index], (const char *)wl_config.pass,
+                      wl_config.pass_len);
+}
+
+u32 wl_bridge_leave(WL_BRIDGE *b, const WL_CARD *card)
+{
+    b->off = 1;
+    return card->leave(card->context);
+}

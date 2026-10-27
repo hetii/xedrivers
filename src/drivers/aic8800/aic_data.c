@@ -70,8 +70,10 @@ static void tx_complete(URB *urb, u32 status)
     AIC *a = (AIC *)urb->Owner;
 
     PROF_SINCE(tx_wait, urb->Stamp, urb->Length);
-    if (a->nd->st->tx_inflight)
-        a->nd->st->tx_inflight--;
+    /* Counted up on whichever processor xnet transmits from and down on the USB
+     * one: a plain ++ and -- lose one now and then, and a count that never comes
+     * back to zero reads as a transmit that never finished. */
+    __sync_fetch_and_sub(&a->nd->st->tx_inflight, 1);
     if (!NT_SUCCESS(status)) {
         a->st->data_tx_errors++;
         a->st->data_tx_last_error = status;
@@ -157,7 +159,7 @@ u32 aic_data_xmit(AIC *a, const u8 *frame, u32 length)
     usb_prepare(&a->data_tx_urb[slot], a->dev, a->ep_data_out, tx_complete, b, total, 0);
     a->st->data_tx_frames++;
     a->nd->st->tx_frames++;
-    a->nd->st->tx_inflight++;
+    __sync_fetch_and_add(&a->nd->st->tx_inflight, 1);
     net_add64(&a->nd->st->tx_bytes, &a->nd->st->tx_bytes_hi, length);
     PROF_MARK(a->data_tx_urb[slot].Stamp);
     PROF_SINCE(turnaround, a->last_rx_stamp, length);

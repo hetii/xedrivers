@@ -1,7 +1,9 @@
 /* The wireless layer: what is the same for every Wi-Fi card -- the networks a scan
- * found, which one to join, and (later) the WPA2 handshake. A card's driver
- * (src/drivers/<card>/) moves frames and runs its firmware's commands; it hands
- * every beacon or probe response a scan brings to wl_scan_result.
+ * found, which one to join, the WPA2 handshake (wpa.c), putting block acks back in
+ * order (reorder.c), and the policy that decides when to join what (bridge.c). A
+ * card's driver (src/drivers/<card>/) moves frames and runs its firmware's
+ * commands; it hands every beacon or probe response a scan brings to
+ * wl_scan_result, and offers what it can do as a WL_CARD.
  */
 
 #ifndef XE_WIRELESS_H
@@ -89,5 +91,22 @@ void wl_load_config(void);
  * point. Returns its index, or -1 when it was not seen; *secured is set when it
  * was, but only with a security this driver cannot join yet. */
 s32 wl_pick(u32 *secured);
+
+/* --- a card, as the layer above it sees one ------------------------------------ */
+
+#define WL_CARD_JOINED   0x1u   /* associated (and, if secured, the handshake begun) */
+#define WL_CARD_SCANNING 0x2u
+
+/* What a driver can do, and nothing about when to do it: that is the policy's,
+ * bridge.c's now and a dashboard's later. Every call is from the worker thread. */
+typedef struct {
+    void *context;
+    /* Start a scan; its results go to wl_scan_result and wl_scan_end. */
+    u32 (*scan)(void *context);
+    /* Join `bss` (an entry of wl_bss), with the passphrase if it is secured. */
+    u32 (*join)(void *context, const WL_BSS *bss, const char *pass, u32 pass_len);
+    u32 (*leave)(void *context);
+    u32 (*state)(void *context);            /* WL_CARD_* */
+} WL_CARD;
 
 #endif /* XE_WIRELESS_H */

@@ -21,6 +21,7 @@
 #include "wireless.h"
 #include "wpa.h"
 #include "reorder.h"
+#include "bridge.h"
 #include "aic_bt.h"
 
 #define AIC_VENDOR          0xA69Cu
@@ -145,10 +146,6 @@ typedef struct {
     u32 join_index;             /* the scan table entry asked for */
     u32 join_freq_asked;
     u32 ps_off_status;          /* of ME_SET_PS_MODE at join */
-    u32 auto_scans;             /* scans the automatic join started */
-    u32 auto_joins;             /* joins it asked for */
-    u32 auto_missed;            /* scans that did not see the configured network */
-    u32 auto_secured;           /* ... or saw it secured, which needs keys */
     u32 bt_open_status;         /* opening the Bluetooth event endpoint 0x83 from
                                  * the Wi-Fi interface's node: can one function
                                  * reach the other's endpoints? */
@@ -254,9 +251,8 @@ typedef struct AIC {
     u8 *reorder_pool;           /* WL_REORDER_POOL bytes, allocated once */
     KDPC reorder_dpc;           /* a timeout's flush, run where receive runs */
     volatile u32 reorder_dpc_queued;
-    u32 auto_wait;              /* worker ticks until the next automatic attempt */
-    u32 auto_scanned;           /* a scan of the automatic join is under way */
-    u32 auto_off;               /* left by command: no automatic join until asked */
+    WL_CARD card;               /* what the layer above may ask of it */
+    WL_BRIDGE bridge;           /* the policy's state for it (src/wireless/bridge.c) */
     u32 secured;                /* this join runs the handshake before the link */
     u8 bssid[6];                /* the access point joined, for the EAPOL header */
     void *ep_bt_event;          /* the Bluetooth controller's event endpoint */
@@ -282,9 +278,9 @@ u32 aic_load_firmware(AIC *a);
  * (by its index in the scan table, wl_bss). */
 u32 aic_wifi_start(AIC *a);
 u32 aic_wifi_scan(AIC *a);
-u32 aic_wifi_join(AIC *a, u32 index);
+u32 aic_wifi_join(AIC *a, const WL_BSS *bss, const char *pass, u32 pass_len);
 u32 aic_wifi_disconnect(AIC *a);
-void aic_wifi_tick(AIC *a);
+void aic_wifi_card(AIC *a);         /* fills a->card */
 
 /* aic_data.c: the data endpoints and the frames on them. */
 u32 aic_data_open(AIC *a);

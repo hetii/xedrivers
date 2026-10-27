@@ -88,8 +88,7 @@ STRUCTS = {
                   "port_status", "vif", "if_adds", "if_add_status",
                   "if_removes", "if_remove_status", "if_mac0", "if_mac1",
                   "join_index", "join_freq_asked", "ps_off_status",
-                  "auto_scans", "auto_joins", "auto_missed",
-                  "auto_secured", "bt_open_status", "bt_opened", "bssid0",
+                  "bt_open_status", "bt_opened", "bssid0",
                   "bssid1", "data_tx_frames", "data_tx_full",
                   "data_tx_errors", "data_tx_last_error",
                   "data_rx_transfers", "data_rx_frames", "data_rx_errors",
@@ -119,6 +118,7 @@ STRUCTS = {
                   "sent_lo", "sent_hi", "recv_lo", "recv_hi", "send_errors",
                   "recv_errors", "last_send_error", "last_recv_error", "sndbuf_result",
                   "rcvbuf_result"],
+    "wl_bridge_stats": ["scans", "joins", "missed", "secured"],
     "debug_tx_stall": ["stalls", "inflight", "tx_frames", "rx_frames", "tick"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
@@ -305,10 +305,8 @@ def status(sym):
                     a["secured_joins"], a["eapol_in"], a["eapol_out"],
                     a["eapol_dropped"], a["keys_added"], a["key_status"],
                     a["port_status"], a["join_refused_security"]))
-                print("aic auto scans=%d joins=%d missed=%d secured=%d | bt ep 0x83 "
-                      "opened=%d status=%#x" % (
-                    a["auto_scans"], a["auto_joins"], a["auto_missed"],
-                    a["auto_secured"], a["bt_opened"], a["bt_open_status"]))
+                print("aic bt ep 0x83 opened=%d status=%#x" % (
+                    a["bt_opened"], a["bt_open_status"]))
                 print("aic data tx=%d full=%d err=%d/%#x | rx=%d frames=%d err=%d/%#x "
                       "not_data=%d unsupported=%d not_from_ds=%d short=%d trunc=%d ooo=%d | reorder held=%d late=%d jumps=%d timeouts=%d full=%d resyncs=%d ended=%d" % (
                           a["data_tx_frames"], a["data_tx_full"], a["data_tx_errors"],
@@ -357,6 +355,10 @@ def status(sym):
                   w["messages_in"], w["messages_out"], w["mic_failures"],
                   w["replays"], w["unwrap_failures"], w["no_gtk"], w["failures"],
                   w["gtk_len"], w["last_key_info"]))
+    if "wl_bridge_stats" in sym:
+        b = read_struct(sym, "wl_bridge_stats")
+        print("bridge   auto scans=%d joins=%d missed=%d secured=%d" % (
+            b["scans"], b["joins"], b["missed"], b["secured"]))
     if "wl_stats" in sym:
         w = read_struct(sym, "wl_stats")
         print("wireless scans=%d/%d results=%d bad=%d full=%d networks=%d status=%#x" % (

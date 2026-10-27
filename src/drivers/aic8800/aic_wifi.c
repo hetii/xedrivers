@@ -410,6 +410,7 @@ u32 aic_wifi_start(AIC *a)
 
     a->ind = wifi_ind;
     a->scanning = 0;
+    aic_wifi_card(a);
     n = aic_open(a, 0x02, 0x82);
     if (n)
         return fail(a, n, 0);
@@ -490,10 +491,7 @@ u32 aic_wifi_start(AIC *a)
     a->st->bt_opened = a->st->bt_open_status == 0;
 
     a->st->step = AIC_STEP_WIFI_UP;
-    wl_load_config();
-    a->auto_wait = 0;
-    a->auto_scanned = 0;
-    a->auto_off = 0;
+    wl_bridge_start(&a->bridge, &a->card);
     status = aic_wifi_scan(a);
     if (!NT_SUCCESS(status))
         return fail(a, AIC_STEP_WIFI_SCAN, status);
@@ -543,21 +541,19 @@ static u32 build_connect(AIC *a, const WL_BSS *bss)
     return 320;
 }
 
-u32 aic_wifi_join(AIC *a, u32 index)
+u32 aic_wifi_join(AIC *a, const WL_BSS *bss, const char *pass, u32 pass_len)
 {
     const u8 *mac = join_mac(a);
-    const WL_BSS *bss;
     u32 status, i, differs = 0;
 
-    if (index >= wl_stats.bss_count || a->st->product != AIC_PRODUCT_D81)
+    if (a->st->product != AIC_PRODUCT_D81)
         return STATUS_UNSUCCESSFUL;
-    bss = &wl_bss[index];
     if (!bss->ssid_len)
         return STATUS_UNSUCCESSFUL;             /* a hidden network needs its name */
     /* A secured network needs the passphrase and a security this driver speaks:
      * WPA2 with a pre-shared key. */
     a->secured = bss->security != 0;
-    if (a->secured && (!(bss->security & WL_SEC_WPA2) || !wl_config.pass_len)) {
+    if (a->secured && (!(bss->security & WL_SEC_WPA2) || !pass_len)) {
         a->st->join_refused_security++;
         return STATUS_UNSUCCESSFUL;
     }
@@ -566,7 +562,7 @@ u32 aic_wifi_join(AIC *a, u32 index)
 
     for (i = 0; i < 6; i++)
         differs |= a->if_mac[i] != mac[i];
-    a->st->join_index = index;
+    a->st->join_index = (u32)(bss - wl_bss);
     a->st->join_freq_asked = bss->freq;
     if (differs) {
         /* The interface was created on another address, which only happens when the
@@ -611,8 +607,7 @@ u32 aic_wifi_join(AIC *a, u32 index)
          * moment: done before the association, not inside the handshake. */
         for (i = 0; i < 6; i++)
             a->bssid[i] = bss->bssid[i];
-        wpa_set_psk((const char *)wl_config.pass, (const u8 *)bss->ssid,
-                    bss->ssid_len);
+        wpa_set_psk(pass, (const u8 *)bss->ssid, bss->ssid_len);
         a->st->secured_joins++;
     }
 
@@ -641,47 +636,35 @@ u32 aic_wifi_disconnect(AIC *a)
     return status;
 }
 
-/* --- joining by itself ---------------------------------------------------------- */
+/* --- what the layer above may ask of the card (src/wireless/wireless.h) -------- */
 
-/* Every five seconds while not joined: scan, then join the configured network's
- * strongest access point if it was seen (wl_pick). The same loop takes the console
- * back when the access point goes away (SM_DISCONNECT_IND) or the join fails. The
- * worker calls it every tick (20 ms) while the card is up. */
-#define AUTO_RETRY_TICKS 250
-
-void aic_wifi_tick(AIC *a)
+static u32 card_scan(void *context)
 {
-    u32 secured;
-    s32 pick;
+    return aic_wifi_scan((AIC *)context);
+}
 
-    /* Whatever the handshake settled, handed to the firmware here: this is the
-     * worker, so a command may be waited for. */
-    if (wpa_apply())
-        return;
-    if (a->joined || a->auto_off || !wl_config.count || a->scanning)
-        return;
-    if (a->auto_wait) {
-        a->auto_wait--;
-        return;
-    }
-    if (!a->auto_scanned) {
-        a->auto_scanned = 1;
-        a->st->auto_scans++;
-        if (!NT_SUCCESS(aic_wifi_scan(a))) {
-            a->auto_scanned = 0;
-            a->auto_wait = AUTO_RETRY_TICKS;
-        }
-        return;                         /* the results come in while it runs */
-    }
-    a->auto_scanned = 0;
-    a->auto_wait = AUTO_RETRY_TICKS;
-    pick = wl_pick(&secured);
-    if (pick < 0) {
-        a->st->auto_missed++;
-        if (secured)
-            a->st->auto_secured++;
-        return;
-    }
-    a->st->auto_joins++;
-    aic_wifi_join(a, (u32)pick);
+static u32 card_join(void *context, const WL_BSS *bss, const char *pass, u32 pass_len)
+{
+    return aic_wifi_join((AIC *)context, bss, pass, pass_len);
+}
+
+static u32 card_leave(void *context)
+{
+    return aic_wifi_disconnect((AIC *)context);
+}
+
+static u32 card_state(void *context)
+{
+    AIC *a = (AIC *)context;
+
+    return (a->joined ? WL_CARD_JOINED : 0) | (a->scanning ? WL_CARD_SCANNING : 0);
+}
+
+void aic_wifi_card(AIC *a)
+{
+    a->card.context = a;
+    a->card.scan = card_scan;
+    a->card.join = card_join;
+    a->card.leave = card_leave;
+    a->card.state = card_state;
 }

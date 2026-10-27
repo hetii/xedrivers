@@ -118,12 +118,10 @@ static u32 aic8800_command(NET_DEV *nd, u32 what, volatile u32 *args)
         args[5] = aic_wifi_scan(a);
         return 1;
     case CMD_JOIN:
-        a->auto_off = 0;
-        args[5] = aic_wifi_join(a, args[1]);
+        args[5] = wl_bridge_join(&a->bridge, &a->card, args[1]);
         return 1;
-    case CMD_DISCONNECT:
-        a->auto_off = 1;                /* stay off until joined by command again */
-        args[5] = aic_wifi_disconnect(a);
+    case CMD_DISCONNECT:                /* and stay off until joined by command again */
+        args[5] = wl_bridge_leave(&a->bridge, &a->card);
         return 1;
     default:
         return 0;
@@ -149,7 +147,7 @@ static void aic8800_tick(NET_DEV *nd)
     AIC *a = (AIC *)nd->priv;
 
     if (a && a->st->product == AIC_PRODUCT_D81 && a->st->step == AIC_STEP_WIFI_UP) {
-        aic_wifi_tick(a);
+        wl_bridge_tick(&a->bridge, &a->card);
         aic_data_tick(a);
     }
 }
