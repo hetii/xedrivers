@@ -182,186 +182,43 @@ static void deliver(AIC *a, u8 *eth, u32 length)
     net_frame_in(a->nd, eth, length);
 }
 
-/* --- putting a block ack back in order ----------------------------------------
- *
- * The firmware hands an A-MPDU's frames up as they decode, so one the access
- * point had to send again arrives after those behind it: 3.7% of frames into the
- * console under load, each one a duplicate ACK to the sender, a fast retransmit
- * and a halved window. aicsemi's driver puts them back in order (AICWF_RX_REORDER,
- * reord_process_unit) for the frames whose header says so, and so does this: a
- * frame at the head of the window goes up with every one held behind it, one
- * ahead of a hole is copied aside, one behind the window is a duplicate. Only the
- * receive path and its own DPC touch this, both on the USB processor. */
-
-static void reorder_release(AIC *a, AIC_REORDER *r, u32 index)
+/* Block-ack windows (src/wireless/reorder.c) get the frames the firmware flags
+ * for reordering and hand them back through here, in order. They are touched only
+ * on the USB processor: by the receive path, and by the DPC below for a timeout. */
+static void reorder_deliver(void *context, u8 *eth, u32 length)
 {
-    u8 slot = r->slot[index];
-
-    r->slot[index] = AIC_REORDER_NONE;
-    r->held--;
-    deliver(a, a->reorder_pool + slot * AIC_REORDER_FRAME, r->length[index]);
-    a->reorder_free[a->reorder_free_count++] = slot;
-}
-
-/* Hand up what is consecutive from the head on. */
-static void reorder_advance(AIC *a, AIC_REORDER *r)
-{
-    u32 index;
-
-    for (;;) {
-        index = r->head & (AIC_REORDER_WINDOW - 1);
-        if (r->slot[index] == AIC_REORDER_NONE)
-            break;
-        reorder_release(a, r, index);
-        r->head = (r->head + 1) & 0xFFF;
-    }
-    r->stalled = 0;
-}
-
-/* Give up on the holes: everything held goes up in order, the head after it. */
-static void reorder_flush(AIC *a, AIC_REORDER *r)
-{
-    u32 n;
-
-    for (n = 0; r->held && n < AIC_REORDER_WINDOW; n++) {
-        if (r->slot[r->head & (AIC_REORDER_WINDOW - 1)] == AIC_REORDER_NONE)
-            r->head = (r->head + 1) & 0xFFF;
-        else
-            reorder_advance(a, r);
-    }
-    r->stalled = 0;
-}
-
-static void reorder_in(AIC *a, AIC_REORDER *r, u32 seq, u8 *eth, u32 length)
-{
-    u32 distance, index, i;
-    u8 slot, *to;
-
-    if (!a->reorder_pool || length > AIC_REORDER_FRAME) {
-        deliver(a, eth, length);
-        return;
-    }
-    if (!r->active) {
-        r->active = 1;
-        r->head = (u16)seq;
-    }
-    distance = (seq - r->head) & 0xFFF;
-    if (distance >= 0x800) {
-        /* Behind the window: already handed up, or given up on. Linux hands it up
-         * all the same (reord_need_check: "no need to reord") -- a duplicate
-         * costs the stack nothing, a frame dropped here costs a retransmission.
-         * Many in a row mean the sender's numbering started again: follow it. */
-        a->st->reorder_late++;
-        if (++r->late_run < AIC_REORDER_RESYNC) {
-            deliver(a, eth, length);
-            return;
-        }
-        a->st->reorder_resyncs++;
-        reorder_flush(a, r);
-        r->head = (u16)seq;
-        distance = 0;
-    }
-    r->late_run = 0;
-    if (distance >= AIC_REORDER_WINDOW) {
-        /* Past the end of the window: move it just far enough that this frame is
-         * its last, letting go of what falls out of it (as Linux does). */
-        u32 new_head = (seq - (AIC_REORDER_WINDOW - 1)) & 0xFFF;
-
-        a->st->reorder_jumps++;
-        while (r->head != new_head) {
-            index = r->head & (AIC_REORDER_WINDOW - 1);
-            if (r->slot[index] != AIC_REORDER_NONE)
-                reorder_release(a, r, index);
-            r->head = (r->head + 1) & 0xFFF;
-        }
-        reorder_advance(a, r);
-        distance = (seq - r->head) & 0xFFF;
-    }
-    if (!distance) {
-        deliver(a, eth, length);
-        r->head = (r->head + 1) & 0xFFF;
-        reorder_advance(a, r);
-        return;
-    }
-    index = seq & (AIC_REORDER_WINDOW - 1);
-    if (r->slot[index] != AIC_REORDER_NONE) {
-        a->st->reorder_late++;              /* the same one twice */
-        return;
-    }
-    if (!a->reorder_free_count) {
-        a->st->reorder_full++;
-        reorder_flush(a, r);
-        deliver(a, eth, length);
-        r->head = (u16)((seq + 1) & 0xFFF);
-        return;
-    }
-    slot = a->reorder_free[--a->reorder_free_count];
-    to = a->reorder_pool + slot * AIC_REORDER_FRAME;
-    for (i = 0; i < length; i++)
-        to[i] = eth[i];
-    r->slot[index] = slot;
-    r->length[index] = (u16)length;
-    r->held++;
-    a->st->reorder_held++;
+    deliver((AIC *)context, eth, length);
 }
 
 static void reorder_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
 {
     AIC *a = (AIC *)context;
-    u32 t;
 
     (void)dpc; (void)a1; (void)a2;
     a->reorder_dpc_queued = 0;
-    if (!a->data_running)
-        return;
-    for (t = 0; t < 8; t++)
-        if (a->reorder[t].held && a->reorder[t].stalled >= AIC_REORDER_TICKS) {
-            a->st->reorder_timeouts++;
-            reorder_flush(a, &a->reorder[t]);
-        }
+    if (a->data_running)
+        wl_reorder_expire(&a->reorder);
 }
 
 /* From the worker, every tick: a hole that has held frames back for long enough
  * is let go by the DPC, where the receive path cannot be running at the same time. */
 void aic_data_tick(AIC *a)
 {
-    u32 t, due = 0;
-
-    if (!a->data_running || !a->reorder_pool)
+    if (!a->data_running)
         return;
-
-    for (t = 0; t < 8; t++)
-        if (a->reorder[t].held && ++a->reorder[t].stalled >= AIC_REORDER_TICKS)
-            due = 1;
-    if (due && !__sync_lock_test_and_set(&a->reorder_dpc_queued, 1))
+    if (wl_reorder_tick(&a->reorder) && !__sync_lock_test_and_set(&a->reorder_dpc_queued, 1))
         KeInsertQueueDpc(&a->reorder_dpc, 0, 0);
 }
 
-static void reorder_reset(AIC *a)
-{
-    u32 t, i;
-
-    for (t = 0; t < 8; t++) {
-        a->reorder[t].active = 0;
-        a->reorder[t].held = 0;
-        a->reorder[t].stalled = 0;
-        a->reorder[t].late_run = 0;
-        for (i = 0; i < AIC_REORDER_WINDOW; i++)
-            a->reorder[t].slot[i] = AIC_REORDER_NONE;
-        a->rx_last_seq[t] = 0;
-    }
-    for (i = 0; i < AIC_REORDER_SLOTS; i++)
-        a->reorder_free[i] = (u8)i;
-    a->reorder_free_count = AIC_REORDER_SLOTS;
-}
-
-/* A new association: the access point numbers its frames afresh, so whatever the
- * last one left behind is dropped and the window starts with the next frame. From
- * the indications, which arrive on the USB processor like the frames do. */
+/* A new association: the access point numbers its frames afresh. From the
+ * indications, which arrive on the USB processor like the frames do. */
 void aic_data_rejoin(AIC *a)
 {
-    if (a->reorder_pool)
-        reorder_reset(a);
+    u32 t;
+
+    wl_reorder_reset(&a->reorder);
+    for (t = 0; t < 8; t++)
+        a->rx_last_seq[t] = 0;
 }
 
 /* One MPDU, converted to an Ethernet frame where it lies and handed up. The
@@ -435,17 +292,11 @@ static void mpdu_in(AIC *a, u8 *p, u32 length)
             a->rx_last_seq[tid] = (u16)(0x8000 | seq);
     }
     if (qos && (header[RX_FLAGS_BYTE] & RX_FLAG_NEED_REORDER)) {
-        reorder_in(a, &a->reorder[tid], seq, eth, length - strip + ETH_HLEN);
+        wl_reorder_in(&a->reorder, tid, seq, eth, length - strip + ETH_HLEN);
         return;
     }
-    if (qos && a->reorder_pool && a->reorder[tid].active) {
-        /* A frame of the same TID the firmware no longer asks to be ordered: the
-         * block-ack session is over. What was held goes up first and the window
-         * starts again with the next frame that asks (reord_flush_tid). */
-        reorder_flush(a, &a->reorder[tid]);
-        a->reorder[tid].active = 0;
-        a->st->reorder_ended++;
-    }
+    if (qos)            /* not flagged: the block-ack session, if any, is over */
+        wl_reorder_end(&a->reorder, tid);
     deliver(a, eth, length - strip + ETH_HLEN);
 }
 
@@ -525,12 +376,12 @@ u32 aic_data_open(AIC *a)
         return AIC_STEP_ENDPOINTS;
 
     if (!a->reorder_pool) {
-        a->reorder_pool = (u8 *)MmAllocatePhysicalMemory(2, AIC_REORDER_SLOTS *
-                                                         AIC_REORDER_FRAME, 4);
+        a->reorder_pool = (u8 *)MmAllocatePhysicalMemory(2, WL_REORDER_POOL, 4);
         KeInitializeDpc(&a->reorder_dpc, reorder_dpc_routine, a);
         a->reorder_dpc.TargetNumber = USB_PROCESSOR + 1;
     }
-    reorder_reset(a);
+    wl_reorder_init(&a->reorder, a->reorder_pool, reorder_deliver, a, &a->st->reorder);
+    aic_data_rejoin(a);
     a->reorder_dpc_queued = 0;
 
     a->data_rx_consecutive_errors = 0;

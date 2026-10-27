@@ -60,7 +60,7 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
     up_frames++;
 }
 
-static u8 reorder_memory[AIC_REORDER_SLOTS * AIC_REORDER_FRAME];
+static u8 reorder_memory[WL_REORDER_SLOTS * WL_REORDER_FRAME];
 void *MmAllocatePhysicalMemory(u32 flags, u32 size, u32 protect)
 {
     (void)flags; (void)protect;
@@ -606,7 +606,7 @@ static void test_frames(void)
             buffer[60 + 23] = (u8)(seqs[k] >> 4);
             feed_rx(&a, buffer, n);
             if (k == 2)
-                CHECK(up_frames == 1 && st.reorder_held == 2);
+                CHECK(up_frames == 1 && st.reorder.held == 2);
         }
         /* In order, then the two behind the window handed up as they came, as
          * Linux does: 104 again and 99. */
@@ -614,7 +614,7 @@ static void test_frames(void)
         CHECK(up_order[0] == 100 && up_order[1] == 101 && up_order[2] == 102 &&
               up_order[3] == 103 && up_order[4] == 104);
         CHECK(up_order[5] == 104 && up_order[6] == 99);
-        CHECK(st.reorder_late == 2);
+        CHECK(st.reorder.late == 2);
 
         /* A hole nothing fills is given up on after a few worker ticks. */
         up_frames = 0;
@@ -626,13 +626,13 @@ static void test_frames(void)
         feed_rx(&a, buffer, n);
         CHECK(up_frames == 0);
         queued_dpc = 0;
-        for (k = 0; k < AIC_REORDER_TICKS; k++)
+        for (k = 0; k < WL_REORDER_TICKS; k++)
             aic_data_tick(&a);
         CHECK(queued_dpc != 0);
         if (queued_dpc)
             queued_dpc->DeferredRoutine(queued_dpc, queued_dpc->DeferredContext, 0, 0);
-        CHECK(up_frames == 1 && up_order[0] == 107 && st.reorder_timeouts == 1);
-        CHECK(a.reorder_free_count == AIC_REORDER_SLOTS);
+        CHECK(up_frames == 1 && up_order[0] == 107 && st.reorder.timeouts == 1);
+        CHECK(a.reorder.free_count == WL_REORDER_SLOTS);
 
         /* Joined again: the access point numbers from scratch, and so must we. */
         aic_data_rejoin(&a);
@@ -658,7 +658,7 @@ static void test_frames(void)
             buffer[60 + 23] = (u8)(sq >> 4);
             feed_rx(&a, buffer, n);
         }
-        CHECK(st.reorder_resyncs == 1);
+        CHECK(st.reorder.resyncs == 1);
         CHECK(up_frames == 64);                 /* none lost while it caught up */
 
         /* The session ends: a frame of that TID without the flag lets the held
@@ -681,8 +681,8 @@ static void test_frames(void)
         buffer[60 + 22] = (u8)(14 << 4);
         feed_rx(&a, buffer, n);
         CHECK(up_frames == 4 && up_order[1] == 12 && up_order[2] == 13 &&
-              up_order[3] == 99 && st.reorder_ended == 1);
-        CHECK(a.reorder_free_count == AIC_REORDER_SLOTS);
+              up_order[3] == 99 && st.reorder.ended == 1);
+        CHECK(a.reorder.free_count == WL_REORDER_SLOTS);
     }
 
     /* A frame past the window's end moves it only so far that it is the last in
@@ -707,8 +707,8 @@ static void test_frames(void)
             }
         }
         /* 500 up, 502 held; 600 moves the head to 537: 502 let go, 600 held. */
-        CHECK(up_frames == 2 && up_order[1] == 1 && st.reorder_jumps == 1);
-        CHECK(a.reorder[0].head == 537 && a.reorder[0].held == 1);
+        CHECK(up_frames == 2 && up_order[1] == 1 && st.reorder.jumps == 1);
+        CHECK(a.reorder.tid[0].head == 537 && a.reorder.tid[0].held == 1);
         aic_data_rejoin(&a);
     }
 
