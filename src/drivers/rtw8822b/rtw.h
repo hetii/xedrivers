@@ -24,6 +24,7 @@
 #include "net.h"
 #include "rtw_reg.h"
 #include "rtw8822b_table.h"
+#include "softmac.h"
 
 #define RTW_VENDOR          0x0BDAu
 #define RTW_FW_FILE         "rtw8822b_fw.bin"   /* rtw88/rtw8822b_fw.bin in linux-firmware */
@@ -46,6 +47,8 @@
 #define RTW_EP_NORMAL       1                   /* voice, video */
 #define RTW_EP_LOW          2                   /* best effort, background */
 #define RTW_OUT_MAX         4
+#define RTW_TX_COUNT        32
+#define RTW_TX_SLOT         2048        /* a descriptor and the largest frame */
 #define RTW_RX_COUNT        8
 #define RTW_RX_SIZE         20480       /* rtw88 takes 32 KB; one EHCI qTD carries 20 */
 
@@ -108,6 +111,14 @@ typedef struct {
     u32 rx_data;
     s32 last_signal;
     u32 scans;
+    u32 tx_frames;
+    u32 tx_done;
+    u32 tx_errors;
+    u32 tx_last_error;
+    u32 tx_drops;
+    u32 tx_full;
+    u32 keys;
+    u32 linked;
 } RTW_STATS;
 
 extern volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
@@ -146,6 +157,22 @@ typedef struct RTW {
     u32 scan_index;             /* the channel being listened on, while scanning */
     u32 scan_ticks;
     u32 scan_wait;              /* worker ticks until the next scan */
+
+    u8 *tx_buf[RTW_TX_COUNT];
+    URB tx_slot_urb[RTW_TX_COUNT];
+    volatile u32 tx_busy[RTW_TX_COUNT];
+    volatile u32 tx_next;
+    volatile u32 tx_inflight;
+    volatile u32 tx_ready;
+    u32 port_macid;             /* the station port's own, 0 */
+    u32 data_rate;              /* DESC_RATE* data goes at, until the firmware picks */
+    u32 data_rate_id;
+    u32 data_bw;
+    u32 data_sgi;
+
+    WL_SOFTMAC ops;             /* this card, for the station */
+    WL_STA sta;
+    WL_LINK link;               /* the Wi-Fi mode, and its state for this card */
 } RTW;
 
 /* --- registers (rtw_usb.c) -------------------------------------------------------- */
@@ -207,14 +234,29 @@ void rtw_set_channel(RTW *r, u32 channel, u32 bw, u32 primary);
 u32  rtw_fw_send_general_info(RTW *r);
 u32  rtw_fw_send_phydm_info(RTW *r);
 
+/* --- transmit and keys (rtw_tx.c) ------------------------------------------------- */
+
+/* softmac.h's WL_TX_* */
+#define RTW_TX_MGMT     0x01u
+#define RTW_TX_PROTECT  0x02u
+#define RTW_TX_EAPOL    0x04u
+#define RTW_TX_GROUP    0x08u
+
+u32  rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_length,
+            u32 flags, u32 tid);
+u32  rtw_tx_space(RTW *r);
+u32  rtw_set_key(RTW *r, u32 pairwise, u32 index, const u8 *key, u32 length, const u8 *peer);
+void rtw_clear_keys(RTW *r);
+
 /* --- receive (rtw_rx.c) ------------------------------------------------------------ */
 
 /* Queue every receive buffer. Thread. */
 void rtw_rx_start(RTW *r);
 
-/* One received 802.11 frame without its FCS, the signal in dBm and the
- * descriptor's encryption type; rtw8822b.c's. DISPATCH_LEVEL. */
-void rtw_rx_frame(RTW *r, const u8 *frame, u32 length, s32 signal, u32 enc);
+/* One received 802.11 frame without its FCS, in the receive buffer (it may be
+ * written over), the signal in dBm and the descriptor's first word; rtw8822b.c's.
+ * DISPATCH_LEVEL. */
+void rtw_rx_frame(RTW *r, u8 *frame, u32 length, s32 signal, u32 desc_w0);
 
 /* --- the efuse (rtw_efuse.c) ------------------------------------------------------- */
 

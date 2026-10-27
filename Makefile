@@ -79,10 +79,11 @@ BUILD    ?= build
 # xe_driver_<directory>; the table of them is generated, so nothing else names a
 # driver (src/core/driver.h).
 DRIVERS  ?= $(notdir $(patsubst %/,%,$(wildcard src/drivers/*/)))
-SRC_DIRS := src/core src/net src/wireless $(addprefix src/drivers/,$(DRIVERS)) \
+SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
+            $(addprefix src/drivers/,$(DRIVERS)) \
             $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
-HEADERS  := $(wildcard src/*/*.h src/*/*/*.h)
+HEADERS  := $(wildcard src/*/*.h src/*/*/*.h src/*/*/*/*.h)
 INCLUDES := $(addprefix -I ,$(SRC_DIRS))
 DEBUG    ?= 0
 

@@ -38,7 +38,7 @@ static void rx_done(URB *urb, u32 status)
 {
     RTW *r = (RTW *)urb->Owner;
     u32 i = (u32)(urb - r->rx_urb), at = 0, w0, len, info, shift, skip;
-    const u8 *b = r->rx_buf[i];
+    u8 *b = r->rx_buf[i];
 
     if (!r->rx_running || !r->dev->active)
         return;
@@ -50,7 +50,7 @@ static void rx_done(URB *urb, u32 status)
     }
     r->st->rx_transfers++;
     while (at + RX_DESC_SIZE <= urb->Actual) {
-        const u8 *d = b + at;
+        u8 *d = b + at;
 
         w0 = le32(d);
         len = w0 & 0x3FFF;
@@ -67,11 +67,11 @@ static void rx_done(URB *urb, u32 status)
         } else if (w0 & (BIT(14) | BIT(15))) {          /* CRC or ICV error */
             r->st->rx_crc_errors++;
         } else if (len > FCS_LEN) {
-            const u8 *frame = d + RX_DESC_SIZE + info + shift;
+            u8 *frame = d + RX_DESC_SIZE + info + shift;
             s32 signal = (w0 & BIT(26)) && info ? signal_of(d + RX_DESC_SIZE + shift) : -100;
 
             r->st->rx_frames++;
-            rtw_rx_frame(r, frame, len - FCS_LEN, signal, (w0 >> 20) & 7);
+            rtw_rx_frame(r, frame, len - FCS_LEN, signal, w0);
         }
         at += (skip + 7) & ~7u;
     }

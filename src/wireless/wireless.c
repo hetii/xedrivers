@@ -12,6 +12,7 @@
 #define IE_SSID        0
 #define IE_DS          3
 #define IE_RSN         48
+#define IE_HT_OP       61
 #define IE_VENDOR      221
 
 volatile WL_STATS wl_stats;
@@ -91,6 +92,10 @@ u32 wl_parse_bss(const u8 *frame, u32 length, WL_BSS *bss)
             if (n >= 1)
                 bss->channel = e[0];
             break;
+        case IE_HT_OP:      /* its primary channel: 5 GHz beacons often have no DS */
+            if (n >= 1 && !bss->channel)
+                bss->channel = e[0];
+            break;
         case IE_RSN:
             has_rsn = 1;
             sec |= akm_security(e, n, 1);
@@ -158,10 +163,15 @@ void wl_scan_result(const u8 *frame, u32 length, u32 freq, s32 rssi)
         if (rssi > slot->rssi)
             slot->rssi = (s8)rssi;
     }
-    slot->freq = (u16)freq;
-    if (!slot->channel)                 /* 5 GHz beacons often carry no DS element */
+    /* The channel the frame names is the AP's; the one it was heard on is only the
+     * radio's guess -- a SoftMAC card's frames can arrive after it has tuned on. */
+    if (found.channel)
+        slot->channel = found.channel;
+    else if (!slot->channel)
         slot->channel = (u8)(freq >= 5000 ? (freq - 5000) / 5 :
                              freq == 2484 ? 14 : (freq - 2407) / 5);
+    slot->freq = (u16)(slot->channel > 14 ? 5000 + 5 * slot->channel :
+                       slot->channel == 14 ? 2484 : 2407 + 5 * slot->channel);
     slot->seen++;
 }
 

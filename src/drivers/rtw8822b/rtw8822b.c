@@ -3,15 +3,17 @@
  * Brought up as rtw88's probe, power_on and core_start do it: the MAC powered,
  * the firmware downloaded and running, the efuse read for the card's address,
  * the MAC, baseband and radio set up, a station's port on that address, and
- * receive running. It then listens on each channel in turn for beacons
- * (wireless.c's table); it does not join anything yet, so its NET_DEV has no link
- * and never becomes the uplink.
+ * receive running. Scanning, joining and the data path are the SoftMAC station's
+ * (src/wireless/softmac/), which this file gives the card's operations to; which
+ * network to join and when is the Wi-Fi mode's (src/wireless/mode, wl_mode_pick),
+ * as for any Wi-Fi card.
  */
 
 #include "rtw.h"
 #include "rtw8822b_defs.h"
 #include "driver.h"
 #include "wireless.h"
+#include "bridge.h"
 
 #define RTW_MAX             2
 #define REG_BUF_SIZE        64
@@ -27,16 +29,13 @@
 #define PORT0_NET_TYPE      0x30000     /* in REG_CR */
 #define PORT0_AID           0x06A8
 #define PORT0_BCN_CTRL      0x0550
-#define DWELL_TICKS         5           /* ~150 ms on a channel */
-#define SCAN_EVERY_TICKS    900         /* a scan every ~30 s */
-
-static const u8 scan_channels[] = {
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
-    36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132,
-    136, 140, 144, 149, 153, 157, 161, 165,
-};
+#define NET_MGD_LINKED      2           /* RTW_NET_MGD_LINKED */
+#define RCR_LINKED          (RCR_SCAN | BIT_CBSSID_BCN | BIT_CBSSID_DATA)
+#define DESC_RATE54M        0x0B
+#define RATEID_G            7
 
 volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
+volatile WL_STA_STATS rtw_sta_stats[USB_MAX_DEVICES];
 
 static RTW rtw_inst[RTW_MAX];
 static u8 efuse_maps[RTW_MAX][RTW_EFUSE_LOGICAL];
@@ -54,6 +53,16 @@ static u32 rtw8822b_match(const u8 *device, const u8 *interface)
     return XE_MATCH_NONE;
 }
 
+static u32 op_tx(void *c, const u8 *head, u32 head_length, const u8 *body, u32 body_length,
+                 u32 flags, u32 tid);
+static u32 op_tx_space(void *c);
+static void op_set_channel(void *c, u32 channel, u32 bw, u32 primary);
+static void op_set_mac(void *c, const u8 *mac);
+static void op_set_link(void *c, const WL_LINK_INFO *link);
+static u32 op_set_key(void *c, u32 pairwise, u32 index, const u8 *key, u32 length,
+                      const u8 *peer);
+static void op_clear_keys(void *c);
+
 static RTW *take_instance(NET_DEV *nd)
 {
     u32 i;
@@ -68,6 +77,14 @@ static RTW *take_instance(NET_DEV *nd)
         r->dev = nd->usb;
         r->st = &rtw_stats[nd->usb->index];
         r->efuse = efuse_maps[i];
+        r->ops.context = r;
+        r->ops.tx = op_tx;
+        r->ops.tx_space = op_tx_space;
+        r->ops.set_channel = op_set_channel;
+        r->ops.set_mac = op_set_mac;
+        r->ops.set_link = op_set_link;
+        r->ops.set_key = op_set_key;
+        r->ops.clear_keys = op_clear_keys;
         nd->priv = r;
         return r;
     }
@@ -90,15 +107,21 @@ static u32 rtw8822b_start(NET_DEV *nd)
         return RTW_STEP_DMA;
     r->st->step = 0;
     if (!net_dma_begin(nd, REG_BUF_SIZE + BULK_BUF_SIZE + RTW_RX_COUNT * RTW_RX_SIZE +
-                       (RTW_RX_COUNT + 2) * 2048))
+                       RTW_TX_COUNT * RTW_TX_SLOT + (RTW_RX_COUNT + RTW_TX_COUNT + 2) * 2048))
         return fail(r, RTW_STEP_DMA, 0);
     r->reg_buf = (u8 *)net_dma_alloc(nd, REG_BUF_SIZE);
     r->bulk_buf = (u8 *)net_dma_alloc(nd, BULK_BUF_SIZE);
     for (step = 0; step < RTW_RX_COUNT; step++)
         r->rx_buf[step] = (u8 *)net_dma_alloc(nd, RTW_RX_SIZE);
+    for (step = 0; step < RTW_TX_COUNT; step++) {
+        r->tx_buf[step] = (u8 *)net_dma_alloc(nd, RTW_TX_SLOT);
+        r->tx_busy[step] = 0;
+    }
+    r->tx_inflight = 0;
     if (!r->fw)
         r->fw = (u8 *)MmAllocatePhysicalMemory(2, RTW_FW_MAX, 4);
-    if (!r->reg_buf || !r->bulk_buf || !r->fw || !r->rx_buf[RTW_RX_COUNT - 1])
+    if (!r->reg_buf || !r->bulk_buf || !r->fw || !r->rx_buf[RTW_RX_COUNT - 1] ||
+        !r->tx_buf[RTW_TX_COUNT - 1])
         return fail(r, RTW_STEP_DMA, 0);
 
     step = rtw_usb_open(r);
@@ -148,63 +171,144 @@ static u32 rtw8822b_start(NET_DEV *nd)
     rtw_write8_mask(r, PORT0_BCN_CTRL, 0xFF, BIT_EN_BCN_FUNCTION);
 
     rtw_set_channel(r, 36, 0, 0);
+    r->tx_ready = 1;
     rtw_rx_start(r);
-    r->scan_index = 0;
-    r->scan_ticks = 0;
-    r->scan_wait = 0;
     r->st->step = RTW_STEP_UP;
+
+    /* the station, and the mode that decides what it joins */
+    wl_sta_init(&r->sta, &r->ops, nd, &rtw_sta_stats[nd->usb->index]);
+    wl_load_config();
+    r->link.card = &r->sta.card;
+    r->link.mode = wl_mode_pick();
+    r->link.mode->start(&r->link, nd);
     return 0;
 }
 
-static u32 freq_of(u32 channel)
+/* --- the card's operations for the station (softmac.h) ---------------------------- */
+
+static u32 op_tx(void *c, const u8 *head, u32 head_length, const u8 *body, u32 body_length,
+                 u32 flags, u32 tid)
 {
-    return channel <= 14 ? 2407 + 5 * channel : 5000 + 5 * channel;
+    return rtw_tx((RTW *)c, head, head_length, body, body_length, flags, tid);
 }
 
-/* A beacon or probe response goes to the scan table; nothing else is used yet. */
-void rtw_rx_frame(RTW *r, const u8 *frame, u32 length, s32 signal, u32 enc)
+static u32 op_tx_space(void *c)
 {
-    u32 type = (frame[0] >> 2) & 3, subtype = frame[0] >> 4;
+    return rtw_tx_space((RTW *)c);
+}
 
-    (void)enc;
-    r->st->last_signal = signal;
-    if (type == 0) {
-        r->st->rx_mgmt++;
-        if (subtype == 8 || subtype == 5) {
-            r->st->rx_beacons++;
-            wl_scan_result(frame, length, freq_of(r->channel), signal);
-        }
-    } else if (type == 2) {
-        r->st->rx_data++;
+static void op_set_channel(void *c, u32 channel, u32 bw, u32 primary)
+{
+    rtw_set_channel((RTW *)c, channel, bw, primary);
+}
+
+static void op_set_mac(void *c, const u8 *mac)
+{
+    RTW *r = (RTW *)c;
+    u32 i;
+
+    for (i = 0; i < 6; i++)
+        rtw_write8(r, PORT0_MAC + i, mac[i]);
+}
+
+/* The center of a 40 or 80 MHz channel from its primary and rtw88's RTW_SC_* of
+ * where the primary sits (1 upper, 2 lower, 3 upmost, 4 lowest). */
+static u32 center_of(u32 channel, u32 bw, u32 primary)
+{
+    if (bw == 1)
+        return primary == 2 ? channel + 2 : channel - 2;
+    if (bw == 2)
+        return primary == 4 ? channel + 6 : primary == 2 ? channel + 2 :
+               primary == 1 ? channel - 2 : channel - 6;
+    return channel;
+}
+
+/* rtw_ops_bss_info_changed on association: the BSSID, a managed link, the AID, the
+ * BSSID filters on, the channel at the link's width; leaving undoes it. The data
+ * rate is fixed until the firmware's rate adaptation is set up. */
+static void op_set_link(void *c, const WL_LINK_INFO *link)
+{
+    RTW *r = (RTW *)c;
+    u32 i;
+
+    if (!link) {
+        rtw_write32(r, REG_RCR, RCR_SCAN);
+        rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, 0);
+        for (i = 0; i < 6; i++)
+            rtw_write8(r, PORT0_BSSID + i, 0);
+        r->st->linked = 0;
+        return;
     }
+    rtw_set_channel(r, center_of(link->channel, link->bw, link->primary), link->bw,
+                    link->primary);
+    for (i = 0; i < 6; i++)
+        rtw_write8(r, PORT0_BSSID + i, link->bssid[i]);
+    rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, NET_MGD_LINKED);
+    rtw_write32_mask(r, PORT0_AID, 0x7FF, link->aid);
+    rtw_write32(r, REG_RCR, RCR_LINKED);
+    r->data_rate = DESC_RATE54M;
+    r->data_rate_id = RATEID_G;
+    r->data_bw = 0;
+    r->data_sgi = 0;
+    r->st->linked = 1;
 }
 
-/* A passive scan: each channel in turn for DWELL_TICKS, then back to the first. */
+static u32 op_set_key(void *c, u32 pairwise, u32 index, const u8 *key, u32 length,
+                      const u8 *peer)
+{
+    return rtw_set_key((RTW *)c, pairwise, index, key, length, peer);
+}
+
+static void op_clear_keys(void *c)
+{
+    rtw_clear_keys((RTW *)c);
+}
+
+/* A received frame goes to the station: decrypted when the card says it did
+ * (rtw_rx_query_rx_desc: an encryption type and no software decryption). */
+void rtw_rx_frame(RTW *r, u8 *frame, u32 length, s32 signal, u32 desc_w0)
+{
+    u32 type = (frame[0] >> 2) & 3;
+
+    r->st->last_signal = signal;
+    if (type == 0)
+        r->st->rx_mgmt++;
+    else if (type == 2)
+        r->st->rx_data++;
+    if (r->st->step == RTW_STEP_UP)
+        wl_sta_rx(&r->sta, frame, length, signal, r->channel,
+                  ((desc_w0 >> 20) & 7) != 0 && !(desc_w0 & BIT(27)));
+}
+
 static void rtw8822b_tick(NET_DEV *nd)
 {
     RTW *r = (RTW *)nd->priv;
 
     if (!r || r->st->step != RTW_STEP_UP)
         return;
-    if (r->scan_wait) {
-        r->scan_wait--;
-        return;
+    r->link.mode->tick(&r->link);
+    wl_sta_tick(&r->sta);
+}
+
+static u32 rtw8822b_command(NET_DEV *nd, u32 what, volatile u32 *args)
+{
+    RTW *r = (RTW *)nd->priv;
+
+    if (!r || r->st->step != RTW_STEP_UP)
+        return 0;
+    switch (what) {
+    case 30:                            /* scan: aic8800.c's numbering */
+        args[5] = r->sta.card.scan(r->sta.card.context);
+        return 1;
+    case 31:                            /* join entry [1] of the scan table */
+        args[5] = r->link.mode->join(&r->link, args[1]);
+        return 1;
+    case 32:                            /* leave, and stay off */
+        args[5] = r->link.mode->leave(&r->link);
+        return 1;
+    default:
+        return 0;
     }
-    if (r->scan_index == 0 && r->scan_ticks == 0) {
-        r->st->scans++;
-        wl_scan_begin();
-        rtw_set_channel(r, scan_channels[r->scan_index], 0, 0);
-    }
-    if (++r->scan_ticks < DWELL_TICKS)
-        return;
-    r->scan_ticks = 0;
-    if (++r->scan_index < sizeof(scan_channels)) {
-        rtw_set_channel(r, scan_channels[r->scan_index], 0, 0);
-        return;
-    }
-    wl_scan_end(0);
-    r->scan_index = 0;
-    r->scan_wait = SCAN_EVERY_TICKS;
 }
 
 static void rtw8822b_detached(NET_DEV *nd)
@@ -214,22 +318,25 @@ static void rtw8822b_detached(NET_DEV *nd)
     if (!r)
         return;
     r->rx_running = 0;
+    r->tx_ready = 0;
+    if (r->link.mode)
+        r->link.mode->gone(&r->link);
     r->in_use = 0;
     mem_sync();
 }
 
 static u32 rtw8822b_xmit(NET_DEV *nd, const u8 *frame, u32 length)
 {
-    (void)nd;
-    (void)frame;
-    (void)length;
-    return 0;
+    RTW *r = (RTW *)nd->priv;
+
+    return r && r->tx_ready ? wl_sta_xmit(&r->sta, frame, length) : 0;
 }
 
 static u32 rtw8822b_tx_space(NET_DEV *nd)
 {
-    (void)nd;
-    return 0;
+    RTW *r = (RTW *)nd->priv;
+
+    return r && r->tx_ready && rtw_tx_space(r);
 }
 
 const XE_DRIVER xe_driver_rtw8822b = {
@@ -240,5 +347,6 @@ const XE_DRIVER xe_driver_rtw8822b = {
     .detached = rtw8822b_detached,
     .xmit = rtw8822b_xmit,
     .tx_space = rtw8822b_tx_space,
+    .command = rtw8822b_command,
     .tick = rtw8822b_tick,
 };
