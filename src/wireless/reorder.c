@@ -40,6 +40,7 @@ void wl_reorder_init(WL_REORDER *r, u8 *pool, WL_DELIVER deliver, void *context,
     r->deliver = deliver;
     r->context = context;
     r->st = st;
+    r->drop_late = 0;
     wl_reorder_reset(r);
 }
 
@@ -102,7 +103,8 @@ void wl_reorder_in(WL_REORDER *r, u32 tid, u32 seq, u8 *frame, u32 length)
          * mean the sender's numbering started again: follow it. */
         r->st->late++;
         if (++q->late_run < WL_REORDER_RESYNC) {
-            r->deliver(r->context, frame, length);
+            if (!r->drop_late)
+                r->deliver(r->context, frame, length);
             return;
         }
         r->st->resyncs++;

@@ -54,6 +54,9 @@ typedef struct {
     WL_DELIVER deliver;
     void *context;
     volatile WL_REORDER_STATS *st;
+    u32 drop_late;          /* behind the window is a duplicate (mac80211's rule, for
+                             * a SoftMAC card), not a frame to hand up late (the
+                             * AIC8800's firmware's, as AICWF_RX_REORDER does) */
 } WL_REORDER;
 
 /* Once, before the first frame: the pool may be 0, and then nothing is held. */

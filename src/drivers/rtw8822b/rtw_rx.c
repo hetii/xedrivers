@@ -49,6 +49,8 @@ static void rx_done(URB *urb, u32 status)
         return;
     }
     r->st->rx_transfers++;
+    if (urb->Actual > r->st->rx_largest)
+        r->st->rx_largest = urb->Actual;
     while (at + RX_DESC_SIZE <= urb->Actual) {
         u8 *d = b + at;
 
@@ -85,11 +87,25 @@ static void submit(RTW *r, u32 i)
     usb_submit(&r->rx_urb[i]);
 }
 
+/* rtw_usb_dynamic_rx_agg_v1, enabled, with a threshold the receive buffers hold:
+ * the chip closes a transfer once it passes 4 x 4 KB, so one frame more stays under
+ * RTW_RX_SIZE (rtw88 takes 5 into 32 KB buffers). Thread. */
+#define RX_AGG_PAGES    4
+#define RX_AGG_TIMEOUT  0x20
+
+static void rx_aggregation(RTW *r)
+{
+    rtw_write8_set(r, REG_TXDMA_PQ_MAP, BIT_RXDMA_AGG_EN);
+    rtw_write8_clr(r, REG_RXDMA_AGG_PG_TH + 3, BIT(7));
+    rtw_write16(r, REG_RXDMA_AGG_PG_TH, RX_AGG_PAGES | RX_AGG_TIMEOUT << 8);
+}
+
 /* rtw_usb_rx_resubmit for every buffer. Thread. */
 void rtw_rx_start(RTW *r)
 {
     u32 i;
 
+    rx_aggregation(r);
     r->rx_running = 1;
     mem_sync();
     for (i = 0; i < RTW_RX_COUNT; i++)

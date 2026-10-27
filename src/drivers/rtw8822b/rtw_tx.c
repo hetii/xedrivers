@@ -49,6 +49,8 @@ static void tx_done(URB *urb, u32 status)
     mem_sync();
     r->tx_busy[urb->Tag] = 0;
     __sync_fetch_and_sub(&r->tx_inflight, 1);
+    if (r->nd)
+        net_tx_done(r->nd);             /* what waited for a slot goes now */
 }
 
 static u32 take_slot(RTW *r)
@@ -117,9 +119,17 @@ u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_len
         put32(b + 4, (bmc ? (u32)r->port_macid : MACID_AP) | qsel << 8 |
                      r->data_rate_id << 16 |
                      (flags & RTW_TX_PROTECT ? SEC_TYPE_CCMP << 22 : 0));
-        put32(b + 12, 1u << 8 | (flags & RTW_TX_EAPOL ? 1u << 10 : 0));
+        if (flags & RTW_TX_EAPOL) {
+            put32(b + 12, 1u << 8 | 1u << 10);          /* USE_RATE, DISDATAFB */
+        } else {
+            if (r->ampdu)                               /* AGG_EN, AMPDU_DEN, MAX_AGG_NUM */
+                put32(b + 8, 1u << 12 | (r->ampdu_density & 7) << 20);
+            put32(b + 12, (r->data_use_rate ? 1u << 8 : 0) |
+                          (r->ampdu ? (r->ampdu_factor & 0x1F) << 17 : 0));
+            put32(b + 20, r->data_bw << 5 | (r->data_sgi ? 1u << 4 : 0) |
+                          (r->data_ldpc ? 1u << 7 : 0) | (r->data_stbc ? 1u << 8 : 0));
+        }
         put32(b + 16, rate);                            /* DATARATE */
-        put32(b + 20, r->data_bw << 5 | (r->data_sgi && !(flags & RTW_TX_EAPOL) ? 1u << 4 : 0));
         seq = (u32)(frame[22] | frame[23] << 8) >> 4;
         put32(b + 36, seq << 12);                       /* SW_SEQ */
         put32(b, length | RTW_TX_DESC_SIZE << 16 | bmc << 24 | 1u << 26);
@@ -133,10 +143,17 @@ u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_len
     for (i = 0; i < body_length; i++)
         b[RTW_TX_DESC_SIZE + head_length + i] = body[i];
 
+    /* rtw88 sends with URB_ZERO_PACKET, so a transfer of whole 512-byte packets
+     * still ends; here one byte more past the frame does it, as send_firmware_pkt
+     * does for the firmware (the descriptor's size says where the frame ends). */
+    i = RTW_TX_DESC_SIZE + length;
+    if (!(i & 511)) {
+        b[i++] = 0;
+        r->st->tx_padded++;
+    }
     __sync_fetch_and_add(&r->tx_inflight, 1);
     r->st->tx_frames++;
-    usb_prepare(&r->tx_slot_urb[slot], r->dev, r->ep_out[ep], tx_done, b,
-                RTW_TX_DESC_SIZE + length, 0);
+    usb_prepare(&r->tx_slot_urb[slot], r->dev, r->ep_out[ep], tx_done, b, i, 0);
     r->tx_slot_urb[slot].Owner = r;
     r->tx_slot_urb[slot].Tag = slot;
     usb_submit(&r->tx_slot_urb[slot]);

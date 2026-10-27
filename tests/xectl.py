@@ -79,12 +79,16 @@ STRUCTS = {
                   "rx_transfers", "rx_frames", "rx_bad", "rx_c2h", "rx_crc_errors",
                   "rx_errors", "rx_last_error", "rx_beacons", "rx_mgmt", "rx_data",
                   "last_signal", "scans", "tx_frames", "tx_done", "tx_errors",
-                  "tx_last_error", "tx_drops", "tx_full", "keys", "linked"],
+                  "tx_last_error", "tx_drops", "tx_full", "keys", "linked", "h2c_commands",
+                  "h2c_busy", "ra_mask", "ra_rate_id", "ampdu", "rx_largest", "tx_padded",
+                  "tx_inflight_now"],
     "rtw_sta_stats": ["state", "scans", "probes", "auths", "auth_status", "assocs",
                       "assoc_status", "aid", "joins", "timeouts", "deauths",
                       "deauth_reason", "beacon_losses", "rx_data", "rx_eapol",
                       "rx_dropped", "tx_data", "tx_dropped", "addba_requests",
-                      "addba_accepted", "bw", "channel", "keys", "port_open"],
+                      "addba_accepted", "bw", "channel", "keys", "port_open", "rx_duplicates", "tx_ba",
+                      "rx_ba", "r_held", "r_late", "r_jumps", "r_timeouts", "r_full",
+                      "r_resyncs", "r_ended"],
     "aic_stats": ["product", "step", "step_status", "chip_word", "chip_id", "mcu_id",
                   "fw_version", "bytes_loaded", "files_loaded",
                   "file_status", "commands", "timeouts", "tx_errors",
@@ -315,9 +319,12 @@ def status(sym):
                       r["rx_bad"], r["rx_c2h"], r["rx_crc_errors"], r["rx_errors"],
                       r["rx_last_error"], r["rx_beacons"], r["rx_mgmt"], r["rx_data"],
                       sig, r["scans"]))
-            print("rtw tx   frames=%d done=%d err=%d/%#x drops=%d full=%d keys=%d linked=%d" % (
+            print("rtw tx   frames=%d done=%d err=%d/%#x drops=%d full=%d keys=%d linked=%d "
+                  "h2c=%d busy=%d ra=%#x/%d ampdu=%d rx_largest=%d padded=%d inflight=%d" % (
                 r["tx_frames"], r["tx_done"], r["tx_errors"], r["tx_last_error"],
-                r["tx_drops"], r["tx_full"], r["keys"], r["linked"]))
+                r["tx_drops"], r["tx_full"], r["keys"], r["linked"], r["h2c_commands"],
+                r["h2c_busy"], r["ra_mask"], r["ra_rate_id"], r["ampdu"], r["rx_largest"],
+                r["tx_padded"], r["tx_inflight_now"]))
             if "rtw_sta_stats" in sym:
                 t = read_struct(sym, "rtw_sta_stats", i)
                 states = ["idle", "scanning", "probing", "auth", "assoc", "joined"]
@@ -328,9 +335,13 @@ def status(sym):
                           t["assoc_status"], t["aid"], t["joins"], t["timeouts"],
                           t["deauths"], t["deauth_reason"], t["beacon_losses"], t["channel"],
                           t["bw"], t["keys"], t["port_open"]))
-                print("sta data rx=%d eapol=%d dropped=%d tx=%d dropped=%d" % (
-                    t["rx_data"], t["rx_eapol"], t["rx_dropped"], t["tx_data"],
-                    t["tx_dropped"]))
+                print("sta data rx=%d dup=%d eapol=%d dropped=%d tx=%d dropped=%d | ba tx=%d rx=%#x "
+                      "addba=%d/%d | reorder held=%d late=%d jumps=%d timeouts=%d full=%d "
+                      "resyncs=%d" % (
+                    t["rx_data"], t["rx_duplicates"], t["rx_eapol"], t["rx_dropped"],
+                    t["tx_data"], t["tx_dropped"], t["tx_ba"], t["rx_ba"], t["addba_requests"],
+                    t["addba_accepted"], t["r_held"], t["r_late"], t["r_jumps"],
+                    t["r_timeouts"], t["r_full"], t["r_resyncs"]))
     if "aic_stats" in sym:
         for i in range(NET_MAX):
             a = read_struct(sym, "aic_stats", i)

@@ -32,7 +32,16 @@
 #define NET_MGD_LINKED      2           /* RTW_NET_MGD_LINKED */
 #define RCR_LINKED          (RCR_SCAN | BIT_CBSSID_BCN | BIT_CBSSID_DATA)
 #define DESC_RATE54M        0x0B
+#define DESC_RATEMCS15      0x1B
+#define DESC_RATEVHT2SS_MCS0 0x36
+#define RATEID_BGN_40M_2SS  0
+#define RATEID_BGN_20M_2SS  2
+#define RATEID_GN_N2SS      4
+#define RATEID_BG           6
 #define RATEID_G            7
+#define RATEID_AC_2SS       9           /* RTW_RATEID_ARFR0_AC_2SS */
+#define RATEID_AC_2G_2SS    12          /* RTW_RATEID_ARFR3_AC_2G_2SS */
+#define MACID_AP            1
 
 volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
 volatile WL_STA_STATS rtw_sta_stats[USB_MAX_DEVICES];
@@ -62,6 +71,7 @@ static void op_set_link(void *c, const WL_LINK_INFO *link);
 static u32 op_set_key(void *c, u32 pairwise, u32 index, const u8 *key, u32 length,
                       const u8 *peer);
 static void op_clear_keys(void *c);
+static void op_set_aggregation(void *c, u32 tid, u32 on);
 
 static RTW *take_instance(NET_DEV *nd)
 {
@@ -85,6 +95,7 @@ static RTW *take_instance(NET_DEV *nd)
         r->ops.set_link = op_set_link;
         r->ops.set_key = op_set_key;
         r->ops.clear_keys = op_clear_keys;
+        r->ops.set_aggregation = op_set_aggregation;
         nd->priv = r;
         return r;
     }
@@ -223,15 +234,73 @@ static u32 center_of(u32 channel, u32 bw, u32 primary)
     return channel;
 }
 
+/* rtw_update_sta_info for the AP: the rates both sides do, the firmware's rate set
+ * for them (rate_id), the best of them to start from. Two streams each way. */
+static void rate_info(RTW *r, const WL_LINK_INFO *l, u32 *mask, u32 *rate_id, u32 *top)
+{
+    u32 m = 0, i, cap, legacy = l->legacy_rates;
+
+    if (l->vht) {
+        u32 map = l->vht_mcs_map;
+
+        for (i = 0; i < 2; i++, map >>= 2) {             /* get_vht_ra_mask, 2SS */
+            cap = map & 3;
+            if (cap == 2)
+                m |= 0x3FFu << (12 + 10 * i);
+            else if (cap == 1)
+                m |= 0x1FFu << (12 + 10 * i);
+            else if (cap == 0)
+                m |= 0x0FFu << (12 + 10 * i);
+        }
+        cap = (l->vht_mcs_map >> 2) & 3;
+        *top = DESC_RATEVHT2SS_MCS0 + (cap == 0 ? 7 : cap == 1 ? 8 : 9);
+    } else if (l->ht) {
+        m = (u32)l->ht_mcs << 12;
+        *top = DESC_RATEMCS15;
+    } else {
+        *top = DESC_RATE54M;
+    }
+    if (r->channel > 14) {
+        m |= legacy & 0xFF0;
+        if (l->vht) {
+            m &= 0xFFFFF000u | 0x10;                    /* VHT, OFDM_IN_VHT */
+            *rate_id = RATEID_AC_2SS;
+        } else if (l->ht) {
+            m &= 0x0FFFF000u | 0x30;                    /* HT, OFDM_IN_HT_5G */
+            *rate_id = RATEID_GN_N2SS;
+        } else {
+            *rate_id = RATEID_G;
+        }
+    } else {
+        m |= legacy;
+        if (l->vht) {
+            m &= 0xFFFFF000u | 0x5 | 0x10;
+            *rate_id = l->bw >= 2 ? RATEID_AC_2SS : RATEID_AC_2G_2SS;
+        } else if (l->ht) {
+            m &= 0x0FFFF000u | 0x5 | 0x10;
+            *rate_id = l->bw == 1 ? RATEID_BGN_40M_2SS : RATEID_BGN_20M_2SS;
+        } else {
+            m &= 0xFF0 | 0x5;
+            *rate_id = RATEID_BG;
+        }
+    }
+    if (!m)                                             /* rtw_rate_mask_recover */
+        m = legacy;
+    *mask = m;
+}
+
 /* rtw_ops_bss_info_changed on association: the BSSID, a managed link, the AID, the
- * BSSID filters on, the channel at the link's width; leaving undoes it. The data
- * rate is fixed until the firmware's rate adaptation is set up. */
+ * BSSID filters on, the channel at the link's width, the AP's media status and its
+ * rates to the firmware, which picks the data rate from then on; leaving undoes
+ * it. */
 static void op_set_link(void *c, const WL_LINK_INFO *link)
 {
     RTW *r = (RTW *)c;
     u32 i;
 
     if (!link) {
+        r->ampdu = 0;
+        rtw_fw_media_status(r, MACID_AP, 0);
         rtw_write32(r, REG_RCR, RCR_SCAN);
         rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, 0);
         for (i = 0; i < 6; i++)
@@ -246,11 +315,35 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
     rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, NET_MGD_LINKED);
     rtw_write32_mask(r, PORT0_AID, 0x7FF, link->aid);
     rtw_write32(r, REG_RCR, RCR_LINKED);
-    r->data_rate = DESC_RATE54M;
-    r->data_rate_id = RATEID_G;
-    r->data_bw = 0;
-    r->data_sgi = 0;
+    {
+        u32 mask, rate_id, top;
+
+        rate_info(r, link, &mask, &rate_id, &top);
+        rtw_fw_media_status(r, MACID_AP, 1);
+        rtw_fw_ra_info(r, MACID_AP, rate_id, 1, link->sgi, link->bw, link->ldpc,
+                       link->vht, mask);
+        r->data_rate = top;
+        r->data_rate_id = rate_id;
+        r->data_use_rate = 0;
+        r->st->ra_mask = mask;
+        r->st->ra_rate_id = rate_id;
+    }
+    r->data_bw = link->bw;
+    r->data_sgi = 0;                    /* the firmware's, with its rate */
+    r->data_ldpc = link->ldpc;
+    r->data_stbc = link->stbc;
+    r->ampdu_factor = (4u << link->ampdu_factor) - 1;   /* get_tx_ampdu_factor */
+    r->ampdu_density = link->ampdu_density;
     r->st->linked = 1;
+}
+
+static void op_set_aggregation(void *c, u32 tid, u32 on)
+{
+    RTW *r = (RTW *)c;
+
+    (void)tid;
+    r->ampdu = on;
+    r->st->ampdu = on;
 }
 
 static u32 op_set_key(void *c, u32 pairwise, u32 index, const u8 *key, u32 length,
@@ -286,6 +379,7 @@ static void rtw8822b_tick(NET_DEV *nd)
 
     if (!r || r->st->step != RTW_STEP_UP)
         return;
+    r->st->tx_inflight_now = r->tx_inflight;
     r->link.mode->tick(&r->link);
     wl_sta_tick(&r->sta);
 }

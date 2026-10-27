@@ -22,6 +22,8 @@ typedef struct {
     u32 legacy_rates;
     u16 ht_mcs;
     u16 vht_mcs_map;
+    u8  rx_ldpc;
+    u8  rx_stbc;
 } WL_AP_IES;
 
 #define WL_FRAME_MAX 400        /* the longest management frame built here */
@@ -31,6 +33,12 @@ u32  wl_frame_auth(u8 *f, const u8 *own, const u8 *bssid, u32 seq);
 u32  wl_frame_deauth(u8 *f, const u8 *own, const u8 *bssid, u32 seq, u32 reason);
 u32  wl_frame_assoc_req(u8 *f, const u8 *own, const WL_BSS *bss, const WL_AP_IES *ap,
                         const u8 *rsn, u32 rsn_len, u32 seq);
+
+/* Block ack (ba.c): our request for `tid`, and our answer to the AP's request. */
+u32  wl_frame_addba_req(u8 *f, const u8 *own, const u8 *bssid, u32 token, u32 tid,
+                        u32 ssn);
+u32  wl_frame_addba_resp(u8 *f, const u8 *own, const u8 *bssid, u32 token, u32 status,
+                         u32 param, u32 timeout);
 
 /* The elements of a beacon or probe response (after its 24-byte header and 12
  * fixed bytes). */

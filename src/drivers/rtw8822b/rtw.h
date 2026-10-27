@@ -119,6 +119,14 @@ typedef struct {
     u32 tx_full;
     u32 keys;
     u32 linked;
+    u32 h2c_commands;
+    u32 h2c_busy;
+    u32 ra_mask;
+    u32 ra_rate_id;
+    u32 ampdu;
+    u32 rx_largest;             /* the longest receive transfer */
+    u32 tx_padded;              /* transfers a byte longer, not to end on 512 */
+    u32 tx_inflight_now;
 } RTW_STATS;
 
 extern volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
@@ -149,6 +157,7 @@ typedef struct RTW {
     volatile u32 tx_done;
     volatile u32 tx_status;
     u32 h2c_seq;
+    u32 h2c_box;                /* the next mailbox, 0-3 */
 
     u8 *rx_buf[RTW_RX_COUNT];
     URB rx_urb[RTW_RX_COUNT];
@@ -169,6 +178,12 @@ typedef struct RTW {
     u32 data_rate_id;
     u32 data_bw;
     u32 data_sgi;
+    u32 data_use_rate;          /* the rate in the descriptor, not the firmware's */
+    u32 data_ldpc;
+    u32 data_stbc;
+    volatile u32 ampdu;         /* aggregate data (a block-ack session to the AP) */
+    u32 ampdu_factor;           /* the descriptor's MAX_AGG_NUM */
+    u32 ampdu_density;
 
     WL_SOFTMAC ops;             /* this card, for the station */
     WL_STA sta;
@@ -233,6 +248,9 @@ void rtw_set_channel(RTW *r, u32 channel, u32 bw, u32 primary);
 
 u32  rtw_fw_send_general_info(RTW *r);
 u32  rtw_fw_send_phydm_info(RTW *r);
+u32  rtw_fw_media_status(RTW *r, u32 macid, u32 connected);
+u32  rtw_fw_ra_info(RTW *r, u32 macid, u32 rate_id, u32 init_level, u32 sgi, u32 bw,
+                    u32 ldpc, u32 vht, u32 mask);
 
 /* --- transmit and keys (rtw_tx.c) ------------------------------------------------- */
 

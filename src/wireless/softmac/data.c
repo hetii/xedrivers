@@ -23,6 +23,7 @@
 #define FC_FROMDS       0x02
 #define FC_PROTECTED    0x40
 #define FC_ORDER        0x80
+#define FC_RETRY        0x08
 #define ETH_MAX         1514
 
 static u32 same(const u8 *a, const u8 *b)
@@ -107,7 +108,8 @@ u32 wl_sta_send_eapol(void *context, const u8 *body, u32 length)
  * `sa`. The Ethernet header is written in place over the six bytes before the
  * EtherType, which belong to headers already read: the receive buffer is the
  * card's, and nothing is copied. */
-static void deliver(WL_STA *s, const u8 *da_in, const u8 *sa_in, u8 *p, u32 length)
+static void deliver(WL_STA *s, const u8 *da_in, const u8 *sa_in, u8 *p, u32 length,
+                    u32 tid, u32 seq)
 {
     u8 da[6], sa[6], *eth;
     u32 type, i;
@@ -137,12 +139,17 @@ static void deliver(WL_STA *s, const u8 *da_in, const u8 *sa_in, u8 *p, u32 leng
         eth[6 + i] = sa[i];
     }
     s->st->rx_data++;
-    net_frame_in(s->nd, eth, 14 + length - SNAP_LEN);
+    /* a group frame is numbered apart from the session's and is not reordered */
+    if (tid < WL_REORDER_TIDS && (s->rx_ba >> tid) & 1 && !(da_in[0] & 1))
+        wl_reorder_in(&s->reorder, tid, seq, eth, 14 + length - SNAP_LEN);
+    else
+        net_frame_in(s->nd, eth, 14 + length - SNAP_LEN);
 }
 
 void wl_sta_rx_data(WL_STA *s, u8 *f, u32 length, u32 decrypted)
 {
-    u32 hdr = HDR_LEN, amsdu = 0, at, n;
+    u32 hdr = HDR_LEN, amsdu = 0, at, n, tid = WL_REORDER_TIDS;
+    u32 seq = (u32)(f[22] | f[23] << 8) >> 4;
     const u8 *da = f + 4, *sa = f + 16;
 
     if ((f[1] & (FC_TODS | FC_FROMDS)) != FC_FROMDS || !same(f + 10, s->bss.bssid) ||
@@ -154,11 +161,23 @@ void wl_sta_rx_data(WL_STA *s, u8 *f, u32 length, u32 decrypted)
         if (f[0] & 0x40)                    /* QoS null: nothing in it */
             return;
         amsdu = f[24] & 0x80;
+        tid = f[24] & 7;
         hdr += QOS_LEN;
         if (f[1] & FC_ORDER)
             hdr += 4;                       /* HT control */
     } else if (f[0] & 0x40) {
         return;                             /* null */
+    }
+    /* A retransmission of the last frame of its TID: the first one made it, only
+     * the acknowledgement was lost (ieee80211_rx_h_check_dup, unicast only). */
+    if (!(da[0] & 1)) {
+        u32 i = tid < WL_REORDER_TIDS ? tid : WL_REORDER_TIDS, sc = f[22] | f[23] << 8;
+
+        if ((f[1] & FC_RETRY) && s->last_seq_ctrl[i] == sc) {
+            s->st->rx_duplicates++;
+            return;
+        }
+        s->last_seq_ctrl[i] = (u16)sc;
     }
     if (f[1] & FC_PROTECTED) {
         if (!decrypted || length < hdr + CCMP_HDR_LEN + CCMP_MIC_LEN) {
@@ -173,7 +192,7 @@ void wl_sta_rx_data(WL_STA *s, u8 *f, u32 length, u32 decrypted)
         return;
     }
     if (!amsdu) {
-        deliver(s, da, sa, f + hdr, length - hdr);
+        deliver(s, da, sa, f + hdr, length - hdr, tid, seq);
         return;
     }
     /* A-MSDU: subframes of DA, SA, length, the MSDU, padded to four bytes */
@@ -181,6 +200,6 @@ void wl_sta_rx_data(WL_STA *s, u8 *f, u32 length, u32 decrypted)
         n = (u32)f[at + 12] << 8 | f[at + 13];
         if (at + 14 + n > length)
             break;
-        deliver(s, f + at, f + at + 6, f + at + 14, n);
+        deliver(s, f + at, f + at + 6, f + at + 14, n, WL_REORDER_TIDS, 0);
     }
 }

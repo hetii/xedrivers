@@ -41,6 +41,8 @@ typedef struct {
     u16 vht_mcs_map;            /* the AP's VHT RX MCS map */
     u8  ampdu_factor;           /* the AP's maximum A-MPDU length exponent */
     u8  ampdu_density;
+    u8  ldpc;                   /* the AP receives LDPC, STBC */
+    u8  stbc;
 } WL_LINK_INFO;
 
 typedef struct {
@@ -66,6 +68,9 @@ typedef struct {
                     const u8 *peer);
     /* Forget every key. Thread. */
     void (*clear_keys)(void *context);
+    /* Aggregate data of `tid` into A-MPDUs (a block-ack session with the AP is up)
+     * or stop. Any IRQL up to DISPATCH. */
+    void (*set_aggregation)(void *context, u32 tid, u32 on);
 } WL_SOFTMAC;
 
 /* Where the station is. */
@@ -106,6 +111,10 @@ typedef struct {
     u32 channel;
     u32 keys;
     u32 port_open;
+    u32 rx_duplicates;          /* retransmissions of a frame already received */
+    u32 tx_ba;                  /* our session to the AP: 1 asked, 2 up, 3 refused */
+    u32 rx_ba;                  /* the AP's to us, a bit per TID */
+    WL_REORDER_STATS reorder;
 } WL_STA_STATS;
 
 typedef struct {
@@ -141,12 +150,19 @@ typedef struct {
     volatile u32 got_lost;
 
     volatile u32 seq;           /* the next data sequence number */
+
+    /* block ack (ba.c): the AP's sessions to us by TID, and ours to it */
+    volatile u32 rx_ba;         /* bit n: TID n's frames go through reorder.c */
+    volatile u32 tx_ba;         /* 0 none, 1 asked, 2 up */
+    u32 ba_token;
+    KDPC reorder_dpc;
+    volatile u32 reorder_dpc_queued;
     volatile u32 pn_lo;         /* CCMP's packet number, 48 bits in two words: */
     volatile u32 pn_hi;         /* no 64-bit atomics here */
 
     WL_REORDER reorder;
     u8 reorder_pool[WL_REORDER_POOL];
-    volatile WL_REORDER_STATS reorder_stats;
+    u16 last_seq_ctrl[WL_REORDER_TIDS + 1];     /* per TID, and one for non-QoS */
 } WL_STA;
 
 /* Set up `s` for the card `hw` with the network device `nd`, its stats in `st`.

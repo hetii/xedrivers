@@ -96,7 +96,9 @@ void wl_sta_rx(WL_STA *s, u8 *f, u32 length, s32 signal, u32 channel, u32 decryp
     type = (f[0] >> 2) & 3;
     subtype = f[0] >> 4;
     if (type == 2) {
-        if (s->state == WL_STA_JOINED)
+        /* the handshake's first message follows the association answer at once,
+         * before the worker has acted on it */
+        if (s->state == WL_STA_JOINED || (s->state == WL_STA_ASSOC && s->got_assoc))
             wl_sta_rx_data(s, f, length, decrypted);
         return;
     }
@@ -140,6 +142,10 @@ void wl_sta_rx(WL_STA *s, u8 *f, u32 length, s32 signal, u32 channel, u32 decryp
             s->got_assoc = 1;
         }
         break;
+    case 13:                                            /* action */
+        if (s->state == WL_STA_JOINED)
+            wl_sta_action(s, f, length);
+        break;
     case 10:                                            /* disassociation */
     case 12:                                            /* deauthentication */
         s->st->deauths++;
@@ -171,6 +177,7 @@ static u32 card_scan(void *context)
 
 static void link_down(WL_STA *s)
 {
+    wl_sta_ba_reset(s);
     s->port_open = 0;
     s->pairwise_set = 0;
     s->st->port_open = 0;
@@ -298,6 +305,7 @@ static void send_assoc(WL_STA *s)
 static void joined(WL_STA *s)
 {
     WL_AP_IES ap;
+    u32 i;
 
     wl_parse_ap(s->ies, s->ies_len, &ap);
     wl_link_from_ap(&s->bss, &ap, &s->link);
@@ -306,7 +314,9 @@ static void joined(WL_STA *s)
     s->st->channel = s->link.channel;
     s->seq = 0;
     s->last_beacon = 0;
-    wl_reorder_reset(&s->reorder);
+    for (i = 0; i <= WL_REORDER_TIDS; i++)
+        s->last_seq_ctrl[i] = 0xFFFF;
+    wl_sta_ba_reset(s);
     s->hw->set_link(s->hw->context, &s->link);
     s->st->joins++;
     step_to(s, WL_STA_JOINED);
@@ -383,6 +393,7 @@ void wl_sta_tick(WL_STA *s)
         break;
 
     case WL_STA_JOINED:
+        wl_sta_ba_tick(s);
         if (s->got_lost) {
             s->got_lost = 0;
             link_down(s);
@@ -419,6 +430,10 @@ void wl_sta_init(WL_STA *s, const WL_SOFTMAC *hw, NET_DEV *nd, volatile WL_STA_S
     s->card.join = card_join;
     s->card.leave = card_leave;
     s->card.state = card_state;
-    wl_reorder_init(&s->reorder, s->reorder_pool, reorder_deliver, s, &s->reorder_stats);
+    s->rx_ba = 0;
+    s->tx_ba = 0;
+    wl_reorder_init(&s->reorder, s->reorder_pool, reorder_deliver, s, &st->reorder);
+    s->reorder.drop_late = 1;           /* a duplicate, as mac80211 has it */
+    wl_sta_ba_init(s);
     choose_own(s);
 }

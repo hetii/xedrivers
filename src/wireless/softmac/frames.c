@@ -175,6 +175,38 @@ u32 wl_frame_assoc_req(u8 *f, const u8 *own, const WL_BSS *bss, const WL_AP_IES 
     return n;
 }
 
+/* --- block ack ---------------------------------------------------------------------- */
+
+/* An ADDBA request (action category 3, action 0): immediate block ack for `tid`, 64
+ * frames, no timeout, starting at `ssn`. */
+u32 wl_frame_addba_req(u8 *f, const u8 *own, const u8 *bssid, u32 token, u32 tid, u32 ssn)
+{
+    u32 n = header(f, 13, bssid, own, bssid, 0);
+
+    f[n++] = 3;
+    f[n++] = 0;
+    f[n++] = (u8)token;
+    put16(f + n, 1u << 1 | (tid & 15) << 2 | 64u << 6);    /* immediate, TID, 64 */
+    put16(f + n + 2, 0);                                    /* timeout */
+    put16(f + n + 4, (ssn & 0xFFF) << 4);
+    return n + 6;
+}
+
+/* An ADDBA response: `param` the block-ack parameter set as answered. */
+u32 wl_frame_addba_resp(u8 *f, const u8 *own, const u8 *bssid, u32 token, u32 status,
+                        u32 param, u32 timeout)
+{
+    u32 n = header(f, 13, bssid, own, bssid, 0);
+
+    f[n++] = 3;
+    f[n++] = 1;
+    f[n++] = (u8)token;
+    put16(f + n, status);
+    put16(f + n + 2, param);
+    put16(f + n + 4, timeout);
+    return n + 6;
+}
+
 /* --- reading the AP ---------------------------------------------------------------- */
 
 static void legacy_rates(const u8 *e, u32 n, u32 *mask)
@@ -204,6 +236,7 @@ void wl_parse_ap(const u8 *ies, u32 length, WL_AP_IES *ap)
     ap->ht_sgi20 = ap->ht_sgi40 = ap->vht_sgi80 = 0;
     ap->ampdu_factor = 0;
     ap->ampdu_density = 0;
+    ap->rx_ldpc = ap->rx_stbc = 0;
     for (at = 0; at + 2 <= length; at += 2 + ies[at + 1]) {
         const u8 *e = ies + at + 2;
         u32 n = ies[at + 1];
@@ -223,6 +256,8 @@ void wl_parse_ap(const u8 *ies, u32 length, WL_AP_IES *ap)
                 ap->ampdu_factor = e[2] & 3;
                 ap->ampdu_density = (e[2] >> 2) & 7;
                 ap->ht_mcs = (u16)(e[3] | e[4] << 8);
+                ap->rx_ldpc |= e[0] & 1;
+                ap->rx_stbc |= (e[1] & 3) != 0;
             }
             break;
         case IE_HT_OP:
@@ -238,6 +273,8 @@ void wl_parse_ap(const u8 *ies, u32 length, WL_AP_IES *ap)
                 ap->vht = 1;
                 ap->vht_sgi80 = (e[0] >> 5) & 1;
                 ap->vht_mcs_map = (u16)le16(e + 4);
+                ap->rx_ldpc |= (e[0] >> 4) & 1;
+                ap->rx_stbc |= (e[1] & 7) != 0;
             }
             break;
         case IE_VHT_OP:
@@ -273,6 +310,8 @@ void wl_link_from_ap(const WL_BSS *bss, const WL_AP_IES *ap, WL_LINK_INFO *link)
     link->vht_mcs_map = ap->vht_mcs_map;
     link->ampdu_factor = ap->ampdu_factor;
     link->ampdu_density = ap->ampdu_density;
+    link->ldpc = ap->rx_ldpc;
+    link->stbc = ap->rx_stbc;
     link->bw = 0;
     link->primary = 0;
     link->sgi = ap->ht_sgi20;

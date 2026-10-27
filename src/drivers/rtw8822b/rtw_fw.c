@@ -67,3 +67,46 @@ u32 rtw_fw_send_phydm_info(RTW *r)
                        (r->st->rfe_option & 0xFF) | FW_RF_2T2R << 8 | (r->cut & 0xFF) << 16 |
                        3u << 24 | 3u << 28, 0);
 }
+
+/* --- commands through the mailboxes (rtw_fw_send_h2c_command) ------------------ */
+
+#define H2C_CMD_MEDIA_STATUS_RPT    0x01
+#define H2C_CMD_RA_INFO             0x40
+#define HMEBOX_STEP                 4               /* REG_HMEBOX0..3, _EX alike */
+
+/* One 8-byte command in the next of the four mailboxes, once the firmware has
+ * emptied it. */
+static u32 send_command(RTW *r, u32 w0, u32 w1)
+{
+    u32 box = r->h2c_box, i;
+
+    for (i = 0; i < 30; i++)                        /* 3 ms in rtw88 */
+        if (!((rtw_read8(r, REG_HMETFR) >> box) & 1))
+            break;
+    if (i == 30) {
+        r->st->h2c_busy++;
+        return STATUS_UNSUCCESSFUL;
+    }
+    rtw_write32(r, REG_HMEBOX0_EX + box * HMEBOX_STEP, w1);
+    rtw_write32(r, REG_HMEBOX0 + box * HMEBOX_STEP, w0);
+    r->h2c_box = (box + 1) & 3;
+    r->st->h2c_commands++;
+    return 0;
+}
+
+/* rtw_fw_media_status_report */
+u32 rtw_fw_media_status(RTW *r, u32 macid, u32 connected)
+{
+    return send_command(r, H2C_CMD_MEDIA_STATUS_RPT | (connected & 1) << 8 |
+                           (macid & 0xFF) << 16, 0);
+}
+
+/* rtw_fw_send_ra_info: the station's rates for the firmware to adapt over. */
+u32 rtw_fw_ra_info(RTW *r, u32 macid, u32 rate_id, u32 init_level, u32 sgi, u32 bw,
+                   u32 ldpc, u32 vht, u32 mask)
+{
+    return send_command(r, H2C_CMD_RA_INFO | (macid & 0xFF) << 8 | (rate_id & 0x1F) << 16 |
+                           (init_level & 3) << 21 | (sgi & 1) << 23 | (bw & 3) << 24 |
+                           (ldpc & 1) << 26 | (vht & 3) << 28 | 1u << 30, /* DIS_PT */
+                        mask);
+}
