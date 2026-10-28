@@ -310,6 +310,7 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
     }
     rtw_set_channel(r, center_of(link->channel, link->bw, link->primary), link->bw,
                     link->primary);
+    rtw_iqk(r);                         /* rtw88 does it before the first frames */
     for (i = 0; i < 6; i++)
         rtw_write8(r, PORT0_BSSID + i, link->bssid[i]);
     rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, NET_MGD_LINKED);

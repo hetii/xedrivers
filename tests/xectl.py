@@ -81,7 +81,7 @@ STRUCTS = {
                   "last_signal", "scans", "tx_frames", "tx_done", "tx_errors",
                   "tx_last_error", "tx_drops", "tx_full", "keys", "linked", "h2c_commands",
                   "h2c_busy", "ra_mask", "ra_rate_id", "ampdu", "rx_largest", "tx_padded",
-                  "tx_inflight_now"],
+                  "tx_inflight_now", "txpwr_ofdm6", "txpwr_vht2_mcs7", "iqk_runs", "iqk_ms"],
     "rtw_sta_stats": ["state", "scans", "probes", "auths", "auth_status", "assocs",
                       "assoc_status", "aid", "joins", "timeouts", "deauths",
                       "deauth_reason", "beacon_losses", "rx_data", "rx_eapol",
@@ -320,11 +320,12 @@ def status(sym):
                       r["rx_last_error"], r["rx_beacons"], r["rx_mgmt"], r["rx_data"],
                       sig, r["scans"]))
             print("rtw tx   frames=%d done=%d err=%d/%#x drops=%d full=%d keys=%d linked=%d "
-                  "h2c=%d busy=%d ra=%#x/%d ampdu=%d rx_largest=%d padded=%d inflight=%d" % (
+                  "h2c=%d busy=%d ra=%#x/%d ampdu=%d rx_largest=%d padded=%d inflight=%d txpwr=%#x/%#x iqk=%d/%dms" % (
                 r["tx_frames"], r["tx_done"], r["tx_errors"], r["tx_last_error"],
                 r["tx_drops"], r["tx_full"], r["keys"], r["linked"], r["h2c_commands"],
                 r["h2c_busy"], r["ra_mask"], r["ra_rate_id"], r["ampdu"], r["rx_largest"],
-                r["tx_padded"], r["tx_inflight_now"]))
+                r["tx_padded"], r["tx_inflight_now"], r["txpwr_ofdm6"], r["txpwr_vht2_mcs7"],
+                r["iqk_runs"], r["iqk_ms"]))
             if "rtw_sta_stats" in sym:
                 t = read_struct(sym, "rtw_sta_stats", i)
                 states = ["idle", "scanning", "probing", "auth", "assoc", "joined"]

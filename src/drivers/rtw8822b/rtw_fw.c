@@ -13,6 +13,7 @@
 #define H2C_PKT_CMD_ID      0xFF
 #define H2C_PKT_GENERAL_INFO 0x0D
 #define H2C_PKT_PHYDM_INFO  0x11
+#define H2C_PKT_IQK         0x0E
 #define FW_RF_2T2R          2
 #define RSVD_PG_FW_TXBUF    4                   /* RSVD_PG_FW_TXBUF_NUM */
 #define TXFF_PAGES          (262144 / 128)
@@ -66,6 +67,12 @@ u32 rtw_fw_send_phydm_info(RTW *r)
     return send_packet(r, H2C_PKT_PHYDM_INFO, 8,
                        (r->st->rfe_option & 0xFF) | FW_RF_2T2R << 8 | (r->cut & 0xFF) << 16 |
                        3u << 24 | 3u << 28, 0);
+}
+
+/* rtw_fw_do_iqk: neither clear nor segment, as rtw8822b_do_iqk asks. */
+u32 rtw_fw_iqk(RTW *r)
+{
+    return send_packet(r, H2C_PKT_IQK, 1, 0, 0);
 }
 
 /* --- commands through the mailboxes (rtw_fw_send_h2c_command) ------------------ */

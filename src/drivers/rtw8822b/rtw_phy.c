@@ -4,6 +4,7 @@
 
 #include "rtw.h"
 #include "rtw8822b_defs.h"
+#include "rtw8822b_txpwr.h"
 
 #define RFREG_MASK          0xFFFFFu
 #define MASKBYTE0           0x000000FFu
@@ -473,6 +474,135 @@ static void set_channel_rxdfir(RTW *r, u32 bw)
 
 /* rtw8822b_set_channel. `bw` 0 is 20 MHz, 1 40, 2 80; `primary` the 20 MHz
  * channel's place in the wider one (rtw88's RTW_SC_*), 0 at 20 MHz. */
+/* --- transmit power (phy.c's rtw_phy_set_tx_power_level) ------------------------
+ *
+ * Each rate's power index is the efuse's calibrated base for the path, the band's
+ * channel group and the bandwidth (rtw_phy_get_2g/5g_tx_power_index), plus the
+ * rate's offset from the chip's table for its RFE type (rtw8822b_txpwr.c). rtw88
+ * then takes the smaller of that offset and the regulatory limit for the channel;
+ * here there is no limit (the bench's rule: what the hardware gives). Indices go
+ * four to a register, 0x1D00 for path A and 0x1D80 for B
+ * (rtw8822b_set_tx_power_index_by_rate). */
+#define EFUSE_TXPWR         0x10        /* rtw8822b_efuse.txpwr_idx_table[4] */
+#define EFUSE_TXPWR_PATH    42          /* rtw_txpwr_idx: 18 bytes 2G, 24 bytes 5G */
+#define EFUSE_TXPWR_5G      18
+#define TXAGC_MAX           0x3F        /* max_power_index */
+#define RATE_MCS0           0x0C
+#define RATE_MCS8           0x14
+#define RATE_VHT1SS_MCS0    0x2C
+#define RATE_VHT2SS_MCS0    0x36
+
+/* A signed nibble of an efuse byte: the low one is the struct's first bit field. */
+static s32 nibble(u8 v, u32 high)
+{
+    s32 n = high ? v >> 4 : v & 15;
+
+    return n >= 8 ? n - 16 : n;
+}
+
+/* rtw_get_channel_group */
+static u32 channel_group(u32 ch, u32 rate)
+{
+    if (ch <= 14)
+        return ch <= 2 ? 0 : ch <= 5 ? 1 : ch <= 8 ? 2 : ch <= 11 ? 3 : ch <= 13 ? 4 :
+               rate <= 3 ? 5 : 4;
+    if (ch <= 42) return 0;
+    if (ch <= 50) return 1;
+    if (ch <= 58) return 2;
+    if (ch <= 64) return 3;
+    if (ch <= 106) return 4;
+    if (ch <= 114) return 5;
+    if (ch <= 122) return 6;
+    if (ch <= 130) return 7;
+    if (ch <= 138) return 8;
+    if (ch <= 144) return 9;
+    if (ch <= 155) return 10;
+    if (ch <= 161) return 11;
+    if (ch <= 171) return 12;
+    return 13;
+}
+
+static s32 base_index(const u8 *e, u32 ch, u32 bw, u32 rate)
+{
+    u32 group = channel_group(ch, rate);
+    u32 mcs = rate >= RATE_MCS0, two = (rate >= RATE_MCS8 && rate < RATE_VHT1SS_MCS0) ||
+              rate >= RATE_VHT2SS_MCS0;
+    s32 p;
+
+    if (ch <= 14) {                             /* rtw_phy_get_2g_tx_power_index */
+        p = rate <= 3 ? e[group] : e[6 + group];
+        if (rate >= 4 && rate < RATE_MCS0)
+            p += nibble(e[11], 0);
+        if (!mcs)
+            return p;
+        if (bw == 0)
+            p += nibble(e[11], 1) + (two ? nibble(e[12], 0) : 0);
+        else if (two)
+            p += nibble(e[12], 1);
+        return p;
+    }
+    e += EFUSE_TXPWR_5G;                        /* rtw_phy_get_5g_tx_power_index */
+    p = e[group];
+    if (!mcs)
+        return p + nibble(e[14], 0);
+    if (bw == 0)
+        return p + nibble(e[14], 1) + (two ? nibble(e[15], 0) : 0);
+    if (bw == 1)
+        return p + (two ? nibble(e[15], 1) : 0);
+    /* 80 MHz: the average of the two 40 MHz halves */
+    p = (e[group] + e[group + 1 < 14 ? group + 1 : group]) / 2;
+    return p + nibble(e[20], 1) + (two ? nibble(e[21], 1) : 0);
+}
+
+static void set_tx_power(RTW *r, u32 ch, u32 bw)
+{
+    static const u8 words[] = { 0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18,
+                                0x2C, 0x30, 0x34, 0x38, 0x3C };
+    s32 type = r->st->rfe_option < RTW8822B_RFE_MAX ?
+               rtw8822b_txpwr_type_of_rfe[r->st->rfe_option] : -1;
+    u32 path, w, i, rate, word;
+    s32 p;
+
+    if (type < 0)
+        type = 0;
+    for (path = 0; path < 2; path++) {
+        const u8 *e = r->efuse + EFUSE_TXPWR + path * EFUSE_TXPWR_PATH;
+        const s8 *offset = rtw8822b_txpwr_by_rate[type][ch > 14][path];
+
+        for (w = ch > 14 ? 1 : 0; w < sizeof(words); w++) {
+            word = 0;
+            for (i = 0; i < 4; i++) {
+                rate = words[w] + i;
+                p = base_index(e, ch, bw, rate) + offset[rate];
+                p = p < 0 ? 0 : p > TXAGC_MAX ? TXAGC_MAX : p;
+                word |= (u32)p << (i * 8);
+                if (path == 0 && rate == 0x04)
+                    r->st->txpwr_ofdm6 = (u32)p;
+                if (path == 0 && rate == RATE_VHT2SS_MCS0 + 7)
+                    r->st->txpwr_vht2_mcs7 = (u32)p;
+            }
+            rtw_write32(r, (path ? 0x1D80 : 0x1D00) + words[w], word);
+        }
+    }
+}
+
+/* rtw8822b_do_iqk: the firmware calibrates the paths' I/Q on the channel set, and
+ * says it is done by writing 0xABCDE to RF 0x08. Thread. */
+void rtw_iqk(RTW *r)
+{
+    u32 i;
+
+    rtw_fw_iqk(r);
+    for (i = 0; i < 300; i++) {
+        if (rtw_read_rf(r, RF_PATH_A, RF_DTXLOK, RFREG_MASK) == 0xABCDE)
+            break;
+        usb_sleep(20);
+    }
+    rtw_write_rf(r, RF_PATH_A, RF_DTXLOK, RFREG_MASK, 0x0);
+    r->st->iqk_ms = i * 20;
+    r->st->iqk_runs++;
+}
+
 void rtw_set_channel(RTW *r, u32 channel, u32 bw, u32 primary)
 {
     set_channel_bb(r, channel, bw, primary);
@@ -482,6 +612,7 @@ void rtw_set_channel(RTW *r, u32 channel, u32 bw, u32 primary)
     toggle_igi(r);
     set_channel_cca(r, channel, bw);
     set_channel_rfe(r, channel);
+    set_tx_power(r, channel, bw);
     r->channel = channel;
     r->st->channel = channel;
 }

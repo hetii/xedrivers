@@ -127,6 +127,10 @@ typedef struct {
     u32 rx_largest;             /* the longest receive transfer */
     u32 tx_padded;              /* transfers a byte longer, not to end on 512 */
     u32 tx_inflight_now;
+    u32 txpwr_ofdm6;            /* path A's power index at 6M, as last set */
+    u32 txpwr_vht2_mcs7;        /* and at VHT 2SS MCS7 */
+    u32 iqk_runs;
+    u32 iqk_ms;                 /* how long the firmware's calibration took */
 } RTW_STATS;
 
 extern volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
@@ -243,12 +247,14 @@ u32  rtw_phy_set_param(RTW *r);
 /* rtw8822b_set_channel: `bw` 0 20 MHz, 1 40, 2 80; `primary` RTW_SC_* of the
  * 20 MHz channel in it, 0 at 20 MHz. */
 void rtw_set_channel(RTW *r, u32 channel, u32 bw, u32 primary);
+void rtw_iqk(RTW *r);
 
 /* --- firmware commands (rtw_fw.c) -------------------------------------------------- */
 
 u32  rtw_fw_send_general_info(RTW *r);
 u32  rtw_fw_send_phydm_info(RTW *r);
 u32  rtw_fw_media_status(RTW *r, u32 macid, u32 connected);
+u32  rtw_fw_iqk(RTW *r);
 u32  rtw_fw_ra_info(RTW *r, u32 macid, u32 rate_id, u32 init_level, u32 sgi, u32 bw,
                     u32 ldpc, u32 vht, u32 mask);
 
