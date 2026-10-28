@@ -139,7 +139,8 @@ STRUCTS = {
     "tcp_stats": ["started", "step", "step_error", "accepts", "active", "refused",
                   "sent_lo", "sent_hi", "recv_lo", "recv_hi", "send_errors",
                   "recv_errors", "last_send_error", "last_recv_error", "sndbuf_result",
-                  "rcvbuf_result"],
+                  "rcvbuf_result", "flight_samples", "flight_kb_sum", "flight_max",
+                  "fh0", "fh1", "fh2", "fh3", "fh4", "fh5", "fh6", "fh7", "flight_resent"],
     "wl_bridge_stats": ["scans", "joins", "missed", "secured"],
     "wl_omni_stats": ["registered", "attached", "present", "link", "gets", "sets",
                       "unknown_gets", "unknown_sets", "last_unknown", "scans", "joins",
@@ -514,6 +515,10 @@ def status(sym):
         ts["last_recv_error"]))
     print("tcp opts sndbuf_result=%#x rcvbuf_result=%#x" % (ts["sndbuf_result"],
                                                            ts["rcvbuf_result"]))
+    if "flight_samples" in ts and ts["flight_samples"]:
+        print("tcp flight on 5201: avg %d KB, max %d B, resent %d, by 16 KB: %s" % (
+            ts["flight_kb_sum"] // ts["flight_samples"], ts["flight_max"], ts["flight_resent"],
+            " ".join(str(ts["fh%d" % k]) for k in range(8))))
 
 
 def omni_log(sym):

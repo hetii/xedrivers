@@ -359,3 +359,76 @@ u32 tcp_start(void)
     tcp_stats.started = 1;
     return TCP_OK;
 }
+
+/* --- bytes in flight on the send port ---------------------------------------
+ *
+ * Seen from the console, which a capture on the PC cannot do: the highest
+ * sequence number the console has sent on PORT_SOURCE against the last ACK it
+ * received. One connection at a time is what this is for. */
+
+static volatile u32 flight_top, flight_ack, flight_valid;
+
+static u32 be32(const u8 *p)
+{
+    return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3];
+}
+
+/* The TCP header of an Ethernet IPv4 frame, its payload length in *payload. */
+static const u8 *tcp_of(const u8 *f, u32 length, u32 *payload)
+{
+    u32 ihl, total, off;
+
+    if (length < 54 || f[12] != 0x08 || f[13] != 0x00 || f[23] != 6)
+        return 0;
+    ihl = (u32)(f[14] & 15) * 4;
+    total = (u32)f[16] << 8 | f[17];
+    if (ihl < 20 || 14 + ihl + 20 > length)
+        return 0;
+    off = (u32)(f[14 + ihl + 12] >> 4) * 4;
+    *payload = total > ihl + off ? total - ihl - off : 0;
+    return f + 14 + ihl;
+}
+
+void tcp_flight_out(const u8 *frame, u32 length)
+{
+    u32 payload, top, flight, kb;
+    const u8 *t = tcp_of(frame, length, &payload);
+
+    if (!t || ((u32)t[0] << 8 | t[1]) != PORT_SOURCE || !payload)
+        return;
+    top = be32(t + 4) + payload;
+    if (flight_valid && (s32)(top - flight_top) <= 0) {
+        tcp_stats.flight_resent++;
+        return;
+    }
+    if (!flight_valid) {
+        flight_ack = be32(t + 4);
+        flight_valid = 1;
+    }
+    flight_top = top;
+    flight = top - flight_ack;
+    if (flight > 0x1000000)
+        return;
+    kb = flight >> 10;
+    tcp_stats.flight_samples++;
+    tcp_stats.flight_kb_sum += kb;
+    if (flight > tcp_stats.flight_max)
+        tcp_stats.flight_max = flight;
+    tcp_stats.flight_hist[kb >= 112 ? 7 : kb / 16]++;
+}
+
+void tcp_flight_in(const u8 *frame, u32 length)
+{
+    u32 payload, ack;
+    const u8 *t = tcp_of(frame, length, &payload);
+
+    if (!t || ((u32)t[2] << 8 | t[3]) != PORT_SOURCE || !(t[13] & 0x10))
+        return;
+    if (t[13] & 0x02) {                     /* a new connection's SYN */
+        flight_valid = 0;
+        return;
+    }
+    ack = be32(t + 8);
+    if (flight_valid && (s32)(ack - flight_ack) > 0)
+        flight_ack = ack;
+}

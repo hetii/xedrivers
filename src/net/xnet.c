@@ -202,6 +202,7 @@ static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
     }
 
     xnet_stats.xmit_usb++;
+    bench_frame_out((const u8 *)frame, length);
     net_txq_put(&xq, user, frame, length, cookie);
 }
 
@@ -258,6 +259,7 @@ static void deliver(const u8 *frame, u32 length)
         return;
     }
     xnet_stats.rx_delivered++;
+    bench_frame_in(frame, length);
     cb(ctx, (void *)frame, length, xnet_rx_iface, dest);
 }
 

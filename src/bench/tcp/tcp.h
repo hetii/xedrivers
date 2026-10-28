@@ -36,6 +36,11 @@ extern volatile u32 tcp_prio;       /* absolute thread priority, 0 = leave it */
  * step that failed; calling it again after success does nothing. */
 u32 tcp_start(void);
 
+/* Every frame xnet sends and receives (bench_frame_out/in): the send port's
+ * bytes in flight. Any IRQL. */
+void tcp_flight_out(const u8 *frame, u32 length);
+void tcp_flight_in(const u8 *frame, u32 length);
+
 enum {
     TCP_OK = 0,
     TCP_ERR_POOL = 1,
@@ -62,6 +67,13 @@ typedef struct {
     u32 last_recv_error;
     u32 sndbuf_result;      /* 0, or WSAGetLastError() if setsockopt failed */
     u32 rcvbuf_result;
+    /* What the console has sent on PORT_SOURCE and not yet seen acknowledged,
+     * sampled at every data segment it sends (tcp_flight_out). */
+    u32 flight_samples;
+    u32 flight_kb_sum;          /* of the samples, in KB */
+    u32 flight_max;             /* bytes */
+    u32 flight_hist[8];         /* samples by 16 KB: 0-16, 16-32, ... 112 and up */
+    u32 flight_resent;          /* data segments at or below the highest sent */
 } TCP_STATS;
 
 extern volatile TCP_STATS tcp_stats;

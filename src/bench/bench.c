@@ -121,3 +121,23 @@ BENCH_RX bench_mode(u32 mode)
     (void)mode;
     return 0;
 }
+
+void bench_frame_out(const u8 *frame, u32 length)
+{
+#if XE_TCP
+    tcp_flight_out(frame, length);
+#else
+    (void)frame;
+    (void)length;
+#endif
+}
+
+void bench_frame_in(const u8 *frame, u32 length)
+{
+#if XE_TCP
+    tcp_flight_in(frame, length);
+#else
+    (void)frame;
+    (void)length;
+#endif
+}
