@@ -157,6 +157,29 @@ static void xq_drain(void)
     net_txq_drain(&xq);
 }
 
+/* Frames waiting and none leaving for XQ_STALL_TICKS of the worker: the uplink
+ * takes nothing (a card that refuses frames without having any transfer out), and
+ * everything xnet sends -- to the onboard port too -- would wait behind them. Says
+ * so once; net.c then takes the uplink's link down and xnet falls back. Thread. */
+#define XQ_STALL_TICKS  60              /* ~2 s */
+
+u32 xnet_tick_stalled(void)
+{
+    static u32 seen_head, quiet;
+    u32 head = xq.head, tail = xq.tail;
+
+    if (!xnet_stats.enabled || head == tail || head != seen_head) {
+        seen_head = head;
+        quiet = 0;
+        return 0;
+    }
+    if (++quiet != XQ_STALL_TICKS)
+        return 0;
+    xnet_stats.xq_stalls++;
+    xnet_stats.xq_stall_depth = (tail + NET_TXQ_SIZE - head) % NET_TXQ_SIZE;
+    return 1;
+}
+
 /* xam -> NicXmit(user, queue, frame, length, cookie). Queue for the card when this
  * is our user and the card has a link; otherwise the kernel's own EMAC path. */
 static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,

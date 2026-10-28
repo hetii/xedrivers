@@ -470,6 +470,8 @@ void net_tick(void)
         if (nd->drv && nd->drv->tick && nd->st->ready)
             nd->drv->tick(nd);
     }
+    if (xnet_tick_stalled() && uplink())
+        net_link_report(uplink(), 0);
 }
 
 /* A driver's own command goes to the uplink's driver if it answers it, else to the

@@ -58,10 +58,15 @@ typedef struct {
     u32 rcvbuf_after;       /* and as set from xnet_rcvbuf_kb */
     u32 sndbuf_before;
     u32 sndbuf_after;       /* from xnet_sndbuf_kb, 0 if left */
+    u32 xq_stalls;          /* times the uplink took nothing for ~2 s */
+    u32 xq_stall_depth;     /* frames waiting the last time */
 } XNET_STATS;
 
 extern volatile u32 xnet_rx_iface;
 
 extern volatile XNET_STATS xnet_stats;
+
+/* The worker's check that the transmit queue moves: 1 once when it has stalled. */
+u32 xnet_tick_stalled(void);
 
 #endif /* XE_XNET_H */
