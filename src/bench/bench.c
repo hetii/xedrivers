@@ -43,6 +43,8 @@ void bench_init(void)
 void bench_tick(u32 tick)
 {
     PROF_STAMP();
+    if (!(tick % 30))
+        bench_trace(".");               /* the worker is alive */
 #if XE_BENCH_HISTORY
     history_tick(tick);
 #endif
@@ -139,5 +141,27 @@ void bench_frame_in(const u8 *frame, u32 length)
 #else
     (void)frame;
     (void)length;
+#endif
+}
+
+/* The kernel UART: transmit data at 0x7FEA1014 (the character in the top byte),
+ * status at 0x7FEA1018 (0x02000000: room to send), 115200 baud as the kernel set
+ * it up. Read live over the plugin's peek and checked by sending "XEDR" to
+ * `xerunner flash read-uart`. */
+#define UART_DATA   ((volatile u32 *)0x7FEA1014u)
+#define UART_STATUS ((volatile u32 *)0x7FEA1018u)
+
+void bench_trace(const char *mark)
+{
+#if XE_BENCH_DEBUG
+    u32 spin;
+
+    for (; *mark; mark++) {
+        for (spin = 0; spin < 20000 && !(*UART_STATUS & 0x02000000u); spin++)
+            ;
+        *UART_DATA = (u32)(u8)*mark << 24;
+    }
+#else
+    (void)mark;
 #endif
 }

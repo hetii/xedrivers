@@ -10,6 +10,7 @@
  */
 
 #include "station.h"
+#include "bench.h"
 #include "frames.h"
 #include "wpa.h"
 
@@ -177,6 +178,7 @@ static u32 card_scan(void *context)
 
 static void link_down(WL_STA *s)
 {
+    bench_trace("[link down]");
     wl_sta_ba_reset(s);
     s->port_open = 0;
     s->pairwise_set = 0;
@@ -304,6 +306,7 @@ static void send_assoc(WL_STA *s)
 
 static void joined(WL_STA *s)
 {
+    bench_trace("[joined]");
     WL_AP_IES ap;
     u32 i;
 
@@ -400,6 +403,7 @@ void wl_sta_tick(WL_STA *s)
             step_to(s, WL_STA_IDLE);
         } else if (++s->last_beacon > LOSS_TICKS) {
             s->st->beacon_losses++;
+            bench_trace("[beacon loss]");
             link_down(s);
             step_to(s, WL_STA_IDLE);
         }

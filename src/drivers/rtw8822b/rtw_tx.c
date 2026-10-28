@@ -11,6 +11,7 @@
 
 #include "rtw.h"
 #include "prof.h"
+#include "bench.h"
 
 #define DESC_RATE1M         0x00
 #define DESC_RATE6M         0x04
@@ -107,6 +108,8 @@ static void tx_done(URB *urb, u32 status)
         r->st->tx_last_error = status;
     } else {
         r->st->tx_done++;
+        if (!(r->st->tx_done & 4095))
+            bench_trace("t");
     }
     /* what joined while this endpoint was busy goes now */
     irql = KfAcquireSpinLock(&r->tx_lock);

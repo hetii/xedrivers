@@ -12,11 +12,13 @@
 
 #include "rtw.h"
 #include "prof.h"
+#include "bench.h"
 
 #define RX_DESC_SIZE    24
 #define FCS_LEN         4
 #define MPDU_MAX        11454           /* IEEE80211_MAX_MPDU_LEN_VHT_11454 */
 #define DESC_RATE_MAX   0x54
+#define RX_RETRIES      4               /* failed completions in a row before a transfer stays out */
 
 static u32 le32(const u8 *p)
 {
@@ -42,15 +44,39 @@ static void rx_done(URB *urb, u32 status)
     u8 *b = r->rx_buf[i];
     PROF_START(t);
 
-    if (!r->rx_running || !r->dev->active)
-        return;
-    if (!NT_SUCCESS(status)) {
-        r->st->rx_errors++;
-        r->st->rx_last_error = status;
-        submit(r, i);
+    if (!r->rx_running || !r->dev->active) {
+        bench_trace("x");               /* a transfer of the card that was */
         return;
     }
+    if (!NT_SUCCESS(status)) {
+        /* Queued again at once, a transfer the endpoint refuses comes back at
+         * once, and the USB processor does nothing else from then on: after a
+         * few in a row it stays out, and the watchdog resets the card. */
+        r->st->rx_errors++;
+        r->st->rx_last_error = status;
+        if (r->st->rx_errors <= 8) {
+            static char mark[] = "[E 00000000 a00000]";
+            static const char hex[] = "0123456789abcdef";
+            u32 k;
+
+            for (k = 0; k < 8; k++)
+                mark[3 + k] = hex[(status >> (28 - 4 * k)) & 15];
+            for (k = 0; k < 5; k++)
+                mark[13 + k] = hex[(urb->Actual >> (16 - 4 * k)) & 15];
+            bench_trace(mark);
+        }
+        if (++r->rx_failing[i] < RX_RETRIES) {
+            submit(r, i);
+        } else {
+            __sync_fetch_and_add(&r->rx_parked, 1);
+            bench_trace("[rx parked]");
+        }
+        return;
+    }
+    r->rx_failing[i] = 0;
     r->st->rx_transfers++;
+    if (!(r->st->rx_transfers & 4095))
+        bench_trace("r");
     if (urb->Actual > r->st->rx_largest)
         r->st->rx_largest = urb->Actual;
     while (at + RX_DESC_SIZE <= urb->Actual) {
@@ -114,7 +140,11 @@ void rtw_rx_start(RTW *r)
 {
     u32 i;
 
+    bench_trace("[rx start]");
     rx_aggregation(r);
+    for (i = 0; i < RTW_RX_COUNT; i++)
+        r->rx_failing[i] = 0;
+    r->rx_parked = 0;
     r->rx_running = 1;
     mem_sync();
     for (i = 0; i < RTW_RX_COUNT; i++)

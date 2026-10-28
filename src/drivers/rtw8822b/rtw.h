@@ -132,6 +132,7 @@ typedef struct {
     u32 iqk_runs;
     u32 iqk_ms;                 /* how long the firmware's calibration took */
     u32 tx_stalls;              /* links dropped: transfers out, none completing */
+    u32 rx_stalls;              /* card resets: no receive transfer for ~2 s */
     u32 stall_inflight;         /* at the last stall: slots taken, */
     u32 stall_ep_busy;          /* transfers out on the low endpoint, */
     u32 stall_open;             /* frames in its open transfer */
@@ -172,6 +173,10 @@ typedef struct RTW {
     u8 *rx_buf[RTW_RX_COUNT];
     URB rx_urb[RTW_RX_COUNT];
     volatile u32 rx_running;
+    u32 rx_failing[RTW_RX_COUNT];       /* errors in a row on each transfer */
+    volatile u32 rx_parked;             /* transfers left unqueued after too many */
+    u32 rx_seen;                        /* the watchdog's last rx_transfers */
+    u32 rx_quiet;
 
     u32 scan_index;             /* the channel being listened on, while scanning */
     u32 scan_ticks;

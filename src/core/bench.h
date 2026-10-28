@@ -42,6 +42,10 @@ BENCH_RX bench_mode(u32 mode);
  * (the omni probe). Asked on every link poll. */
 u32    bench_wired_hidden(void);
 
+/* A short mark on the console's UART (bench=debug), for what a hang leaves no
+ * other trace of: read with `xerunner flash read-uart`. Any IRQL. */
+void   bench_trace(const char *mark);
+
 /* Every frame xnet sends through the card, and every one handed up to it. */
 void   bench_frame_out(const u8 *frame, u32 length);
 void   bench_frame_in(const u8 *frame, u32 length);
@@ -56,6 +60,7 @@ static inline u32    bench_command(u32 what, volatile u32 *args)
 }
 static inline BENCH_RX bench_mode(u32 mode) { (void)mode; return 0; }
 static inline u32    bench_wired_hidden(void) { return 0; }
+static inline void   bench_trace(const char *mark) { (void)mark; }
 static inline void   bench_frame_out(const u8 *frame, u32 length) { (void)frame; (void)length; }
 static inline void   bench_frame_in(const u8 *frame, u32 length) { (void)frame; (void)length; }
 #endif
