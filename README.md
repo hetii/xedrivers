@@ -9,6 +9,43 @@ network stack in place of its onboard port. Built on Linux with nothing but
 `gcc-powerpc-linux-gnu` and `python3`: the ordinals and the packer are in `kit/`,
 copied from xerunner.
 
+## Cards and speeds
+
+Every card measured the same way: the console on the home router (OpenWrt
+ZBT-WE1326; Wi-Fi on 5 GHz channel 36 VHT80, a metre away), the PC wired to it at
+1 Gbit/s. "TCP RAM" is the plugin's own server (`src/bench/tcp`, `tests/tcpbench.py`,
+10 s a run), RAM to RAM with no disk; "FTP" is ftpdll, 64 MB to and from `Hdd1:`.
+Each figure is the range of three or more runs, in MB/s.
+
+| # | card | VID:PID | test | console -> PC | PC -> console |
+|---|---|---|---|---|---|
+| 1 | Realtek RTL8156B, 2.5G Ethernet | `0bda:8156` | TCP RAM, 1-4 streams | 21.8-22.0 | 26.8-27.0 |
+| 2 | Realtek RTL8156B, 2.5G Ethernet | `0bda:8156` | FTP 64 MB | 19.6-19.7 | 20.5 |
+| 3 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 1 stream | 12.9-13.0 | 7.7-8.2 |
+| 4 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 4 streams | 17.5-17.8 | 13.0-13.7 |
+| 5 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | FTP 64 MB | 10.8 | 11.2 |
+| 6 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 1 stream | 10.8-11.3 | 5.5-5.7 |
+| 7 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 4 streams | 16.7-16.9 | 14.6-14.8 |
+| 8 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | FTP 64 MB | 10.6-10.7 | 11.4-11.5 |
+
+What a repeated run that came out lower was, so that none of it is taken for a
+regression:
+
+- **RTL8156B at 19.5 / 23.4 (or 18.3 / 21.6)**: an AIC8800 was plugged into the
+  same USB host controller and shared its bandwidth. With the RTL8156B alone the
+  same build is back at rows 1-2.
+- **AIC8800D80 four streams out of the console at 0**: the card drops off the
+  router after minutes of sustained sending ("disconnected due to excessive
+  missing ACKs"), whatever card, port, channel or cooling. That is open. The
+  RTL8822BU on the same router ran the same load for 20 minutes (16.6-17.4 MB/s,
+  41 rounds) without one disconnect, so the router and the air are not the cause.
+- **Wi-Fi into the console with one stream** is bound by the console's TCP window
+  (17.5 KB) over the radio's round trip, not by the driver. With
+  `xectl.py set tcp_rcvbuf 0xffff` the RTL8822BU carries 11.7-12.6 with one stream
+  and 17.6-18.1 with four. Inbound figures of 15-16 MB/s for the AIC8800 came from
+  that setting, not from the default. Why the RTL8822BU's single stream sits
+  below the AIC8800's at the same window (5.6 against 8) is not measured yet.
+
 ## What it does
 
 The card is switched into its CDC-ECM configuration, where its own firmware runs the
