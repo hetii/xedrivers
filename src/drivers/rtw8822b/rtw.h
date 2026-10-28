@@ -91,6 +91,7 @@ typedef struct {
     u32 bulk_out;
     u32 bulk_errors;
     u32 bulk_last_error;
+    u32 bulk_late;              /* bulk writes refused: the last one still out */
     u32 rfe_option;
     u32 crystal_cap;
     u32 mac_lo;                 /* the efuse's address, bytes 0-3 */

@@ -6,6 +6,7 @@
  */
 
 #include "rtw.h"
+#include "bench.h"
 
 #define H2C_PKT_SIZE        32
 #define H2C_PKT_HDR_SIZE    8
@@ -87,6 +88,7 @@ static u32 send_command(RTW *r, u32 w0, u32 w1)
 {
     u32 box = r->h2c_box, i;
 
+    bench_where('B');
     for (i = 0; i < 30; i++)                        /* 3 ms in rtw88 */
         if (!((rtw_read8(r, REG_HMETFR) >> box) & 1))
             break;

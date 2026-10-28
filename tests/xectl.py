@@ -73,7 +73,7 @@ STRUCTS = {
     "rtw_stats": ["step", "step_status", "chip_version", "cut", "reg_reads", "reg_writes",
                   "reg_errors", "reg_last_error", "reg_last_address", "fw_size",
                   "fw_version", "fw_h2c_version", "fw_ctrl", "poll_timeouts",
-                  "last_poll_address", "bulk_out", "bulk_errors", "bulk_last_error",
+                  "last_poll_address", "bulk_out", "bulk_errors", "bulk_last_error", "bulk_late",
                   "rfe_option", "crystal_cap", "mac_lo", "mac_hi", "out_ep0", "out_ep1",
                   "out_ep2", "out_ep3", "in_ep", "int_ep", "channel", "h2c_packets",
                   "rx_transfers", "rx_frames", "rx_bad", "rx_c2h", "rx_crc_errors",

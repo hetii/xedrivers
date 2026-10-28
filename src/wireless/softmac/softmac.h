@@ -140,6 +140,7 @@ typedef struct {
     u8  rsn[32];
     u32 rsn_len;
     volatile u32 port_open;
+    u32 ready_pending;          /* the handshake finished before joined(): 1 failed, 2 ok */
     volatile u32 pairwise_set;
     volatile u32 last_beacon;   /* worker ticks since its last beacon */
     WL_LINK_INFO link;

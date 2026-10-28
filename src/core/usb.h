@@ -95,6 +95,7 @@ typedef struct {
     u32 reset_status;
     u32 unbound_resets;     /* nodes no driver had, reset to be offered again */
     u32 no_slot;            /* devices refused: USB_MAX_DEVICES already owned */
+    u32 control_late;       /* control requests refused: the last one still out */
 } USB_STATS;
 
 extern volatile USB_STATS usb_stats;

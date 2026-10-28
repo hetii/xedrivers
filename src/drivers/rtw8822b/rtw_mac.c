@@ -3,6 +3,7 @@
  */
 
 #include "rtw.h"
+#include "bench.h"
 #include "file.h"
 #include "rtw8822b_defs.h"
 
@@ -378,11 +379,13 @@ static u32 load_file(RTW *r)
     void *f = file_open(RTW_FW_FILE);
     u32 n, got = 0;
 
+    bench_trace("[fw file]");
     if (!f)
         return 0;
     while (got < RTW_FW_MAX && (n = file_read(f, r->fw + got, RTW_FW_MAX - got, got)) != 0)
         got += n;
     file_close(f);
+    bench_trace("[fw read]");
     return got;
 }
 

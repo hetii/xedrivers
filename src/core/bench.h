@@ -46,6 +46,12 @@ u32    bench_wired_hidden(void);
  * other trace of: read with `xerunner flash read-uart`. Any IRQL. */
 void   bench_trace(const char *mark);
 
+/* Where the worker is, one letter, for a receive completion to print every so
+ * often (bench=debug): it goes on while the worker is stuck, and stops with it
+ * only if the processor that runs completions is stuck too. */
+void   bench_where(char step);
+void   bench_where_mark(void);
+
 /* Every frame xnet sends through the card, and every one handed up to it. */
 void   bench_frame_out(const u8 *frame, u32 length);
 void   bench_frame_in(const u8 *frame, u32 length);
@@ -61,6 +67,8 @@ static inline u32    bench_command(u32 what, volatile u32 *args)
 static inline BENCH_RX bench_mode(u32 mode) { (void)mode; return 0; }
 static inline u32    bench_wired_hidden(void) { return 0; }
 static inline void   bench_trace(const char *mark) { (void)mark; }
+static inline void   bench_where(char step) { (void)step; }
+static inline void   bench_where_mark(void) { }
 static inline void   bench_frame_out(const u8 *frame, u32 length) { (void)frame; (void)length; }
 static inline void   bench_frame_in(const u8 *frame, u32 length) { (void)frame; (void)length; }
 #endif

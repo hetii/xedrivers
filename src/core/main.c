@@ -145,6 +145,7 @@ static void worker(void *parameter)
         if (!owned() && xe_state.claim_attempts < 6 &&
             (tick == 50 || (tick > 50 && tick % 250 == 0))) {
             xe_state.claim_attempts++;
+            bench_trace("[claim]");
             if (usb_claim_present())
                 xe_state.claim_found++;
         }
@@ -154,10 +155,13 @@ static void worker(void *parameter)
 
             if (dev->active && dev->generation != seen_generation[i]) {
                 seen_generation[i] = dev->generation;
+                bench_trace("[bring up]");
                 net_bring_up(dev);
             }
         }
+        bench_where('n');
         net_tick();
+        bench_where('.');
 
         what = xe_cmd[0];
         if (what) {
@@ -167,7 +171,9 @@ static void worker(void *parameter)
             xe_cmd[6] = what;
             xe_cmd[4] = xe_cmd[4] + 1;
         }
+        bench_where('z');
         usb_wait(20);
+        bench_where('a');
     }
 }
 

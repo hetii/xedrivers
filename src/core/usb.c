@@ -164,6 +164,17 @@ u32 usb_control(USB_DEV *dev, const u8 setup[8], void *buffer, u32 length,
 
     if (!dev->active || !dev->control)
         return STATUS_UNSUCCESSFUL;
+    /* A request that timed out is still the host controller's: preparing the same
+     * request again would rewrite one the controller holds on its lists (and the
+     * buffer it may still fill), which wrecks them. Wait for it a while longer;
+     * if it does not come back, refuse rather than touch it. */
+    for (waited = 0; dev->control_urb.Busy; waited++) {
+        if (waited >= timeout_ms) {
+            usb_stats.control_late++;
+            return STATUS_UNSUCCESSFUL;
+        }
+        usb_wait(1);
+    }
 
     dev->control_done = 0;
     usb_prepare(&dev->control_urb, dev, dev->control, control_complete, buffer, length,

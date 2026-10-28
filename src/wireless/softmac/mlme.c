@@ -80,6 +80,17 @@ static void wpa_ready(void *context, u32 ok)
 {
     WL_STA *s = (WL_STA *)context;
 
+    /* The handshake's first message is taken as soon as the association answer
+     * is in, so the keys can be settled before the worker has run joined(): the
+     * port then opens there, once the card is set for the link. Opened before,
+     * xnet moved to the card, the title's traffic started, and set_link changed
+     * channel width and ran the firmware's calibration under it -- the card
+     * wedged, and with it everything xnet sent (one boot in ~17). */
+    if (s->state != WL_STA_JOINED) {
+        s->ready_pending = ok ? 2 : 1;
+        bench_trace("[ready early]");
+        return;
+    }
     s->port_open = ok;
     s->st->port_open = ok;
     mem_sync();
@@ -296,6 +307,7 @@ static void send_assoc(WL_STA *s)
         host.key = wpa_key;
         host.ready = wpa_ready;
         host.context = s;
+        s->ready_pending = 0;
         wpa_begin(&host, s->own, s->bss.bssid, s->rsn, s->rsn_len);
     }
     s->got_assoc = 0;
@@ -306,6 +318,7 @@ static void send_assoc(WL_STA *s)
 
 static void joined(WL_STA *s)
 {
+    bench_where('J');
     bench_trace("[joined]");
     WL_AP_IES ap;
     u32 i;
@@ -323,8 +336,13 @@ static void joined(WL_STA *s)
     s->hw->set_link(s->hw->context, &s->link);
     s->st->joins++;
     step_to(s, WL_STA_JOINED);
-    if (!s->secured)
+    if (!s->secured) {
         wpa_ready(s, 1);
+    } else if (s->ready_pending) {
+        i = s->ready_pending == 2;
+        s->ready_pending = 0;
+        wpa_ready(s, i);
+    }
 }
 
 void wl_sta_tick(WL_STA *s)

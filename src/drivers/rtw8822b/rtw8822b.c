@@ -142,6 +142,7 @@ static u32 rtw8822b_start(NET_DEV *nd)
         !r->tx_buf[RTW_TX_COUNT - 1])
         return fail(r, RTW_STEP_DMA, 0);
 
+    bench_trace("[s:open]");
     step = rtw_usb_open(r);
     if (step)
         return fail(r, step, 0);
@@ -154,25 +155,31 @@ static u32 rtw8822b_start(NET_DEV *nd)
         return fail(r, RTW_STEP_CHIP, r->st->reg_last_error);
 
     /* rtw_chip_efuse_enable */
+    bench_trace("[s:power]");
     status = rtw_mac_power_on(r);
     if (status)
         return fail(r, RTW_STEP_POWER_ON, status);
     rtw_write8(r, REG_C2HEVT, C2H_HW_FEATURE_DUMP);
+    bench_trace("[s:fw]");
     step = rtw_download_firmware(r);
     if (step)
         return fail(r, step, 0);
 
+    bench_trace("[s:efuse]");
     status = rtw_parse_efuse_map(r);
     if (status)
         return fail(r, RTW_STEP_EFUSE, status);
 
     /* the rest of rtw_power_on */
+    bench_trace("[s:mac]");
     step = rtw_mac_init(r);
     if (step)
         return fail(r, step, 0);
+    bench_trace("[s:phy]");
     step = rtw_phy_set_param(r);
     if (step)
         return fail(r, step, 0);
+    bench_trace("[s:h2c]");
     rtw_fw_send_general_info(r);
     rtw_fw_send_phydm_info(r);
 
@@ -317,11 +324,14 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
         return;
     }
     bench_trace("[set_link");
+    bench_where('C');
     rtw_set_channel(r, center_of(link->channel, link->bw, link->primary), link->bw,
                     link->primary);
     bench_trace("c");
+    bench_where('Q');
     rtw_iqk(r);
-    bench_trace("i");                         /* rtw88 does it before the first frames */
+    bench_trace("i");
+    bench_where('H');                         /* rtw88 does it before the first frames */
     for (i = 0; i < 6; i++)
         rtw_write8(r, PORT0_BSSID + i, link->bssid[i]);
     rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, NET_MGD_LINKED);
@@ -348,6 +358,7 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
     r->ampdu_density = link->ampdu_density;
     r->st->linked = 1;
     bench_trace("]");
+    bench_where('L');
 }
 
 static void op_set_aggregation(void *c, u32 tid, u32 on)
@@ -439,10 +450,14 @@ static void rtw8822b_tick(NET_DEV *nd)
     if (!r || r->st->step != RTW_STEP_UP)
         return;
     r->st->tx_inflight_now = r->tx_inflight;
+    bench_where('k');
     tx_watchdog(r);
     rx_watchdog(r);
+    bench_where('m');
     r->link.mode->tick(&r->link);
+    bench_where('s');
     wl_sta_tick(&r->sta);
+    bench_where('w');
 }
 
 static u32 rtw8822b_command(NET_DEV *nd, u32 what, volatile u32 *args)

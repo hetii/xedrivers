@@ -165,3 +165,19 @@ void bench_trace(const char *mark)
     (void)mark;
 #endif
 }
+
+static volatile char where = '-';
+
+void bench_where(char step)
+{
+    where = step;
+}
+
+void bench_where_mark(void)
+{
+    char m[2];
+
+    m[0] = where;
+    m[1] = 0;
+    bench_trace(m);
+}

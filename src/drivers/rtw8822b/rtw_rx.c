@@ -75,8 +75,7 @@ static void rx_done(URB *urb, u32 status)
     }
     r->rx_failing[i] = 0;
     r->st->rx_transfers++;
-    if (!(r->st->rx_transfers & 4095))
-        bench_trace("r");
+
     if (urb->Actual > r->st->rx_largest)
         r->st->rx_largest = urb->Actual;
     while (at + RX_DESC_SIZE <= urb->Actual) {
