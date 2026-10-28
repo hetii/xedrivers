@@ -24,9 +24,9 @@ Each figure is the range of three or more runs, in MB/s.
 | 3 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 1 stream | 12.9-13.0 | 7.7-8.2 |
 | 4 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 4 streams | 17.5-17.8 | 13.0-13.7 |
 | 5 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | FTP 64 MB | 10.8 | 11.2 |
-| 6 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 1 stream | 10.8-11.3 | 5.5-5.7 |
-| 7 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 4 streams | 16.7-16.9 | 14.6-14.8 |
-| 8 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | FTP 64 MB | 10.6-10.7 | 11.4-11.5 |
+| 6 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 1 stream | 10.8-13.9 | 5.5-6.8 |
+| 7 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 4 streams | 16.7-18.9 | 14.6-18.3 |
+| 8 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | FTP 64 MB | 10.6-12.7 | 11.4-13.9 |
 
 What a repeated run that came out lower was, so that none of it is taken for a
 regression:
@@ -39,12 +39,16 @@ regression:
   missing ACKs"), whatever card, port, channel or cooling. That is open. The
   RTL8822BU on the same router ran the same load for 20 minutes (16.6-17.4 MB/s,
   41 rounds) without one disconnect, so the router and the air are not the cause.
+- **RTL8822BU, the low ends of rows 6-8**: one evening (10.8-11.3, 16.7 / 14.6,
+  FTP 10.6 / 11.4); the high ends the next morning. The same build gave the
+  morning's figures too, run for run the same day, so the difference is the air
+  (the neighbours' 5 GHz traffic), not the code.
 - **Wi-Fi into the console with one stream** is bound by the console's TCP window
   (17.5 KB) over the radio's round trip, not by the driver. With
-  `xectl.py set tcp_rcvbuf 0xffff` the RTL8822BU carries 11.7-12.6 with one stream
-  and 17.6-18.1 with four. Inbound figures of 15-16 MB/s for the AIC8800 came from
+  `xectl.py set tcp_rcvbuf 0xffff` the RTL8822BU carries 11.7-17.2 with one stream
+  and 17.6-21.6 with four. Inbound figures of 15-16 MB/s for the AIC8800 came from
   that setting, not from the default. Why the RTL8822BU's single stream sits
-  below the AIC8800's at the same window (5.6 against 8) is not measured yet.
+  below the AIC8800's at the same window (5.6-6.8 against 8) is not measured yet.
 
 ## What it does
 
