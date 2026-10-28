@@ -39,6 +39,10 @@ regression:
   missing ACKs"), whatever card, port, channel or cooling. That is open. The
   RTL8822BU on the same router ran the same load for 20 minutes (16.6-17.4 MB/s,
   41 rounds) without one disconnect, so the router and the air are not the cause.
+  Nor is this driver: both AIC8800D80 dongles on Linux PCs, with aicsemi's own
+  driver, against the same router, sent 60-115 Mbit/s for the first 30 s of a 20
+  minute upload and 0-1 Mbit/s for the rest, transmitting at VHT-MCS 0, and stayed
+  that slow after a pause. The card itself does not hold a sustained upload.
 - **RTL8822BU, the low ends of rows 6-8**: one evening (10.8-11.3, 16.7 / 14.6,
   FTP 10.6 / 11.4); the high ends the next morning. The same build gave the
   morning's figures too, run for run the same day, so the difference is the air
