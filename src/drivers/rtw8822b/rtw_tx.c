@@ -63,10 +63,8 @@ static u32 seal(RTW *r, u8 *b, u32 length, u32 frames)
         b[29] = (u8)(sum >> 8);
         r->st->tx_aggregated++;
     }
-    if (!(length & 511)) {
+    if (!(length & 511))
         b[length++] = 0;
-        r->st->tx_padded++;
-    }
     return length;
 }
 

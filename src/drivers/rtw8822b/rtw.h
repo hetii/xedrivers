@@ -126,7 +126,6 @@ typedef struct {
     u32 ra_rate_id;
     u32 ampdu;
     u32 rx_largest;             /* the longest receive transfer */
-    u32 tx_padded;              /* transfers a byte longer, not to end on 512 */
     u32 tx_inflight_now;
     u32 txpwr_ofdm6;            /* path A's power index at 6M, as last set */
     u32 txpwr_vht2_mcs7;        /* and at VHT 2SS MCS7 */

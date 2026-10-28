@@ -80,7 +80,7 @@ STRUCTS = {
                   "rx_errors", "rx_last_error", "rx_beacons", "rx_mgmt", "rx_data",
                   "last_signal", "scans", "tx_frames", "tx_done", "tx_errors",
                   "tx_last_error", "tx_drops", "tx_full", "keys", "linked", "h2c_commands",
-                  "h2c_busy", "ra_mask", "ra_rate_id", "ampdu", "rx_largest", "tx_padded",
+                  "h2c_busy", "ra_mask", "ra_rate_id", "ampdu", "rx_largest",
                   "tx_inflight_now", "txpwr_ofdm6", "txpwr_vht2_mcs7", "iqk_runs", "iqk_ms",
                   "tx_stalls", "stall_inflight", "stall_ep_busy", "stall_open",
                   "tx_transfers", "tx_aggregated"],
@@ -322,12 +322,12 @@ def status(sym):
                       r["rx_last_error"], r["rx_beacons"], r["rx_mgmt"], r["rx_data"],
                       sig, r["scans"]))
             print("rtw tx   frames=%d done=%d err=%d/%#x drops=%d full=%d keys=%d linked=%d "
-                  "h2c=%d busy=%d ra=%#x/%d ampdu=%d rx_largest=%d padded=%d inflight=%d txpwr=%#x/%#x iqk=%d/%dms "
+                  "h2c=%d busy=%d ra=%#x/%d ampdu=%d rx_largest=%d inflight=%d txpwr=%#x/%#x iqk=%d/%dms "
                   "transfers=%d aggregated=%d stalls=%d (inflight %d, low busy %d, open %d)" % (
                 r["tx_frames"], r["tx_done"], r["tx_errors"], r["tx_last_error"],
                 r["tx_drops"], r["tx_full"], r["keys"], r["linked"], r["h2c_commands"],
                 r["h2c_busy"], r["ra_mask"], r["ra_rate_id"], r["ampdu"], r["rx_largest"],
-                r["tx_padded"], r["tx_inflight_now"], r["txpwr_ofdm6"], r["txpwr_vht2_mcs7"],
+                r["tx_inflight_now"], r["txpwr_ofdm6"], r["txpwr_vht2_mcs7"],
                 r["iqk_runs"], r["iqk_ms"], r["tx_transfers"], r["tx_aggregated"],
                 r["tx_stalls"], r["stall_inflight"], r["stall_ep_busy"], r["stall_open"]))
             if "rtw_sta_stats" in sym:
