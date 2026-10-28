@@ -54,6 +54,10 @@ typedef struct {
     u32 xmit_dropped;       /* completed to xnet unsent: queue full or link gone */
     u32 xq_high;            /* the deepest the transmit queue has been */
     u32 link_fallback;      /* link polls answered with the EMAC's: card down */
+    u32 rcvbuf_before;      /* system sockets' default receive buffer, KB, as found */
+    u32 rcvbuf_after;       /* and as set from xnet_rcvbuf_kb */
+    u32 sndbuf_before;
+    u32 sndbuf_after;       /* from xnet_sndbuf_kb, 0 if left */
 } XNET_STATS;
 
 extern volatile u32 xnet_rx_iface;

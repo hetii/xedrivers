@@ -6,6 +6,7 @@
 #include "bench.h"
 #include "net.h"
 #include "txq.h"
+#include "file.h"
 
 volatile XNET_STATS xnet_stats;
 
@@ -270,6 +271,79 @@ static void link_changed(u32 up)
     notify_link();
 }
 
+/* --- socket buffers ----------------------------------------------------------- */
+
+/* xam's xnet keeps, per caller type, the socket buffer sizes a new socket starts
+ * with, in a 64-byte block at the xnet object + (caller + 109) * 64; the object is
+ * the context it gave the NIC for receive callbacks. A system application's
+ * (caller 2: XBDM, ftpdll, dashboard) default receive buffer is 16 KB, which
+ * xnet rounds to 17520 bytes on the wire, and with a 3 ms round trip over Wi-Fi
+ * that caps one TCP stream into the console at under 6 MB/s. Titles get 63 KB.
+ * xerunner: xnet-socket-buffer-defaults@1 */
+#define XNET_BLOCK(caller)      (((caller) + 109u) * 64u)
+#define XNET_SYSTEM             2u
+#define XNET_DEF_RCVBUF_KB      50u
+#define XNET_DEF_SNDBUF_KB      51u
+#define XNET_MAX_SNDBUF_KB      53u
+#define XNET_MAX_RCVBUF_KB      54u
+#define XNET_RCVBUF_STOCK       16u
+#define XNET_SETTINGS           "xedrivers.ini"
+
+/* A size in KB from `key =` in XNET_SETTINGS, `fallback` without one. */
+static u32 setting_kb(const char *key, u32 fallback)
+{
+    char value[8];
+    u32 n, i, kb = 0;
+
+    n = file_setting(XNET_SETTINGS, key, value, sizeof(value));
+    if (!n)
+        return fallback;
+    for (i = 0; i < n && value[i] >= '0' && value[i] <= '9'; i++)
+        kb = kb * 10 + (u32)(value[i] - '0');
+    return kb;
+}
+
+/* `xnet_rcvbuf_kb =` and `xnet_sndbuf_kb =` in XNET_SETTINGS: the default receive
+ * and send buffers of system sockets, in KB (at most 255); 0 or none leaves xnet's
+ * own. Above 63 the peer has to offer window scaling, which xnet then answers
+ * (shift 1 measured); 64 is refused, since a buffer of exactly 65536 makes xnet
+ * advertise a zero window. A send buffer above the largest allowed raises that
+ * too. Measured over the RTL8822BU: one TCP stream into the console 8.1 MB/s at
+ * 16 KB, 16.1 at 63, 18.4 at 128, 20.7 at 255; but what the open connections'
+ * windows add up to has to fit xnet's pool for system sockets -- 4 x 63 KB does,
+ * 8 x 63 or 4 x 96 KB stalls them and leaves that listener dead until a reboot.
+ * Sending is not limited by it (128 and 255 KB moved nothing), nor is ftpdll,
+ * which picks its own buffers, nor XBDM, whose listener exists before this runs
+ * and passes its 16 KB to what it accepts. Hence off unless asked for. Thread. */
+static void set_buffers(void)
+{
+    u8 *xnet = *(u8 **)((u8 *)title_user + USER_CTX_OFF);
+    u8 *block;
+    u32 kb;
+
+    if (!xnet || !MmIsAddressValid(xnet + XNET_BLOCK(XNET_SYSTEM) + 63))
+        return;
+    block = xnet + XNET_BLOCK(XNET_SYSTEM);
+    xnet_stats.rcvbuf_before = block[XNET_DEF_RCVBUF_KB];
+    xnet_stats.sndbuf_before = block[XNET_DEF_SNDBUF_KB];
+    /* only a block that looks like the one measured: 16 KB default, 255 KB most */
+    if (block[XNET_DEF_RCVBUF_KB] != XNET_RCVBUF_STOCK || block[XNET_MAX_RCVBUF_KB] != 255)
+        return;
+    kb = setting_kb("xnet_rcvbuf_kb", 0);
+    if (kb && kb != 64 && kb <= 255) {
+        block[XNET_DEF_RCVBUF_KB] = (u8)kb;
+        xnet_stats.rcvbuf_after = kb;
+    }
+    kb = setting_kb("xnet_sndbuf_kb", 0);
+    if (kb && kb != 64 && kb <= 255) {
+        if (kb > block[XNET_MAX_SNDBUF_KB])
+            block[XNET_MAX_SNDBUF_KB] = (u8)kb;
+        block[XNET_DEF_SNDBUF_KB] = (u8)kb;
+        xnet_stats.sndbuf_after = kb;
+    }
+    mem_sync();
+}
+
 /* --- enable / disable -------------------------------------------------------- */
 
 u32 xnet_enable(void)
@@ -292,6 +366,7 @@ u32 xnet_enable(void)
     if (!title_user)
         return XNET_ERR_NO_USER;
     xnet_stats.user = (u32)(unsigned long)title_user;
+    set_buffers();
 
     saved_xmit_lis = xmit[0];
     saved_xmit_addi = xmit[1];
