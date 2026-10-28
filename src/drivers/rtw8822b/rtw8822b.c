@@ -379,6 +379,29 @@ void rtw_rx_frame(RTW *r, u8 *frame, u32 length, s32 signal, u32 desc_w0)
                   ((desc_w0 >> 20) & 7) != 0 && !(desc_w0 & BIT(27)));
 }
 
+/* Transfers out and none completing for TX_STALL_TICKS: the card no longer sends
+ * (seen after a join, with beacons still coming in), so give the link up rather
+ * than leave xnet on a card that cannot answer. */
+#define TX_STALL_TICKS  60              /* ~2 s of 33 ms ticks */
+
+static void tx_watchdog(RTW *r)
+{
+    if (!r->st->linked || !r->tx_inflight || r->st->tx_done != r->tx_seen) {
+        r->tx_seen = r->st->tx_done;
+        r->tx_quiet = 0;
+        return;
+    }
+    if (++r->tx_quiet < TX_STALL_TICKS)
+        return;
+    r->tx_quiet = 0;
+    r->st->tx_stalls++;
+    r->st->stall_inflight = r->tx_inflight;
+    r->st->stall_ep_busy = r->tx_ep_busy[RTW_EP_LOW];
+    r->st->stall_open = r->tx_open[RTW_EP_LOW] == RTW_TX_COUNT ? 0 :
+                        r->tx_open_frames[RTW_EP_LOW];
+    wl_sta_lost(&r->sta);
+}
+
 static void rtw8822b_tick(NET_DEV *nd)
 {
     RTW *r = (RTW *)nd->priv;
@@ -386,6 +409,7 @@ static void rtw8822b_tick(NET_DEV *nd)
     if (!r || r->st->step != RTW_STEP_UP)
         return;
     r->st->tx_inflight_now = r->tx_inflight;
+    tx_watchdog(r);
     r->link.mode->tick(&r->link);
     wl_sta_tick(&r->sta);
 }

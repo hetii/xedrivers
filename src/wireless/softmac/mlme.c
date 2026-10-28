@@ -410,6 +410,18 @@ void wl_sta_tick(WL_STA *s)
     }
 }
 
+/* The card says the link is gone although beacons still come (its transmit path
+ * stopped): as a beacon loss, so the network goes back to another uplink and the
+ * station joins again. Thread. */
+void wl_sta_lost(WL_STA *s)
+{
+    if (s->state != WL_STA_JOINED)
+        return;
+    s->st->beacon_losses++;
+    link_down(s);
+    step_to(s, WL_STA_IDLE);
+}
+
 static void reorder_deliver(void *context, u8 *eth, u32 length)
 {
     WL_STA *s = (WL_STA *)context;

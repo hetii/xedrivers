@@ -10,6 +10,7 @@
  */
 
 #include "rtw.h"
+#include "prof.h"
 
 #define DESC_RATE1M         0x00
 #define DESC_RATE6M         0x04
@@ -74,6 +75,7 @@ static void tx_done(URB *urb, u32 status);
 static void submit(RTW *r, u32 slot, u32 length)
 {
     r->st->tx_transfers++;
+    PROF_MARK(r->tx_slot_urb[slot].Stamp);
     usb_prepare(&r->tx_slot_urb[slot], r->dev, r->ep_out[r->tx_slot_ep[slot]], tx_done,
                 r->tx_buf[slot], length, 0);
     r->tx_slot_urb[slot].Owner = r;
@@ -99,7 +101,9 @@ static void tx_done(URB *urb, u32 status)
 {
     RTW *r = (RTW *)urb->Owner;
     u32 slot = urb->Tag, ep = r->tx_slot_ep[slot], irql, next, length = 0;
+    PROF_START(t);
 
+    PROF_SINCE(tx_wait, urb->Stamp, urb->Length);
     if (!NT_SUCCESS(status)) {
         r->st->tx_errors++;
         r->st->tx_last_error = status;
@@ -119,6 +123,7 @@ static void tx_done(URB *urb, u32 status)
     __sync_fetch_and_sub(&r->tx_inflight, 1);
     if (r->nd)
         net_tx_done(r->nd);             /* what waited for a slot goes now */
+    PROF_END(tx_done, t, urb->Length);
 }
 
 static u32 take_slot(RTW *r)
@@ -187,10 +192,8 @@ static void fill(RTW *r, u8 *b, const u8 *head, u32 head_length, const u8 *body,
         sum ^= (u16)(b[i] | b[i + 1] << 8);
     b[28] = (u8)sum;
     b[29] = (u8)(sum >> 8);
-    for (i = 0; i < head_length; i++)
-        b[RTW_TX_DESC_SIZE + i] = head[i];
-    for (i = 0; i < body_length; i++)
-        b[RTW_TX_DESC_SIZE + head_length + i] = body[i];
+    xe_copy(b + RTW_TX_DESC_SIZE, head, head_length);
+    xe_copy(b + RTW_TX_DESC_SIZE + head_length, body, body_length);
 }
 
 static u32 endpoint_of(u32 flags, u32 tid)
@@ -233,7 +236,9 @@ u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_len
         r->tx_slot_ep[slot] = ep;
         if (r->tx_ep_busy[ep] < EP_DIRECT) {
             /* the endpoint keeps up: this frame alone, now */
+            PROF_START(c);
             fill(r, r->tx_buf[slot], head, head_length, body, body_length, flags, tid);
+            PROF_END(copy, c, length);
             now = slot;
             now_length = seal(r, r->tx_buf[slot], RTW_TX_DESC_SIZE + length, 1);
             r->tx_ep_busy[ep]++;
@@ -246,7 +251,11 @@ u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_len
     at = align8(r->tx_open_length[ep]);
     for (; r->tx_open_length[ep] < at; r->tx_open_length[ep]++)
         r->tx_buf[slot][r->tx_open_length[ep]] = 0;
-    fill(r, r->tx_buf[slot] + at, head, head_length, body, body_length, flags, tid);
+    {
+        PROF_START(c);
+        fill(r, r->tx_buf[slot] + at, head, head_length, body, body_length, flags, tid);
+        PROF_END(copy, c, length);
+    }
     r->tx_open_length[ep] = at + RTW_TX_DESC_SIZE + length;
     if (++r->tx_open_frames[ep] == RTW_TX_AGG)
         now = close_open(r, ep, &now_length);

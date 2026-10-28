@@ -181,5 +181,7 @@ u32  wl_sta_xmit(WL_STA *s, const u8 *eth, u32 length);
 
 /* Every worker tick. Thread. */
 void wl_sta_tick(WL_STA *s);
+/* The card's transmit path has stopped: drop the link as a beacon loss would. */
+void wl_sta_lost(WL_STA *s);
 
 #endif /* XE_WL_SOFTMAC_H */

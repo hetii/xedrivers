@@ -48,8 +48,8 @@
 #define RTW_EP_LOW          2                   /* best effort, background */
 #define RTW_OUT_MAX         4
 #define RTW_TX_COUNT        32
-#define RTW_TX_SLOT         6152        /* three descriptors and frames (RTW_TX_AGG), 8 to pad */
-#define RTW_TX_AGG          3           /* frames to a transfer: usb_tx_agg_desc_num */
+#define RTW_TX_SLOT         12296       /* six descriptors and frames (RTW_TX_AGG), 8 to pad */
+#define RTW_TX_AGG          6           /* frames to a transfer (usb_tx_agg_desc_num is 3) */
 #define RTW_RX_COUNT        8
 #define RTW_RX_SIZE         20480       /* rtw88 takes 32 KB; one EHCI qTD carries 20 */
 
@@ -132,6 +132,10 @@ typedef struct {
     u32 txpwr_vht2_mcs7;        /* and at VHT 2SS MCS7 */
     u32 iqk_runs;
     u32 iqk_ms;                 /* how long the firmware's calibration took */
+    u32 tx_stalls;              /* links dropped: transfers out, none completing */
+    u32 stall_inflight;         /* at the last stall: slots taken, */
+    u32 stall_ep_busy;          /* transfers out on the low endpoint, */
+    u32 stall_open;             /* frames in its open transfer */
     u32 tx_transfers;           /* bulk transfers that carried tx_frames */
     u32 tx_aggregated;          /* transfers of more than one frame */
 } RTW_STATS;
@@ -180,6 +184,8 @@ typedef struct RTW {
     volatile u32 tx_next;
     volatile u32 tx_inflight;           /* slots taken: in a transfer or being filled */
     volatile u32 tx_ready;
+    u32 tx_seen;                        /* the watchdog's last tx_done */
+    u32 tx_quiet;                       /* its ticks without one */
     KSPIN_LOCK tx_lock;                 /* the open aggregates and the counts by endpoint */
     u32 tx_slot_ep[RTW_TX_COUNT];
     u32 tx_ep_busy[RTW_OUT_MAX];        /* transfers out on each endpoint */

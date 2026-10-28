@@ -11,6 +11,7 @@
  */
 
 #include "rtw.h"
+#include "prof.h"
 
 #define RX_DESC_SIZE    24
 #define FCS_LEN         4
@@ -39,6 +40,7 @@ static void rx_done(URB *urb, u32 status)
     RTW *r = (RTW *)urb->Owner;
     u32 i = (u32)(urb - r->rx_urb), at = 0, w0, len, info, shift, skip;
     u8 *b = r->rx_buf[i];
+    PROF_START(t);
 
     if (!r->rx_running || !r->dev->active)
         return;
@@ -78,6 +80,7 @@ static void rx_done(URB *urb, u32 status)
         at += (skip + 7) & ~7u;
     }
     submit(r, i);
+    PROF_END(rx_done, t, urb->Actual);
 }
 
 static void submit(RTW *r, u32 i)
