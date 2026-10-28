@@ -56,7 +56,12 @@ typedef struct {
     volatile WL_REORDER_STATS *st;
     u32 drop_late;          /* behind the window is a duplicate (mac80211's rule, for
                              * a SoftMAC card), not a frame to hand up late (the
-                             * AIC8800's firmware's, as AICWF_RX_REORDER does) */
+                             * AIC8800's firmware's, as AICWF_RX_REORDER does); and
+                             * never a reason to move the window back: an AP that
+                             * repeats a whole aggregate whose block ack it missed
+                             * would otherwise drag it onto old numbers, the new
+                             * frames then waiting out the timeout (+8% in, 4 TCP
+                             * streams, without it) */
 } WL_REORDER;
 
 /* Once, before the first frame: the pool may be 0, and then nothing is held. */

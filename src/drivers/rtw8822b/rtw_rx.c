@@ -89,9 +89,15 @@ static void submit(RTW *r, u32 i)
 
 /* rtw_usb_dynamic_rx_agg_v1, enabled, with a threshold the receive buffers hold:
  * the chip closes a transfer once it passes 4 x 4 KB, so one frame more stays under
- * RTW_RX_SIZE (rtw88 takes 5 into 32 KB buffers). Thread. */
+ * RTW_RX_SIZE (rtw88 takes 5 into 32 KB buffers). The timeout is a quarter of
+ * rtw88's: what the chip waits before sending a short aggregate is in every round
+ * trip, and 8 against 0x20 took the median from 3.6 to 2.7 ms and one TCP stream in
+ * from 4.5 to 5.3 MB/s. Shorter ones (1, or no aggregation) are faster still, but
+ * under four streams the chip then stops sending on bulk IN within a minute, 141
+ * frames in its FIFO (REG_RXPKT_NUM) and all eight transfers queued; 8 held a 20
+ * minute soak both ways. Thread. */
 #define RX_AGG_PAGES    4
-#define RX_AGG_TIMEOUT  0x20
+#define RX_AGG_TIMEOUT  0x08
 
 static void rx_aggregation(RTW *r)
 {

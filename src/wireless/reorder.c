@@ -102,9 +102,10 @@ void wl_reorder_in(WL_REORDER *r, u32 tid, u32 seq, u8 *frame, u32 length)
         /* Behind the window: already handed up, or given up on. Many in a row
          * mean the sender's numbering started again: follow it. */
         r->st->late++;
+        if (r->drop_late)
+            return;
         if (++q->late_run < WL_REORDER_RESYNC) {
-            if (!r->drop_late)
-                r->deliver(r->context, frame, length);
+            r->deliver(r->context, frame, length);
             return;
         }
         r->st->resyncs++;
