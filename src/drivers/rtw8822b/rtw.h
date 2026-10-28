@@ -48,7 +48,8 @@
 #define RTW_EP_LOW          2                   /* best effort, background */
 #define RTW_OUT_MAX         4
 #define RTW_TX_COUNT        32
-#define RTW_TX_SLOT         2048        /* a descriptor and the largest frame */
+#define RTW_TX_SLOT         6152        /* three descriptors and frames (RTW_TX_AGG), 8 to pad */
+#define RTW_TX_AGG          3           /* frames to a transfer: usb_tx_agg_desc_num */
 #define RTW_RX_COUNT        8
 #define RTW_RX_SIZE         20480       /* rtw88 takes 32 KB; one EHCI qTD carries 20 */
 
@@ -131,6 +132,8 @@ typedef struct {
     u32 txpwr_vht2_mcs7;        /* and at VHT 2SS MCS7 */
     u32 iqk_runs;
     u32 iqk_ms;                 /* how long the firmware's calibration took */
+    u32 tx_transfers;           /* bulk transfers that carried tx_frames */
+    u32 tx_aggregated;          /* transfers of more than one frame */
 } RTW_STATS;
 
 extern volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
@@ -175,8 +178,14 @@ typedef struct RTW {
     URB tx_slot_urb[RTW_TX_COUNT];
     volatile u32 tx_busy[RTW_TX_COUNT];
     volatile u32 tx_next;
-    volatile u32 tx_inflight;
+    volatile u32 tx_inflight;           /* slots taken: in a transfer or being filled */
     volatile u32 tx_ready;
+    KSPIN_LOCK tx_lock;                 /* the open aggregates and the counts by endpoint */
+    u32 tx_slot_ep[RTW_TX_COUNT];
+    u32 tx_ep_busy[RTW_OUT_MAX];        /* transfers out on each endpoint */
+    u32 tx_open[RTW_OUT_MAX];           /* the slot frames are joining, or RTW_TX_COUNT */
+    u32 tx_open_length[RTW_OUT_MAX];
+    u32 tx_open_frames[RTW_OUT_MAX];
     u32 port_macid;             /* the station port's own, 0 */
     u32 data_rate;              /* DESC_RATE* data goes at, until the firmware picks */
     u32 data_rate_id;

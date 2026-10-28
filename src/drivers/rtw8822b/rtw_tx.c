@@ -36,9 +36,69 @@ static void put32(u8 *p, u32 v)
     p[3] = (u8)(v >> 24);
 }
 
+#define FRAME_MAX       (2048 - RTW_TX_DESC_SIZE)  /* a descriptor and the frame, one at a time */
+#define EP_DIRECT       4           /* transfers out on an endpoint before frames join */
+
+static u32 align8(u32 n)
+{
+    return (n + 7) & ~7u;
+}
+
+/* rtw_usb_fill_tx_checksum: the first descriptor says how many follow it, and its
+ * checksum covers that; a transfer of whole 512-byte packets gets one byte more,
+ * the zero-length packet rtw88 asks for (URB_ZERO_PACKET) the descriptors' sizes
+ * already mark the end. Returns the transfer's length. */
+static u32 seal(RTW *r, u8 *b, u32 length, u32 frames)
+{
+    u32 i;
+    u16 sum = 0;
+
+    if (frames > 1) {
+        b[31] = (u8)frames;                         /* w7 DMA_TXAGG_NUM */
+        b[28] = b[29] = 0;
+        for (i = 0; i < 32; i += 2)
+            sum ^= (u16)(b[i] | b[i + 1] << 8);
+        b[28] = (u8)sum;
+        b[29] = (u8)(sum >> 8);
+        r->st->tx_aggregated++;
+    }
+    if (!(length & 511)) {
+        b[length++] = 0;
+        r->st->tx_padded++;
+    }
+    return length;
+}
+
+static void tx_done(URB *urb, u32 status);
+
+static void submit(RTW *r, u32 slot, u32 length)
+{
+    r->st->tx_transfers++;
+    usb_prepare(&r->tx_slot_urb[slot], r->dev, r->ep_out[r->tx_slot_ep[slot]], tx_done,
+                r->tx_buf[slot], length, 0);
+    r->tx_slot_urb[slot].Owner = r;
+    r->tx_slot_urb[slot].Tag = slot;
+    usb_submit(&r->tx_slot_urb[slot]);
+}
+
+/* Under tx_lock: the endpoint's open aggregate, sealed and closed; its slot, or
+ * RTW_TX_COUNT when there was none. */
+static u32 close_open(RTW *r, u32 ep, u32 *length)
+{
+    u32 slot = r->tx_open[ep];
+
+    if (slot == RTW_TX_COUNT)
+        return slot;
+    *length = seal(r, r->tx_buf[slot], r->tx_open_length[ep], r->tx_open_frames[ep]);
+    r->tx_open[ep] = RTW_TX_COUNT;
+    r->tx_ep_busy[ep]++;
+    return slot;
+}
+
 static void tx_done(URB *urb, u32 status)
 {
     RTW *r = (RTW *)urb->Owner;
+    u32 slot = urb->Tag, ep = r->tx_slot_ep[slot], irql, next, length = 0;
 
     if (!NT_SUCCESS(status)) {
         r->st->tx_errors++;
@@ -46,8 +106,16 @@ static void tx_done(URB *urb, u32 status)
     } else {
         r->st->tx_done++;
     }
+    /* what joined while this endpoint was busy goes now */
+    irql = KfAcquireSpinLock(&r->tx_lock);
+    r->tx_ep_busy[ep]--;
+    next = close_open(r, ep, &length);
+    KfReleaseSpinLock(&r->tx_lock, irql);
+    if (next != RTW_TX_COUNT)
+        submit(r, next, length);
+
     mem_sync();
-    r->tx_busy[urb->Tag] = 0;
+    r->tx_busy[slot] = 0;
     __sync_fetch_and_sub(&r->tx_inflight, 1);
     if (r->nd)
         net_tx_done(r->nd);             /* what waited for a slot goes now */
@@ -59,8 +127,10 @@ static u32 take_slot(RTW *r)
 
     for (n = 0; n < RTW_TX_COUNT; n++) {
         i = __sync_fetch_and_add(&r->tx_next, 1) % RTW_TX_COUNT;
-        if (!__sync_lock_test_and_set(&r->tx_busy[i], 1))
+        if (!__sync_lock_test_and_set(&r->tx_busy[i], 1)) {
+            __sync_fetch_and_add(&r->tx_inflight, 1);
             return i;
+        }
     }
     return RTW_TX_COUNT;
 }
@@ -70,38 +140,18 @@ u32 rtw_tx_space(RTW *r)
     return r->tx_inflight < RTW_TX_COUNT - 1;
 }
 
-/* One 802.11 frame in two parts (softmac.h's tx). */
-u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_length,
-           u32 flags, u32 tid)
+/* One frame's descriptor and the frame, at `b`. */
+static void fill(RTW *r, u8 *b, const u8 *head, u32 head_length, const u8 *body,
+                 u32 body_length, u32 flags, u32 tid)
 {
-    u32 slot, i, qsel, ep, bmc = flags & RTW_TX_GROUP ? 1 : 0, seq,
-        length = head_length + body_length;
-    const u8 *frame = head;
-    u8 *b;
+    u32 i, qsel, bmc = flags & RTW_TX_GROUP ? 1 : 0, seq, length = head_length + body_length;
     u16 sum = 0;
 
-    if (!r->tx_ready || length + RTW_TX_DESC_SIZE > RTW_TX_SLOT) {
-        r->st->tx_drops++;
-        return 0;
-    }
-    slot = take_slot(r);
-    if (slot == RTW_TX_COUNT) {
-        r->st->tx_full++;
-        return 0;
-    }
-    b = r->tx_buf[slot];
-    if (!b) {
-        r->tx_busy[slot] = 0;
-        r->st->tx_drops++;
-        return 0;
-    }
     for (i = 0; i < RTW_TX_DESC_SIZE; i++)
         b[i] = 0;
-
     if (flags & RTW_TX_MGMT) {
         /* rtw_tx_mgmt_pkt_info_update with rtw_tx_pkt_info_update_rate */
         qsel = QSEL_MGMT;
-        ep = RTW_EP_HIGH;
         put32(b + 4, (u32)r->port_macid | qsel << 8 |
                      (r->channel <= 14 ? RATEID_B_20M : RATEID_G) << 16);
         put32(b + 12, 1u << 8 | 1u << 10);             /* USE_RATE, DISDATAFB */
@@ -109,13 +159,12 @@ u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_len
         put32(b + 32, 1u << 15);                        /* EN_HWSEQ, hw_ssn_sel 0 */
         put32(b, length | RTW_TX_DESC_SIZE << 16 | bmc << 24 | 1u << 26 | 1u << 31);
     } else {
-        /* rtw_tx_data_pkt_info_update, a rate the link picked (no adaptation yet),
-         * and rtw_tx_pkt_info_update_sec */
+        /* rtw_tx_data_pkt_info_update and rtw_tx_pkt_info_update_sec: EAPOL at the
+         * band's lowest rate, the rest at the firmware's (or the link's fixed one) */
         u32 rate = flags & RTW_TX_EAPOL ? (r->channel <= 14 ? DESC_RATE1M : DESC_RATE6M)
                                         : r->data_rate;
 
         qsel = tid & 7;
-        ep = qsel == 4 || qsel == 5 || qsel == 6 || qsel == 7 ? RTW_EP_NORMAL : RTW_EP_LOW;
         put32(b + 4, (bmc ? (u32)r->port_macid : MACID_AP) | qsel << 8 |
                      r->data_rate_id << 16 |
                      (flags & RTW_TX_PROTECT ? SEC_TYPE_CCMP << 22 : 0));
@@ -130,7 +179,7 @@ u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_len
                           (r->data_ldpc ? 1u << 7 : 0) | (r->data_stbc ? 1u << 8 : 0));
         }
         put32(b + 16, rate);                            /* DATARATE */
-        seq = (u32)(frame[22] | frame[23] << 8) >> 4;
+        seq = (u32)(head[22] | head[23] << 8) >> 4;
         put32(b + 36, seq << 12);                       /* SW_SEQ */
         put32(b, length | RTW_TX_DESC_SIZE << 16 | bmc << 24 | 1u << 26);
     }
@@ -142,21 +191,72 @@ u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_len
         b[RTW_TX_DESC_SIZE + i] = head[i];
     for (i = 0; i < body_length; i++)
         b[RTW_TX_DESC_SIZE + head_length + i] = body[i];
+}
 
-    /* rtw88 sends with URB_ZERO_PACKET, so a transfer of whole 512-byte packets
-     * still ends; here one byte more past the frame does it, as send_firmware_pkt
-     * does for the firmware (the descriptor's size says where the frame ends). */
-    i = RTW_TX_DESC_SIZE + length;
-    if (!(i & 511)) {
-        b[i++] = 0;
-        r->st->tx_padded++;
+static u32 endpoint_of(u32 flags, u32 tid)
+{
+    if (flags & RTW_TX_MGMT)
+        return RTW_EP_HIGH;
+    tid &= 7;
+    return tid >= 4 ? RTW_EP_NORMAL : RTW_EP_LOW;
+}
+
+/* One 802.11 frame in two parts (softmac.h's tx). While an endpoint has EP_DIRECT
+ * transfers out, frames join one open transfer there (rtw_usb_tx_agg_skb), up to
+ * RTW_TX_AGG, each behind its own descriptor at a multiple of 8; the transfer goes
+ * when it is full or when one of that endpoint's completes. Any IRQL. */
+u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_length,
+           u32 flags, u32 tid)
+{
+    u32 length = head_length + body_length, ep = endpoint_of(flags, tid), irql, at, slot,
+        full = RTW_TX_COUNT, full_length = 0, now = RTW_TX_COUNT, now_length = 0;
+
+    if (!r->tx_ready || length > FRAME_MAX) {
+        r->st->tx_drops++;
+        return 0;
     }
-    __sync_fetch_and_add(&r->tx_inflight, 1);
+    irql = KfAcquireSpinLock(&r->tx_lock);
+    slot = r->tx_open[ep];
+    if (slot != RTW_TX_COUNT &&
+        align8(r->tx_open_length[ep]) + RTW_TX_DESC_SIZE + length > RTW_TX_SLOT - 8)
+        full = close_open(r, ep, &full_length);         /* no room: it goes as it is */
+    slot = r->tx_open[ep];
+    if (slot == RTW_TX_COUNT) {
+        slot = take_slot(r);
+        if (slot == RTW_TX_COUNT) {
+            KfReleaseSpinLock(&r->tx_lock, irql);
+            if (full != RTW_TX_COUNT)
+                submit(r, full, full_length);
+            r->st->tx_full++;
+            return 0;
+        }
+        r->tx_slot_ep[slot] = ep;
+        if (r->tx_ep_busy[ep] < EP_DIRECT) {
+            /* the endpoint keeps up: this frame alone, now */
+            fill(r, r->tx_buf[slot], head, head_length, body, body_length, flags, tid);
+            now = slot;
+            now_length = seal(r, r->tx_buf[slot], RTW_TX_DESC_SIZE + length, 1);
+            r->tx_ep_busy[ep]++;
+            goto out;
+        }
+        r->tx_open[ep] = slot;
+        r->tx_open_length[ep] = 0;
+        r->tx_open_frames[ep] = 0;
+    }
+    at = align8(r->tx_open_length[ep]);
+    for (; r->tx_open_length[ep] < at; r->tx_open_length[ep]++)
+        r->tx_buf[slot][r->tx_open_length[ep]] = 0;
+    fill(r, r->tx_buf[slot] + at, head, head_length, body, body_length, flags, tid);
+    r->tx_open_length[ep] = at + RTW_TX_DESC_SIZE + length;
+    if (++r->tx_open_frames[ep] == RTW_TX_AGG)
+        now = close_open(r, ep, &now_length);
+out:
     r->st->tx_frames++;
-    usb_prepare(&r->tx_slot_urb[slot], r->dev, r->ep_out[ep], tx_done, b, i, 0);
-    r->tx_slot_urb[slot].Owner = r;
-    r->tx_slot_urb[slot].Tag = slot;
-    usb_submit(&r->tx_slot_urb[slot]);
+    KfReleaseSpinLock(&r->tx_lock, irql);
+    if (full != RTW_TX_COUNT)
+        submit(r, full, full_length);
+    if (now != RTW_TX_COUNT)
+        submit(r, now, now_length);
     return 1;
 }
 

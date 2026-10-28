@@ -81,7 +81,8 @@ STRUCTS = {
                   "last_signal", "scans", "tx_frames", "tx_done", "tx_errors",
                   "tx_last_error", "tx_drops", "tx_full", "keys", "linked", "h2c_commands",
                   "h2c_busy", "ra_mask", "ra_rate_id", "ampdu", "rx_largest", "tx_padded",
-                  "tx_inflight_now", "txpwr_ofdm6", "txpwr_vht2_mcs7", "iqk_runs", "iqk_ms"],
+                  "tx_inflight_now", "txpwr_ofdm6", "txpwr_vht2_mcs7", "iqk_runs", "iqk_ms",
+                  "tx_transfers", "tx_aggregated"],
     "rtw_sta_stats": ["state", "scans", "probes", "auths", "auth_status", "assocs",
                       "assoc_status", "aid", "joins", "timeouts", "deauths",
                       "deauth_reason", "beacon_losses", "rx_data", "rx_eapol",
@@ -149,7 +150,7 @@ STRUCTS = {
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
-                   "xq_high", "link_fallback"],
+                   "xq_high", "link_fallback", "rcvbuf_before", "rcvbuf_after", "sndbuf_before", "sndbuf_after"],
 }
 
 
@@ -320,12 +321,13 @@ def status(sym):
                       r["rx_last_error"], r["rx_beacons"], r["rx_mgmt"], r["rx_data"],
                       sig, r["scans"]))
             print("rtw tx   frames=%d done=%d err=%d/%#x drops=%d full=%d keys=%d linked=%d "
-                  "h2c=%d busy=%d ra=%#x/%d ampdu=%d rx_largest=%d padded=%d inflight=%d txpwr=%#x/%#x iqk=%d/%dms" % (
+                  "h2c=%d busy=%d ra=%#x/%d ampdu=%d rx_largest=%d padded=%d inflight=%d txpwr=%#x/%#x iqk=%d/%dms "
+                  "transfers=%d aggregated=%d" % (
                 r["tx_frames"], r["tx_done"], r["tx_errors"], r["tx_last_error"],
                 r["tx_drops"], r["tx_full"], r["keys"], r["linked"], r["h2c_commands"],
                 r["h2c_busy"], r["ra_mask"], r["ra_rate_id"], r["ampdu"], r["rx_largest"],
                 r["tx_padded"], r["tx_inflight_now"], r["txpwr_ofdm6"], r["txpwr_vht2_mcs7"],
-                r["iqk_runs"], r["iqk_ms"]))
+                r["iqk_runs"], r["iqk_ms"], r["tx_transfers"], r["tx_aggregated"]))
             if "rtw_sta_stats" in sym:
                 t = read_struct(sym, "rtw_sta_stats", i)
                 states = ["idle", "scanning", "probing", "auth", "assoc", "joined"]
@@ -487,6 +489,8 @@ def status(sym):
               xs["link_notifies"], xs["flags_before"], xs["flags_after"]))
     print("xnet tx  queued_high=%d dropped=%d link_fallback=%d" % (
         xs["xq_high"], xs["xmit_dropped"], xs["link_fallback"]))
+    print("xnet buf system sockets: receive %d KB -> %d KB, send %d KB -> %d KB" % (
+        xs["rcvbuf_before"], xs["rcvbuf_after"], xs["sndbuf_before"], xs["sndbuf_after"]))
     if "debug_tx_stall" in sym:
         for i in range(NET_MAX):
             d = read_struct(sym, "debug_tx_stall", i)

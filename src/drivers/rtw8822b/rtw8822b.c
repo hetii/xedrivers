@@ -129,6 +129,11 @@ static u32 rtw8822b_start(NET_DEV *nd)
         r->tx_busy[step] = 0;
     }
     r->tx_inflight = 0;
+    r->tx_lock = 0;
+    for (step = 0; step < RTW_OUT_MAX; step++) {
+        r->tx_ep_busy[step] = 0;
+        r->tx_open[step] = RTW_TX_COUNT;
+    }
     if (!r->fw)
         r->fw = (u8 *)MmAllocatePhysicalMemory(2, RTW_FW_MAX, 4);
     if (!r->reg_buf || !r->bulk_buf || !r->fw || !r->rx_buf[RTW_RX_COUNT - 1] ||
