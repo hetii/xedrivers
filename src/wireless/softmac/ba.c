@@ -97,8 +97,6 @@ static void reorder_dpc(KDPC *dpc, void *context, void *a1, void *a2)
 
 void wl_sta_ba_init(WL_STA *s)
 {
-    if (s->reorder_dpc_queued)
-        bench_trace("[reorder dpc queued at init]");
     KeInitializeDpc(&s->reorder_dpc, reorder_dpc, s);
     s->reorder_dpc.TargetNumber = USB_PROCESSOR + 1;    /* the receive path's processor */
     s->reorder_dpc_queued = 0;

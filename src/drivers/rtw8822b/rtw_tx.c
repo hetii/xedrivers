@@ -108,8 +108,6 @@ static void tx_done(URB *urb, u32 status)
         r->st->tx_last_error = status;
     } else {
         r->st->tx_done++;
-        if (!(r->st->tx_done & 4095))
-            bench_trace("t");
     }
     /* what joined while this endpoint was busy goes now */
     irql = KfAcquireSpinLock(&r->tx_lock);

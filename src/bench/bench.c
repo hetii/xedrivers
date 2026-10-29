@@ -42,9 +42,8 @@ void bench_init(void)
 
 void bench_tick(u32 tick)
 {
+    (void)tick;
     PROF_STAMP();
-    if (!(tick % 30))
-        bench_trace(".");               /* the worker is alive */
 #if XE_BENCH_HISTORY
     history_tick(tick);
 #endif
@@ -166,18 +165,3 @@ void bench_trace(const char *mark)
 #endif
 }
 
-static volatile char where = '-';
-
-void bench_where(char step)
-{
-    where = step;
-}
-
-void bench_where_mark(void)
-{
-    char m[2];
-
-    m[0] = where;
-    m[1] = 0;
-    bench_trace(m);
-}

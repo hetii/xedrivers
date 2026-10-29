@@ -150,7 +150,6 @@ static void choose(void)
         switch_ticks = 0;
         mem_sync();
         net_switching = 1;
-        bench_trace("[uplink switching]");
         if (net_link_cb)
             net_link_cb(0);
         return;
@@ -161,7 +160,6 @@ static void choose(void)
     }
     mem_sync();
     net_active = best ? (u32)(best - net_devs) + 1 : 0;
-    bench_trace(best ? "[uplink card]" : "[uplink onboard]");
     if (net_link_cb)
         net_link_cb(best != 0);
 }
@@ -472,7 +470,7 @@ void net_tick(void)
         if (nd->drv && nd->drv->tick && nd->st->ready)
             nd->drv->tick(nd);
     }
-    if (xnet_tick_stalled() && uplink() && (bench_trace("[xq stall]"), 1))
+    if (xnet_tick_stalled() && uplink())
         net_link_report(uplink(), 0);
 }
 

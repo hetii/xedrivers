@@ -88,7 +88,6 @@ static void wpa_ready(void *context, u32 ok)
      * wedged, and with it everything xnet sent (one boot in ~17). */
     if (s->state != WL_STA_JOINED) {
         s->ready_pending = ok ? 2 : 1;
-        bench_trace("[ready early]");
         return;
     }
     s->port_open = ok;
@@ -189,7 +188,6 @@ static u32 card_scan(void *context)
 
 static void link_down(WL_STA *s)
 {
-    bench_trace("[link down]");
     wl_sta_ba_reset(s);
     s->port_open = 0;
     s->pairwise_set = 0;
@@ -318,8 +316,6 @@ static void send_assoc(WL_STA *s)
 
 static void joined(WL_STA *s)
 {
-    bench_where('J');
-    bench_trace("[joined]");
     WL_AP_IES ap;
     u32 i;
 
@@ -421,7 +417,6 @@ void wl_sta_tick(WL_STA *s)
             step_to(s, WL_STA_IDLE);
         } else if (++s->last_beacon > LOSS_TICKS) {
             s->st->beacon_losses++;
-            bench_trace("[beacon loss]");
             link_down(s);
             step_to(s, WL_STA_IDLE);
         }

@@ -56,7 +56,6 @@ static u32 saved_xmit_lis, saved_xmit_addi;
 static u32 saved_link_lis, saved_link_addi;
 static u32 saved_flags;
 static void *title_user;
-static volatile u32 trace_frames;       /* bench=debug: the first frames after a link change */
 
 /* Build/decode the `lis r11,hi` + `addi r11,r11,lo` pair, with the sign extension
  * addi applies to the low half compensated in the high half. */
@@ -203,8 +202,6 @@ static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
     }
 
     xnet_stats.xmit_usb++;
-    if (trace_frames && __sync_fetch_and_sub(&trace_frames, 1) > 0)
-        bench_trace("T");
     bench_frame_out((const u8 *)frame, length);
     net_txq_put(&xq, user, frame, length, cookie);
 }
@@ -219,7 +216,6 @@ static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
 static u32 nic_link_state_hook(u32 device_flags)
 {
     xnet_stats.link_polls++;
-    bench_trace("l");
     if (bench_wired_hidden())
         return NicGetLinkState(device_flags & ~(NIC_IFACE_USBENET | NIC_IFACE_EMAC));
     if ((device_flags & NIC_IFACE_USBENET) && net_link_up())
@@ -263,8 +259,6 @@ static void deliver(const u8 *frame, u32 length)
         return;
     }
     xnet_stats.rx_delivered++;
-    if (trace_frames)
-        bench_trace("R");
     bench_frame_in(frame, length);
     cb(ctx, (void *)frame, length, xnet_rx_iface, dest);
 }
@@ -284,13 +278,10 @@ static void notify_link(void)
     if (!cb)
         return;
     xnet_stats.link_notifies++;
-    bench_trace("[notify");
     old = ke_irql() < DISPATCH_LEVEL ? KeRaiseIrqlToDpcLevel() : 0xFFu;
     cb(*(void **)(user + USER_CTX_OFF));
     if (old != 0xFFu)
         KfLowerIrql(old);
-    bench_trace("]");
-    trace_frames = 6;
 }
 
 void xnet_link_changed(void)

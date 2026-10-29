@@ -44,32 +44,18 @@ static void rx_done(URB *urb, u32 status)
     u8 *b = r->rx_buf[i];
     PROF_START(t);
 
-    if (!r->rx_running || !r->dev->active) {
-        bench_trace("x");               /* a transfer of the card that was */
+    if (!r->rx_running || !r->dev->active)
         return;
-    }
     if (!NT_SUCCESS(status)) {
         /* Queued again at once, a transfer the endpoint refuses comes back at
          * once, and the USB processor does nothing else from then on: after a
          * few in a row it stays out, and the watchdog resets the card. */
         r->st->rx_errors++;
         r->st->rx_last_error = status;
-        if (r->st->rx_errors <= 8) {
-            static char mark[] = "[E 00000000 a00000]";
-            static const char hex[] = "0123456789abcdef";
-            u32 k;
-
-            for (k = 0; k < 8; k++)
-                mark[3 + k] = hex[(status >> (28 - 4 * k)) & 15];
-            for (k = 0; k < 5; k++)
-                mark[13 + k] = hex[(urb->Actual >> (16 - 4 * k)) & 15];
-            bench_trace(mark);
-        }
         if (++r->rx_failing[i] < RX_RETRIES) {
             submit(r, i);
         } else {
             __sync_fetch_and_add(&r->rx_parked, 1);
-            bench_trace("[rx parked]");
         }
         return;
     }
@@ -139,7 +125,6 @@ void rtw_rx_start(RTW *r)
 {
     u32 i;
 
-    bench_trace("[rx start]");
     rx_aggregation(r);
     for (i = 0; i < RTW_RX_COUNT; i++)
         r->rx_failing[i] = 0;
