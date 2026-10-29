@@ -65,7 +65,7 @@ extern int NetDll_WSAGetLastError(void);
 
 #define PORT_SOURCE  5201
 #define PORT_SINK    5202
-#define SLOTS        8
+#define SLOTS        16
 #define SLOT_BYTES   0x10000u       /* the most one send or recv can carry */
 
 volatile u32 tcp_chunk = 0x8000;

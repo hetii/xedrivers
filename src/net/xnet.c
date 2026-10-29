@@ -334,11 +334,18 @@ static u32 setting_kb(const char *key, u32 fallback)
  * (shift 1 measured); 64 is refused, since a buffer of exactly 65536 makes xnet
  * advertise a zero window. A send buffer above the largest allowed raises that
  * too. Measured over the RTL8822BU: one TCP stream into the console 8.1 MB/s at
- * 16 KB, 16.1 at 63, 18.4 at 128, 20.7 at 255. Above 32 KB many connections
- * stall: 8 at 48 or 63 KB, or 4 at 96 KB, and that listener stays dead until a
- * reboot; 16 at 32 KB (512 KB together) and 20 at 16 KB do not, so it is not the
- * sum. 32 KB is the default (RCVBUF_DEFAULT_KB): one stream in 6.4 -> 11 MB/s,
- * four 14.6 -> 17.5, eight 19.2 -> 20.6; `xnet_rcvbuf_kb = 0` keeps xnet's 16.
+ * 16 KB, 16.1 at 63, 18.4 at 128, 20.7 at 255. But xnet's pool for system sockets
+ * holds about 270 KB of data in all, sent and received together (measured: four
+ * paused connections take 64 KB each, a fifth 14 KB, the rest nothing), and xnet
+ * has no SACK: once data that waits for a missing segment, or for its ACK, fills
+ * the pool, the segment that would free it is dropped too and every connection
+ * stops for good. Over the wire that never came; over Wi-Fi it did, first through
+ * frames our reorder window dropped (fixed, reorder.c), and still with both
+ * directions busy: 4 connections each way at 128 KB stopped, at 32 KB and at the
+ * stock 16 they did not, nor did 8 in with the reader stopped for 3 s. Hence 32 KB
+ * (RCVBUF_DEFAULT_KB): one stream in 6.4 -> 12.8 MB/s, four in alongside four out
+ * 4.5 -> 7.3; `xnet_rcvbuf_kb = 0` keeps xnet's 16. A program that runs few
+ * connections can ask for more on its listening socket (8 in at 128 KB: 24.5 MB/s).
  * Sending is not limited by it (128 and 255 KB moved nothing), nor is ftpdll,
  * which picks its own buffers, nor XBDM, whose listener exists before this runs
  * and passes its 16 KB to what it accepts. Thread. */
@@ -386,11 +393,16 @@ static void set_buffers(void)
  * needs a send buffer that large: the largest allowed for system sockets and
  * titles goes up with it (xnet_sndbuf_kb sets the system default).
  * Measured over the RTL8822BU: one stream out 101 Mbit/s (12.6 MB/s) stock, 124
- * (15.5) at 128 KB, 134 (16.8) at 256 KB, each with a send buffer as big. The
- * send buffers are what runs out: xnet's pool holds about 4 x 63 KB of them, and
- * 8 sockets with 128 KB stall every connection, the card's receive with them
- * (the clamp alone, 8 streams at 63 KB, does not) -- hence off unless asked for.
+ * (15.5) at 128 KB, 151 (18.9) at 256 KB with a 255 KB SO_SNDBUF on the
+ * listener. With the stock 63 KB send buffer the clamp changes nothing, so 256 KB
+ * is the default (CWND_DEFAULT_KB, `xnet_cwnd_kb = 0` keeps the stock code): it
+ * lets a program that asks for a bigger send buffer use it. What such a program
+ * must keep in mind is xnet's pool for system sockets: about 270 KB of data, sent
+ * and received together (set_buffers); over Wi-Fi, connections whose buffers add up
+ * to more stall for good once a loss leaves segments out of order (2 x 255 KB or
+ * 4 x 128 KB out did; wired, 8 x 255 KB did not).
  * xerunner: xnet-congestion-window-cap@1 */
+#define CWND_DEFAULT_KB     256u
 #define CWND_LIS            0x81766444u
 #define CWND_CMP_SLOW       0x81766478u
 #define CWND_CMP_AVOID      0x8176651Cu
@@ -411,7 +423,7 @@ static void set_cwnd(void)
     volatile u32 *slow = (volatile u32 *)(unsigned long)CWND_CMP_SLOW;
     volatile u32 *avoid = (volatile u32 *)(unsigned long)CWND_CMP_AVOID;
     u8 *xnet = *(u8 **)((u8 *)title_user + USER_CTX_OFF), *block;
-    u32 kb = setting_kb("xnet_cwnd_kb", 0), n, caller, largest;
+    u32 kb = setting_kb("xnet_cwnd_kb", CWND_DEFAULT_KB), n, caller, largest;
 
     if (kb <= 64 || kb > 4096)
         return;
