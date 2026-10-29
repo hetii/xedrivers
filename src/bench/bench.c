@@ -143,6 +143,18 @@ void bench_frame_in(const u8 *frame, u32 length)
 #endif
 }
 
+void bench_wl_frame(u32 kind, u32 seq, const u8 *eth, u32 length)
+{
+#if XE_TCP
+    tcp_trace_wl(kind, seq, eth, length);
+#else
+    (void)kind;
+    (void)seq;
+    (void)eth;
+    (void)length;
+#endif
+}
+
 /* The kernel UART: transmit data at 0x7FEA1014 (the character in the top byte),
  * status at 0x7FEA1018 (0x02000000: room to send), 115200 baud as the kernel set
  * it up. Read live over the plugin's peek and checked by sending "XEDR" to

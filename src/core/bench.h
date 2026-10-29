@@ -22,6 +22,13 @@ typedef void (*BENCH_RX)(const u8 *frame, u32 length);
 #define XE_BENCH 0
 #endif
 
+/* A Wi-Fi data frame at a step of the SoftMAC's receive path (bench_wl_frame), its
+ * 802.11 sequence number, as an Ethernet frame where it is one (else 0). */
+#define BENCH_WL_IN      1   /* into the reorder window */
+#define BENCH_WL_DUP     2   /* dropped: a retransmission of the last one */
+#define BENCH_WL_LATE    3   /* dropped: behind the reorder window */
+#define BENCH_WL_FLUSH   4   /* a hole given up on (timeout, jump or full) */
+
 #if XE_BENCH
 /* Once, from the worker before its loop. */
 void   bench_init(void);
@@ -50,6 +57,7 @@ void   bench_trace(const char *mark);
 /* Every frame xnet sends through the card, and every one handed up to it. */
 void   bench_frame_out(const u8 *frame, u32 length);
 void   bench_frame_in(const u8 *frame, u32 length);
+void   bench_wl_frame(u32 kind, u32 seq, const u8 *eth, u32 length);
 #else
 static inline void   bench_init(void) { }
 static inline void   bench_tick(u32 tick) { (void)tick; }
@@ -64,6 +72,13 @@ static inline u32    bench_wired_hidden(void) { return 0; }
 static inline void   bench_trace(const char *mark) { (void)mark; }
 static inline void   bench_frame_out(const u8 *frame, u32 length) { (void)frame; (void)length; }
 static inline void   bench_frame_in(const u8 *frame, u32 length) { (void)frame; (void)length; }
+static inline void   bench_wl_frame(u32 kind, u32 seq, const u8 *eth, u32 length)
+{
+    (void)kind;
+    (void)seq;
+    (void)eth;
+    (void)length;
+}
 #endif
 
 #endif /* XE_BENCH_H */

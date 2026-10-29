@@ -34,6 +34,7 @@ extern volatile u32 tcp_prio;       /* absolute thread priority, 0 = leave it */
 extern volatile u32 tcp_sink_pause; /* the sink stops reading while set */
 extern volatile u32 tcp_listen_rcvbuf;  /* SO_RCVBUF on the listeners, before cmd 14 */
 extern volatile u32 tcp_listen_sndbuf;  /* SO_SNDBUF on the listeners, before cmd 14 */
+extern volatile u32 tcp_trace;          /* allocate the sink port's trace, before cmd 14 */
 
 /* Start the listeners. Thread-only -- it allocates and blocks. Returns 0, or the
  * step that failed; calling it again after success does nothing. */
@@ -43,6 +44,7 @@ u32 tcp_start(void);
  * bytes in flight. Any IRQL. */
 void tcp_flight_out(const u8 *frame, u32 length);
 void tcp_flight_in(const u8 *frame, u32 length);
+void tcp_trace_wl(u32 kind, u32 seq80211, const u8 *eth, u32 length);
 
 enum {
     TCP_OK = 0,
@@ -77,6 +79,8 @@ typedef struct {
     u32 flight_max;             /* bytes */
     u32 flight_hist[8];         /* samples by 16 KB: 0-16, 16-32, ... 112 and up */
     u32 flight_resent;          /* data segments at or below the highest sent */
+    u32 thread_failures;        /* accepted, but no thread could be made for it */
+    u32 thread_status;          /* what ExCreateThread said the last time */
 } TCP_STATS;
 
 extern volatile TCP_STATS tcp_stats;

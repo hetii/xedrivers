@@ -88,8 +88,14 @@ volatile u32 tcp_sink_pause = 0;
  * connection inherits and what its SYN-ACK offers (window scaling) -- set them
  * before cmd 14. 0 leaves xnet's defaults. */
 volatile u32 tcp_listen_rcvbuf = 0;
-volatile u32 tcp_listen_sndbuf = 0;  /* the sink stops reading while set: buffers fill */
+volatile u32 tcp_listen_sndbuf = 0;
+volatile u32 tcp_trace = 0;       /* the sink port's trace (4 MB), set before cmd 14 */  /* the sink stops reading while set: buffers fill */
 volatile TCP_STATS tcp_stats;
+
+/* The sink port's trace (trace(), below). */
+#define TRACE_COUNT 262144u
+volatile u32 *volatile sink_trace;
+volatile u32 sink_trace_at;
 
 typedef struct {
     u16 family;
@@ -308,6 +314,7 @@ static void accept_loop(void *parameter)
         u32 accepted = NetDll_accept(CALLER_SYSAPP, listening->socket, 0, 0);
         SLOT *slot;
         void *thread = 0;
+        int status;
 
         if (accepted == INVALID_SOCKET) {
             sleep_ms(100);
@@ -327,10 +334,17 @@ static void accept_loop(void *parameter)
         slot->sink = listening->sink;
         tcp_stats.active++;
         mem_sync();
-        if (ExCreateThread(&thread, 0, 0, 0, (void *)serve, slot, 2) < 0) {
+        status = ExCreateThread(&thread, 0, 0, 0, (void *)serve, slot, 2);
+        if (status < 0) {
             tcp_stats.active--;
+            tcp_stats.thread_failures++;
+            tcp_stats.thread_status = (u32)status;
             NetDll_closesocket(CALLER_SYSAPP, accepted);
             slot->busy = 0;
+        } else {
+            /* the handle only: kept, every connection's thread object and stack
+             * stayed after it ended, and after ~80 the next thread failed */
+            NtClose(thread);
         }
     }
 }
@@ -352,6 +366,8 @@ u32 tcp_start(void)
             return fail(TCP_ERR_POOL);
     }
     source_bytes = slots[0].buffer;     /* the source only ever reads it */
+    if (tcp_trace)                      /* 4 MB: only when asked, memory is short */
+        sink_trace = (volatile u32 *)MmAllocatePhysicalMemory(2, TRACE_COUNT * 16, 4);
     for (i = 0; i < SLOT_BYTES; i++)
         source_bytes[i] = (u8)i;
 
@@ -409,24 +425,46 @@ static const u8 *tcp_of(const u8 *f, u32 length, u32 *payload)
 
 /* Every segment xnet is handed on PORT_SINK and every ACK it sends there, for a
  * capture on the PC to be held against: { time base, sequence or ack number,
- * client port << 16 | payload length, with bit 15 set for what the console sent }. */
-#define TRACE_COUNT 8192
-volatile u32 sink_trace[TRACE_COUNT][3];
-volatile u32 sink_trace_at;
+ * client port << 16 | payload length (bit 15: what the console sent), the frame's
+ * length }. 4 MB from tcp_start, sink_trace pointing at it, sink_trace_at the
+ * next entry (it wraps). */
 
-static void trace(const u8 *t, u32 number, u32 port, u32 word)
+static void trace(u32 number, u32 port, u32 word, u32 length);
+
+/* The SoftMAC's steps (bench.h BENCH_WL_*) into the same trace: the last word is
+ * kind << 28 | 802.11 sequence << 16 | frame length; a frame that is not TCP to
+ * PORT_SINK, or none, goes with port 0. */
+void tcp_trace_wl(u32 kind, u32 seq80211, const u8 *eth, u32 length)
 {
-    u32 at = __sync_fetch_and_add(&sink_trace_at, 1) & (TRACE_COUNT - 1), tb;
+    u32 payload = 0, port = 0, number = 0;
+    const u8 *t = eth ? tcp_of(eth, length, &payload) : 0;
 
-    (void)t;
+    if (t && ((u32)t[2] << 8 | t[3]) == PORT_SINK) {
+        port = (u32)t[0] << 8 | t[1];
+        number = be32(t + 4);
+    }
+    trace(number, port, payload & 0x7FFFu, kind << 28 | (seq80211 & 0xFFFu) << 16 |
+                                           (length & 0xFFFFu));
+}
+
+static void trace(u32 number, u32 port, u32 word, u32 length)
+{
+    volatile u32 *e;
+    u32 at, tb;
+
+    if (!sink_trace)
+        return;
+    at = __sync_fetch_and_add(&sink_trace_at, 1) & (TRACE_COUNT - 1);
 #if defined(__powerpc__)
     __asm__ volatile("mftb %0" : "=r"(tb));
 #else
     tb = 0;
 #endif
-    sink_trace[at][0] = tb;
-    sink_trace[at][1] = number;
-    sink_trace[at][2] = port << 16 | word;
+    e = sink_trace + at * 4;
+    e[0] = tb;
+    e[1] = number;
+    e[2] = port << 16 | word;
+    e[3] = length;
 }
 
 void tcp_flight_out(const u8 *frame, u32 length)
@@ -435,7 +473,7 @@ void tcp_flight_out(const u8 *frame, u32 length)
     const u8 *t = tcp_of(frame, length, &payload);
 
     if (t && ((u32)t[0] << 8 | t[1]) == PORT_SINK)
-        trace(t, be32(t + 8), (u32)t[2] << 8 | t[3], 0x8000u | (t[13] & 0x3Fu));
+        trace(be32(t + 8), (u32)t[2] << 8 | t[3], 0x8000u | (t[13] & 0x3Fu), length);
     if (!t || ((u32)t[0] << 8 | t[1]) != PORT_SOURCE || !payload)
         return;
     top = be32(t + 4) + payload;
@@ -465,7 +503,7 @@ void tcp_flight_in(const u8 *frame, u32 length)
     const u8 *t = tcp_of(frame, length, &payload);
 
     if (t && ((u32)t[2] << 8 | t[3]) == PORT_SINK)
-        trace(t, be32(t + 4), (u32)t[0] << 8 | t[1], payload & 0x7FFFu);
+        trace(be32(t + 4), (u32)t[0] << 8 | t[1], payload & 0x7FFFu, length);
     if (!t || ((u32)t[2] << 8 | t[3]) != PORT_SOURCE || !(t[13] & 0x10))
         return;
     if (t[13] & 0x02) {                     /* a new connection's SYN */
