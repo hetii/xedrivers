@@ -123,6 +123,27 @@ int main(void)
     { static const u32 w[] = { 2, 3 }; CHECK(order(w, 2)); }
     CHECK(st.full == 1 && r.tid[0].held == WL_REORDER_WINDOW - 1);
 
+    /* drop_late (a SoftMAC card): behind the window is a duplicate and goes, unless
+     * the window gave its number up -- an AP sending past the window, the holes'
+     * frames coming just after. */
+    wl_reorder_init(&r, pool, deliver, 0, &st);
+    r.drop_late = 1;
+    st.late = st.rescued = 0;
+    for (i = 1430; i < 1440; i++)
+        if (i != 1432 && i != 1435)
+            in(0, i);                   /* 1430, 1431 go; 1433.. wait for 1432 */
+    outs = 0;
+    in(0, 1503);                        /* head to 1440: 1432 and 1435 given up */
+    CHECK(st.jumps >= 1 && r.tid[0].head == 1440);
+    { static const u32 w[] = { 1433, 1434, 1436, 1437, 1438, 1439 }; CHECK(order(w, 6)); }
+    outs = 0;
+    in(0, 1432);                        /* given up on: handed up after all */
+    in(0, 1435);
+    in(0, 1432);                        /* now a duplicate */
+    in(0, 1431);                        /* delivered long ago: a duplicate */
+    { static const u32 w[] = { 1432, 1435 }; CHECK(order(w, 2)); }
+    CHECK(st.rescued == 2 && st.late == 4);
+
     /* No pool: everything handed up as it comes. */
     wl_reorder_init(&r, 0, deliver, 0, &st);
     outs = 0;

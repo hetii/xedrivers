@@ -10,11 +10,48 @@
  * behind the window handed up as it came (reord_need_check's "no need to reord":
  * a duplicate costs the stack nothing, a frame dropped here costs a
  * retransmission). Single-threaded by contract; see reorder.h.
+ *
+ * Where behind the window means a duplicate (drop_late), a number the window gave
+ * up on is still handed up when it comes: an AP sends past the window it agreed to
+ * (one 73 ahead of a hole was seen), the window jumps to it, and the frames of the
+ * holes arrive a few microseconds later. Dropped, each was a TCP retransmission
+ * and, xnet keeping what came after it, out-of-order data filling its pool: with
+ * enough connections every one of them stopped (see xnet.c set_buffers).
  */
 
 #include "reorder.h"
+#include "bench.h"
 
 #define SEQ_MASK 0xFFFu
+
+/* A number the window moves past without its frame: handed up if it comes late. */
+static void skip(WL_REORDER_TID *q, u32 seq)
+{
+    seq &= SEQ_MASK;
+    bench_wl_frame(BENCH_WL_FLUSH, seq, 0, 0);
+    q->skipped[seq >> 3] |= (u8)(1u << (seq & 7));
+}
+
+static u32 was_skipped(WL_REORDER_TID *q, u32 seq)
+{
+    u8 bit = (u8)(1u << (seq & 7));
+
+    seq &= SEQ_MASK;
+    if (!(q->skipped[seq >> 3] & bit))
+        return 0;
+    q->skipped[seq >> 3] &= (u8)~bit;
+    return 1;
+}
+
+/* The head one on; a mark half the number space away is too old to mean anything. */
+static void step(WL_REORDER_TID *q)
+{
+    u32 old;
+
+    q->head = (q->head + 1) & SEQ_MASK;
+    old = (q->head + 0x800u) & SEQ_MASK;
+    q->skipped[old >> 3] &= (u8)~(1u << (old & 7));
+}
 
 void wl_reorder_reset(WL_REORDER *r)
 {
@@ -27,6 +64,8 @@ void wl_reorder_reset(WL_REORDER *r)
         r->tid[t].late_run = 0;
         for (i = 0; i < WL_REORDER_WINDOW; i++)
             r->tid[t].slot[i] = WL_REORDER_NONE;
+        for (i = 0; i < sizeof(r->tid[t].skipped); i++)
+            r->tid[t].skipped[i] = 0;
     }
     for (i = 0; i < WL_REORDER_SLOTS; i++)
         r->free[i] = (u8)i;
@@ -64,7 +103,7 @@ static void advance(WL_REORDER *r, WL_REORDER_TID *q)
         if (q->slot[index] == WL_REORDER_NONE)
             break;
         release(r, q, index);
-        q->head = (q->head + 1) & SEQ_MASK;
+        step(q);
     }
     q->stalled = 0;
 }
@@ -75,8 +114,10 @@ static void flush(WL_REORDER *r, WL_REORDER_TID *q)
     u32 n;
 
     for (n = 0; q->held && n < WL_REORDER_WINDOW; n++) {
-        if (q->slot[q->head & (WL_REORDER_WINDOW - 1)] == WL_REORDER_NONE)
-            q->head = (q->head + 1) & SEQ_MASK;
+        if (q->slot[q->head & (WL_REORDER_WINDOW - 1)] == WL_REORDER_NONE) {
+            skip(q, q->head);
+            step(q);
+        }
         else
             advance(r, q);
     }
@@ -102,8 +143,15 @@ void wl_reorder_in(WL_REORDER *r, u32 tid, u32 seq, u8 *frame, u32 length)
         /* Behind the window: already handed up, or given up on. Many in a row
          * mean the sender's numbering started again: follow it. */
         r->st->late++;
-        if (r->drop_late)
+        if (r->drop_late) {
+            if (was_skipped(q, seq)) {
+                r->st->rescued++;
+                r->deliver(r->context, frame, length);
+                return;
+            }
+            bench_wl_frame(BENCH_WL_LATE, seq, frame, length);
             return;
+        }
         if (++q->late_run < WL_REORDER_RESYNC) {
             r->deliver(r->context, frame, length);
             return;
@@ -124,27 +172,34 @@ void wl_reorder_in(WL_REORDER *r, u32 tid, u32 seq, u8 *frame, u32 length)
             index = q->head & (WL_REORDER_WINDOW - 1);
             if (q->slot[index] != WL_REORDER_NONE)
                 release(r, q, index);
-            q->head = (q->head + 1) & SEQ_MASK;
+            else
+                skip(q, q->head);
+            step(q);
         }
         advance(r, q);
         distance = (seq - q->head) & SEQ_MASK;
     }
     if (!distance) {
         r->deliver(r->context, frame, length);
-        q->head = (q->head + 1) & SEQ_MASK;
+        step(q);
         advance(r, q);
         return;
     }
     index = seq & (WL_REORDER_WINDOW - 1);
     if (q->slot[index] != WL_REORDER_NONE) {
         r->st->late++;                      /* the same one twice */
+        bench_wl_frame(BENCH_WL_LATE, seq, frame, length);
         return;
     }
     if (!r->free_count) {
         r->st->full++;
         flush(r, q);
+        while (q->head != seq) {            /* what was not here yet may come late */
+            skip(q, q->head);
+            step(q);
+        }
         r->deliver(r->context, frame, length);
-        q->head = (u16)((seq + 1) & SEQ_MASK);
+        step(q);
         return;
     }
     slot = r->free[--r->free_count];

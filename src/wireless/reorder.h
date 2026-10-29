@@ -32,6 +32,7 @@ typedef struct {
     u32 full;               /* no room to hold one: everything let go at once */
     u32 resyncs;            /* the window moved to a sender that started again */
     u32 ended;              /* a TID's frames stopped asking to be ordered */
+    u32 rescued;            /* behind the window, but a number given up on: handed up */
 } WL_REORDER_STATS;
 
 typedef void (*WL_DELIVER)(void *context, u8 *frame, u32 length);
@@ -44,6 +45,7 @@ typedef struct {
     u8  late_run;           /* frames in a row behind the window */
     u8  slot[WL_REORDER_WINDOW];    /* by sequence number mod 64: pool slot or NONE */
     u16 length[WL_REORDER_WINDOW];
+    u8  skipped[4096 / 8];  /* by sequence number: a hole the window moved past */
 } WL_REORDER_TID;
 
 typedef struct {
@@ -55,7 +57,8 @@ typedef struct {
     void *context;
     volatile WL_REORDER_STATS *st;
     u32 drop_late;          /* behind the window is a duplicate (mac80211's rule, for
-                             * a SoftMAC card), not a frame to hand up late (the
+                             * a SoftMAC card) unless its number is one the window
+                             * gave up on (skipped), not a frame to hand up late (the
                              * AIC8800's firmware's, as AICWF_RX_REORDER does); and
                              * never a reason to move the window back: an AP that
                              * repeats a whole aggregate whose block ack it missed

@@ -90,7 +90,7 @@ STRUCTS = {
                       "rx_dropped", "tx_data", "tx_dropped", "addba_requests",
                       "addba_accepted", "bw", "channel", "keys", "port_open", "rx_duplicates", "tx_ba",
                       "rx_ba", "r_held", "r_late", "r_jumps", "r_timeouts", "r_full",
-                      "r_resyncs", "r_ended"],
+                      "r_resyncs", "r_ended", "r_rescued"],
     "aic_stats": ["product", "step", "step_status", "chip_word", "chip_id", "mcu_id",
                   "fw_version", "bytes_loaded", "files_loaded",
                   "file_status", "commands", "timeouts", "tx_errors",
@@ -119,7 +119,7 @@ STRUCTS = {
                   "data_rx_short", "data_rx_truncated",
                   "data_rx_out_of_order", "reorder_held", "reorder_late", "reorder_jumps",
                   "reorder_timeouts", "reorder_full", "reorder_resyncs",
-                  "reorder_ended", "unexp0", "unexp1", "unexp2", "unexp3", "join_width", "join_center1",
+                  "reorder_ended", "reorder_rescued", "unexp0", "unexp1", "unexp2", "unexp3", "join_width", "join_center1",
                   "assoc_ht_cap", "assoc_vht_cap", "ap_vht_oper"],
     "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
                   "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
@@ -140,7 +140,8 @@ STRUCTS = {
                   "sent_lo", "sent_hi", "recv_lo", "recv_hi", "send_errors",
                   "recv_errors", "last_send_error", "last_recv_error", "sndbuf_result",
                   "rcvbuf_result", "flight_samples", "flight_kb_sum", "flight_max",
-                  "fh0", "fh1", "fh2", "fh3", "fh4", "fh5", "fh6", "fh7", "flight_resent"],
+                  "fh0", "fh1", "fh2", "fh3", "fh4", "fh5", "fh6", "fh7", "flight_resent",
+                  "thread_failures", "thread_status"],
     "wl_bridge_stats": ["scans", "joins", "missed", "secured"],
     "wl_omni_stats": ["registered", "attached", "present", "link", "gets", "sets",
                       "unknown_gets", "unknown_sets", "last_unknown", "scans", "joins",
@@ -343,11 +344,11 @@ def status(sym):
                           t["bw"], t["keys"], t["port_open"]))
                 print("sta data rx=%d dup=%d eapol=%d dropped=%d tx=%d dropped=%d | ba tx=%d rx=%#x "
                       "addba=%d/%d | reorder held=%d late=%d jumps=%d timeouts=%d full=%d "
-                      "resyncs=%d" % (
+                      "resyncs=%d rescued=%d" % (
                     t["rx_data"], t["rx_duplicates"], t["rx_eapol"], t["rx_dropped"],
                     t["tx_data"], t["tx_dropped"], t["tx_ba"], t["rx_ba"], t["addba_requests"],
                     t["addba_accepted"], t["r_held"], t["r_late"], t["r_jumps"],
-                    t["r_timeouts"], t["r_full"], t["r_resyncs"]))
+                    t["r_timeouts"], t["r_full"], t["r_resyncs"], t["r_rescued"]))
     if "aic_stats" in sym:
         for i in range(NET_MAX):
             a = read_struct(sym, "aic_stats", i)
@@ -509,9 +510,9 @@ def status(sym):
         ts = read_struct(sym, "tcp_stats")
     except KeyError:
         return
-    print("tcp      started=%d step=%d/%#x accepts=%d active=%d refused=%d" % (
+    print("tcp      started=%d step=%d/%#x accepts=%d active=%d refused=%d no_thread=%d/%#x" % (
         ts["started"], ts["step"], ts["step_error"], ts["accepts"], ts["active"],
-        ts["refused"]))
+        ts["refused"], ts["thread_failures"], ts["thread_status"]))
     print("tcp i/o  sent=%d recv=%d send_err=%d/%#x recv_err=%d/%#x" % (
         ts["sent_hi"] << 32 | ts["sent_lo"], ts["recv_hi"] << 32 | ts["recv_lo"],
         ts["send_errors"], ts["last_send_error"], ts["recv_errors"],
