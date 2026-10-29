@@ -53,19 +53,21 @@ regression:
   2026-10-29 did not repeat -- not traced yet). A 20 minute
   soak in each direction afterwards: 152-156 Mbit/s (19.0-19.5 MB/s) out, 122-130
   Mbit/s (15.2-16.2 MB/s) in, 32 of 32 rounds on the card.
-- **The xnet defaults** (system sockets; 2026-10-29): a 32 KB receive buffer
+- **The xnet defaults** (system sockets; 2026-10-29): a 63 KB receive buffer
   (`xnet_rcvbuf_kb = 0` keeps xnet's 16 KB) and the congestion window clamp at
   256 KB (`xnet_cwnd_kb = 0` keeps the stock 64 KB; with xnet's 63 KB send buffer
   it changes nothing until a program asks for more). Over the RTL8822BU, PC to
-  console: one stream 102 Mbit/s (12.8 MB/s) against 68 (8.5), four in alongside
-  four out 57-60 Mbit/s (7.1-7.5 MB/s) against 34-37 (4.3-4.6). Why no more: xnet
-  keeps about 270 KB of data for all system sockets, sent and received together,
-  and without SACK it stops every connection for good once that fills with data
+  console: one stream 129 Mbit/s (16.1 MB/s) against 68 (8.5), eight 187 Mbit/s
+  (23.4 MB/s), four in alongside four out 82-93 Mbit/s (10.3-11.6 MB/s) in and
+  85-86 Mbit/s (10.6-10.8 MB/s) out, against 34-37 (4.3-4.6) in. Why no more:
+  xnet keeps about 270 KB of data for all system sockets, sent and received
+  together (a 70-page pool, xam's default, taken before plugins load), and
+  without SACK it stops every connection for good once that fills with data
   waiting for a lost segment or an ACK. Over Wi-Fi it did, first through frames
   the reorder window dropped (fixed in 1b3e3f9: 8 streams in at 63 KB went from a
   stall within a few runs to 184-188 Mbit/s (23.0-23.5 MB/s) in 10 of 10), and
-  still with both directions busy at 128 KB (32 KB and 16 KB held, and a reader
-  stopped for 3 s). Over the wire it never came, even at 255 KB.
+  still with both directions busy at 128 KB; 63 KB held that, and a reader
+  stopped for 3 s. Over the wire it never came, even at 255 KB.
 - **A program that runs few connections** can ask for more on its listening
   socket (SO_RCVBUF/SO_SNDBUF before listen()): over Wi-Fi one stream in 171
   Mbit/s (21.4 MB/s) at 255 KB, one out 151 Mbit/s (18.9 MB/s) at 255 KB, eight in

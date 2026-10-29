@@ -339,17 +339,19 @@ static u32 setting_kb(const char *key, u32 fallback)
  * paused connections take 64 KB each, a fifth 14 KB, the rest nothing), and xnet
  * has no SACK: once data that waits for a missing segment, or for its ACK, fills
  * the pool, the segment that would free it is dropped too and every connection
- * stops for good. Over the wire that never came; over Wi-Fi it did, first through
- * frames our reorder window dropped (fixed, reorder.c), and still with both
- * directions busy: 4 connections each way at 128 KB stopped, at 32 KB and at the
- * stock 16 they did not, nor did 8 in with the reader stopped for 3 s. Hence 32 KB
- * (RCVBUF_DEFAULT_KB): one stream in 6.4 -> 12.8 MB/s, four in alongside four out
- * 4.5 -> 7.3; `xnet_rcvbuf_kb = 0` keeps xnet's 16. A program that runs few
- * connections can ask for more on its listening socket (8 in at 128 KB: 24.5 MB/s).
+ * stops for good. The pool is 70 pages, byte 13 of the 76 default config bytes
+ * at 0x81600090 (after the 13 of the public XNetStartupParams, so no caller can
+ * ask for more; xam allows up to 255), taken when a caller's xnet starts -- the
+ * system's before plugins load: raised from DllMain it stayed 270 KB. Over the
+ * wire the pool never filled; over Wi-Fi it did through frames our reorder window
+ * dropped (fixed, reorder.c), and still with both directions busy at 128 KB (4
+ * each way); at 63 KB that held, as did 8 in with the reader stopped for 3 s.
+ * Hence 63 KB (RCVBUF_DEFAULT_KB): one stream in 8.5 -> 16.1 MB/s, eight 23.4,
+ * four in beside four out 4.5 -> 10.7; `xnet_rcvbuf_kb = 0` keeps xnet's 16.
  * Sending is not limited by it (128 and 255 KB moved nothing), nor is ftpdll,
  * which picks its own buffers, nor XBDM, whose listener exists before this runs
  * and passes its 16 KB to what it accepts. Thread. */
-#define RCVBUF_DEFAULT_KB   32u
+#define RCVBUF_DEFAULT_KB   63u
 static void set_buffers(void)
 {
     u8 *xnet = *(u8 **)((u8 *)title_user + USER_CTX_OFF);
