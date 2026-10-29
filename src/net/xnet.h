@@ -62,6 +62,8 @@ typedef struct {
     u32 cwnd_refused;       /* 1: xam's code was not the expected, nothing patched */
     u32 xq_stalls;          /* times the uplink took nothing for ~2 s */
     u32 xq_stall_depth;     /* frames waiting the last time */
+    u32 pool_added_kb;      /* added to the system sockets' pool, from xnet_pool_kb */
+    u32 pool_refused;       /* 1: not the xam laid out as expected, 2: no memory */
 } XNET_STATS;
 
 extern volatile u32 xnet_rx_iface;

@@ -153,7 +153,7 @@ STRUCTS = {
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
-                   "xq_high", "link_fallback", "rcvbuf_before", "rcvbuf_after", "sndbuf_before", "sndbuf_after", "cwnd_kb", "cwnd_refused", "xq_stalls", "xq_stall_depth"],
+                   "xq_high", "link_fallback", "rcvbuf_before", "rcvbuf_after", "sndbuf_before", "sndbuf_after", "cwnd_kb", "cwnd_refused", "xq_stalls", "xq_stall_depth", "pool_added_kb", "pool_refused"],
 }
 
 
@@ -499,6 +499,8 @@ def status(sym):
         xs["xq_stalls"], xs["xq_stall_depth"],
         "refused (other xam)" if xs["cwnd_refused"] else
         ("%d KB" % xs["cwnd_kb"]) if xs["cwnd_kb"] else "stock 64 KB"))
+    print("xnet mem system pool +%d KB%s" % (xs["pool_added_kb"],
+        " (refused %d)" % xs["pool_refused"] if xs["pool_refused"] else ""))
     if "debug_tx_stall" in sym:
         for i in range(NET_MAX):
             d = read_struct(sym, "debug_tx_stall", i)

@@ -452,6 +452,102 @@ static void set_cwnd(void)
     mem_sync();
 }
 
+/* --- the pool of system sockets -------------------------------------------------
+ *
+ * What every system socket's data sits in: a CXnMem in the xnet object at +0x828
+ * (titles' at +0x7A8, the NIC's 16 KB at +0x64): { hal (the xnet object), start,
+ * end, ?, six free lists }, 70 pages taken when the system's xnet started (see
+ * set_buffers). Its allocator (PoolAlloc 0x81748718, PoolFree 0x817488F0, under
+ * the lock at 0x81AC7C00) works in 32-byte units with boundary tags -- a header
+ * of { slack, in use, tag, units, units of the one before } ahead of each block
+ * -- merges a freed block with its neighbours by those tags alone and never looks
+ * at start or end. So a second region laid out as MemInitUsingBuffer (0x81748130)
+ * lays out the first, an in-use 'Tf' block, one free block, an in-use 'Tg' block,
+ * and its free block put on the list of large ones (+0x38), is more pool.
+ * `xnet_pool_kb =` adds that much (0 or none: nothing; at most 2048). Measured
+ * over the RTL8822BU, +768 KB: 9 paused connections took 64 KB each (577 KB, the
+ * tenth found no socket: system xnet has 16); xnet_rcvbuf_kb 128, which stopped
+ * every connection with four each way at once on the stock pool, held five such
+ * runs, 8 in with the reader stopped for 3 s, one stream in 18.7 MB/s (16.1 at
+ * 63); 255 KB with 8 in, 2 MB of windows, still stopped. Off until validated.
+ * xerunner: xnet-caller-pool-size@1 */
+#define POOL_SYSTEM_OFF     0x828u
+#define POOL_STOCK_BYTES    (70u * 4096u)
+#define POOL_LARGE_LIST     0x38u
+#define POOL_UNIT           32u
+#define POOL_TAG_FIRST      0x5466u     /* 'Tf' */
+#define POOL_TAG_LAST       0x5467u     /* 'Tg' */
+#define XNET_LOCK           0x81AC7C00u
+#define XNET_LOCK_TAKE      0x81763388u
+#define XNET_LOCK_GIVE      0x81763410u
+#define POOL_EXTRA_MAX_KB   2048u
+
+static const u32 lock_take_code[4] = { 0x7D8802A6u, 0x4BFCA039u, 0x9421FF80u, 0x7C7B1B78u };
+static const u32 lock_give_code[4] = { 0x7D8802A6u, 0x4BFC9FB9u, 0x9421FF90u, 0x3D6081ACu };
+
+static u32 code_is(u32 at, const u32 *words)
+{
+    u32 i;
+
+    for (i = 0; i < 4; i++)
+        if (((volatile u32 *)(unsigned long)at)[i] != words[i])
+            return 0;
+    return 1;
+}
+
+static void put_header(u8 *b, u32 in_use, u32 tag, u32 units, u32 before)
+{
+    b[0] = 0;
+    b[1] = (u8)in_use;
+    *(u16 *)(b + 2) = (u16)tag;
+    *(u16 *)(b + 4) = (u16)units;
+    *(u16 *)(b + 6) = (u16)before;
+}
+
+static void extend_pool(void)
+{
+    u8 *xnet = *(u8 **)((u8 *)title_user + USER_CTX_OFF), *mem, *region, *blk, *last;
+    u32 kb = setting_kb("xnet_pool_kb", 0), units, irql, *head, *first;
+    u32 (*take)(void *) = (u32 (*)(void *))(unsigned long)XNET_LOCK_TAKE;
+    void (*give)(void *, u32) = (void (*)(void *, u32))(unsigned long)XNET_LOCK_GIVE;
+
+    if (!kb || kb > POOL_EXTRA_MAX_KB || xnet_stats.pool_added_kb)
+        return;
+    if (!xnet || !MmIsAddressValid(xnet + POOL_SYSTEM_OFF + 0x40))
+        return;
+    mem = xnet + POOL_SYSTEM_OFF;
+    if (*(u8 **)mem != xnet ||
+        *(u32 *)(mem + 8) - *(u32 *)(mem + 4) != POOL_STOCK_BYTES ||
+        !code_is(XNET_LOCK_TAKE, lock_take_code) || !code_is(XNET_LOCK_GIVE, lock_give_code)) {
+        xnet_stats.pool_refused = 1;
+        return;
+    }
+    region = (u8 *)ExAllocatePoolTypeWithTag(kb * 1024u, 0x4E455465u, 2);  /* 'NETe', as xam */
+    if (!region) {
+        xnet_stats.pool_refused = 2;
+        return;
+    }
+    /* first 'Tf' (one unit), the free block, last 'Tg' (one unit), 32-byte aligned */
+    blk = (u8 *)(((unsigned long)region + POOL_UNIT - 1) & ~(unsigned long)(POOL_UNIT - 1));
+    units = (u32)((region + kb * 1024u - blk) / POOL_UNIT) - 2;
+    last = blk + (units + 1) * POOL_UNIT;
+    put_header(blk, 1, POOL_TAG_FIRST, 1, 0);
+    put_header(blk + POOL_UNIT, 0, 0, units, 1);
+    put_header(last, 1, POOL_TAG_LAST, 1, units);
+    blk += POOL_UNIT;
+
+    irql = take((void *)(unsigned long)XNET_LOCK);
+    head = (u32 *)(mem + POOL_LARGE_LIST);
+    first = (u32 *)(unsigned long)head[0];
+    *(u32 *)(blk + 12) = (u32)(unsigned long)head;      /* prev: the list head */
+    *(u32 *)(blk + 8) = (u32)(unsigned long)first;      /* next: what was first */
+    first[1] = (u32)(unsigned long)(blk + 8);
+    head[0] = (u32)(unsigned long)(blk + 8);
+    mem_sync();
+    give((void *)(unsigned long)XNET_LOCK, irql);
+    xnet_stats.pool_added_kb = (units * POOL_UNIT) >> 10;
+}
+
 /* --- enable / disable -------------------------------------------------------- */
 
 u32 xnet_enable(void)
@@ -476,6 +572,7 @@ u32 xnet_enable(void)
     xnet_stats.user = (u32)(unsigned long)title_user;
     set_buffers();
     set_cwnd();
+    extend_pool();
 
     saved_xmit_lis = xmit[0];
     saved_xmit_addi = xmit[1];
