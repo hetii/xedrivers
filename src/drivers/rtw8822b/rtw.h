@@ -47,7 +47,7 @@
 #define RTW_EP_NORMAL       1                   /* voice, video */
 #define RTW_EP_LOW          2                   /* best effort, background */
 #define RTW_OUT_MAX         4
-#define RTW_TX_COUNT        32
+#define RTW_TX_COUNT        16
 #define RTW_TX_SLOT         12296       /* six descriptors and frames (RTW_TX_AGG), 8 to pad */
 #define RTW_TX_AGG          6           /* frames to a transfer (usb_tx_agg_desc_num is 3) */
 #define RTW_RX_COUNT        8
