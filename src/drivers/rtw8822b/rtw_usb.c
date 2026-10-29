@@ -190,6 +190,7 @@ u32 rtw_bulk_out(RTW *r, u32 ep, const u8 *data, u32 length)
     usb_prepare(&r->tx_urb, r->dev, r->ep_out[ep], bulk_done, r->bulk_buf, length, 0);
     r->tx_urb.Owner = r;
     usb_submit(&r->tx_urb);
+    usb_spin(&r->tx_done);
     for (waited = 0; !r->tx_done; waited++) {
         if (waited >= BULK_MS || !r->dev->active) {
             r->st->bulk_errors++;

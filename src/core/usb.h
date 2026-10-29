@@ -64,6 +64,7 @@ void  usb_submit(URB *urb);
  * holds it wrecks the controller's lists: every synchronous helper asks this
  * first, and its completion clears Busy. */
 u32   usb_wait_idle(URB *urb, u32 timeout_ms);
+void  usb_spin(volatile u32 *done);    /* up to 1 ms for a transfer just submitted */
 
 /* Fill a request for `dev`'s default endpoint or for `endpoint`. */
 void  usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,

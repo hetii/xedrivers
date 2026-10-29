@@ -146,6 +146,29 @@ void usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
 
 /* --- synchronous control transfers, for the bring-up thread ------------------ */
 
+/* A synchronous transfer is mostly done in a fraction of a millisecond: watching
+ * for that here first means nobody waits on wake_event yet when the completion sets
+ * it, so the USB processor does not have to send this one a request to run again.
+ * Two processors sending each other requests for every transfer of a bring-up is
+ * what both stopped in (see main.c). The timebase runs at 50 MHz. */
+#define SPIN_TB 50000u                  /* 1 ms */
+
+void usb_spin(volatile u32 *done)
+{
+#if defined(__powerpc__)
+    u32 start, now;
+
+    __asm__ volatile("mftb %0" : "=r"(start));
+    do {
+        if (*done)
+            return;
+        __asm__ volatile("mftb %0" : "=r"(now));
+    } while (now - start < SPIN_TB);
+#else
+    (void)done;
+#endif
+}
+
 u32 usb_wait_idle(URB *urb, u32 timeout_ms)
 {
     u32 waited;
@@ -185,6 +208,7 @@ u32 usb_control(USB_DEV *dev, const u8 setup[8], void *buffer, u32 length,
     usb_prepare(&dev->control_urb, dev, dev->control, control_complete, buffer, length,
                 setup);
     usb_submit(&dev->control_urb);
+    usb_spin(&dev->control_done);
 
     for (waited = 0; !dev->control_done; waited++) {
         if (waited >= timeout_ms)

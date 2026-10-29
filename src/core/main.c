@@ -101,7 +101,7 @@ static u32 run(u32 what)
  * at PCR+0x100. */
 extern u32 KeSetAffinityThread(void *thread, u32 affinity, u32 *previous);
 
-static void away_from_the_usb_processor(void)
+static void run_on(u32 processor)
 {
     void *self;
     u32 previous;
@@ -111,7 +111,12 @@ static void away_from_the_usb_processor(void)
 #else
     self = 0;
 #endif
-    KeSetAffinityThread(self, 1u << WORKER_PROCESSOR, &previous);
+    KeSetAffinityThread(self, 1u << processor, &previous);
+}
+
+static void away_from_the_usb_processor(void)
+{
+    run_on(WORKER_PROCESSOR);
 }
 
 /* Whether any device is owned: the boot claims stop once one is (the others that
@@ -145,7 +150,6 @@ static void worker(void *parameter)
         if (!owned() && xe_state.claim_attempts < 6 &&
             (tick == 50 || (tick > 50 && tick % 250 == 0))) {
             xe_state.claim_attempts++;
-            bench_trace("[claim]");
             if (usb_claim_present())
                 xe_state.claim_found++;
         }
@@ -155,13 +159,22 @@ static void worker(void *parameter)
 
             if (dev->active && dev->generation != seen_generation[i]) {
                 seen_generation[i] = dev->generation;
-                bench_trace("[bring up]");
+                /* A bring-up is thousands of synchronous transfers in a row (the
+                 * firmware, the efuse map): from thread 5 each is a DPC sent to
+                 * thread 2 and a wake sent back, and about one boot in twenty
+                 * both threads stopped there for good, every other one running
+                 * on -- crossed interprocessor requests, as it looks (thread 5
+                 * was last seen inside KeInsertQueueDpc). On the USB processor
+                 * both stay local; the dim (above) does not come into a
+                 * bring-up's seconds. The scan's channel changes later are the
+                 * same kind of burst: usb_spin keeps the wake from being sent.
+                 * 2026-10-29: 0 stops in 60 boots, from 5 in about 100. */
+                run_on(USB_PROCESSOR);
                 net_bring_up(dev);
+                away_from_the_usb_processor();
             }
         }
-        bench_where('n');
         net_tick();
-        bench_where('.');
 
         what = xe_cmd[0];
         if (what) {
@@ -171,9 +184,7 @@ static void worker(void *parameter)
             xe_cmd[6] = what;
             xe_cmd[4] = xe_cmd[4] + 1;
         }
-        bench_where('z');
         usb_wait(20);
-        bench_where('a');
     }
 }
 
