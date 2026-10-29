@@ -392,9 +392,10 @@ static void set_buffers(void)
  * needs a send buffer that large: the largest allowed for system sockets and
  * titles goes up with it (xnet_sndbuf_kb sets the system default).
  * Measured over the RTL8822BU: one stream out 101 Mbit/s (12.6 MB/s) stock, 124
- * (15.5) at 128 KB, 134 (16.8) at 256 KB; but 8 streams at 128 KB or 4 at 256
- * KB (~1 MB in flight) stop the card's bulk IN until the receive watchdog
- * resets it -- hence off unless asked for.
+ * (15.5) at 128 KB, 134 (16.8) at 256 KB, each with a send buffer as big. The
+ * send buffers are what runs out: xnet's pool holds about 4 x 63 KB of them, and
+ * 8 sockets with 128 KB stall every connection, the card's receive with them
+ * (the clamp alone, 8 streams at 63 KB, does not) -- hence off unless asked for.
  * xerunner: xnet-congestion-window-cap@1 */
 #define CWND_LIS            0x81766444u
 #define CWND_CMP_SLOW       0x81766478u

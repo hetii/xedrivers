@@ -55,8 +55,10 @@ regression:
   Mbit/s (15.2-16.2 MB/s) in, 32 of 32 rounds on the card.
 - **One stream out of the console** is bound by xnet's congestion window, which it
   clamps to 64 KB (`xnet_cwnd_kb` lifts the clamp, off by default): it goes from 101 Mbit/s (12.6 MB/s) to 124 Mbit/s (15.5 MB/s) at 128 KB and 134 Mbit/s
-  (16.8 MB/s) at 256 KB; eight streams at 128 KB stall the RTL8822BU's receive
-  until its watchdog resets it, ~30 s.
+  (16.8 MB/s) at 256 KB, with a send buffer as large (`xnet_sndbuf_kb`). Those
+  buffers come from xnet's pool, which holds about four of 63 KB: eight sockets
+  of 128 KB stall every connection on the console, and resetting the card does not
+  bring them back.
 - **Wi-Fi into the console with one stream** is bound by the console's TCP window
   (17.5 KB) over the radio's round trip, not by the driver. With
   `xectl.py set tcp_rcvbuf 0xffff` the RTL8822BU carries 113-115 Mbit/s
