@@ -83,6 +83,12 @@ volatile u32 tcp_cpu = 0;         /* N+1 pins each connection to hardware thread
  * 20 is the best of them and stays below the real-time band. 0 leaves it alone. */
 volatile u32 tcp_prio = 20;
 volatile u32 tcp_nodelay = 0;
+volatile u32 tcp_sink_pause = 0;
+/* SO_RCVBUF/SO_SNDBUF on the listening sockets, before listen(): what an accepted
+ * connection inherits and what its SYN-ACK offers (window scaling) -- set them
+ * before cmd 14. 0 leaves xnet's defaults. */
+volatile u32 tcp_listen_rcvbuf = 0;
+volatile u32 tcp_listen_sndbuf = 0;  /* the sink stops reading while set: buffers fill */
 volatile TCP_STATS tcp_stats;
 
 typedef struct {
@@ -206,6 +212,10 @@ static void serve(void *parameter)
 
     for (;;) {
         if (slot->sink) {
+            if (tcp_sink_pause) {
+                sleep_ms(10);
+                continue;
+            }
             moved = NetDll_recv(CALLER_SYSAPP, slot->socket, slot->buffer,
                                 (int)chunk, 0);
             if (moved > 0) {
@@ -263,6 +273,14 @@ static u32 listener(u32 port, u32 *out)
         return fail(TCP_ERR_INSECURE);
     }
 
+    if (tcp_listen_rcvbuf) {
+        i = tcp_listen_rcvbuf;
+        NetDll_setsockopt(CALLER_SYSAPP, socket, SOL_SOCKET, SO_RCVBUF, &i, sizeof(i));
+    }
+    if (tcp_listen_sndbuf) {
+        i = tcp_listen_sndbuf;
+        NetDll_setsockopt(CALLER_SYSAPP, socket, SOL_SOCKET, SO_SNDBUF, &i, sizeof(i));
+    }
     address.family = AF_INET;
     address.port = (u16)port;           /* big-endian machine: already network */
     address.address = 0;                /* every interface */
@@ -389,11 +407,35 @@ static const u8 *tcp_of(const u8 *f, u32 length, u32 *payload)
     return f + 14 + ihl;
 }
 
+/* Every segment xnet is handed on PORT_SINK and every ACK it sends there, for a
+ * capture on the PC to be held against: { time base, sequence or ack number,
+ * client port << 16 | payload length, with bit 15 set for what the console sent }. */
+#define TRACE_COUNT 8192
+volatile u32 sink_trace[TRACE_COUNT][3];
+volatile u32 sink_trace_at;
+
+static void trace(const u8 *t, u32 number, u32 port, u32 word)
+{
+    u32 at = __sync_fetch_and_add(&sink_trace_at, 1) & (TRACE_COUNT - 1), tb;
+
+    (void)t;
+#if defined(__powerpc__)
+    __asm__ volatile("mftb %0" : "=r"(tb));
+#else
+    tb = 0;
+#endif
+    sink_trace[at][0] = tb;
+    sink_trace[at][1] = number;
+    sink_trace[at][2] = port << 16 | word;
+}
+
 void tcp_flight_out(const u8 *frame, u32 length)
 {
     u32 payload, top, flight, kb;
     const u8 *t = tcp_of(frame, length, &payload);
 
+    if (t && ((u32)t[0] << 8 | t[1]) == PORT_SINK)
+        trace(t, be32(t + 8), (u32)t[2] << 8 | t[3], 0x8000u | (t[13] & 0x3Fu));
     if (!t || ((u32)t[0] << 8 | t[1]) != PORT_SOURCE || !payload)
         return;
     top = be32(t + 4) + payload;
@@ -422,6 +464,8 @@ void tcp_flight_in(const u8 *frame, u32 length)
     u32 payload, ack;
     const u8 *t = tcp_of(frame, length, &payload);
 
+    if (t && ((u32)t[2] << 8 | t[3]) == PORT_SINK)
+        trace(t, be32(t + 4), (u32)t[0] << 8 | t[1], payload & 0x7FFFu);
     if (!t || ((u32)t[2] << 8 | t[3]) != PORT_SOURCE || !(t[13] & 0x10))
         return;
     if (t[13] & 0x02) {                     /* a new connection's SYN */

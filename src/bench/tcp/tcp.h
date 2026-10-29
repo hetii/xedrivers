@@ -31,6 +31,9 @@ extern volatile u32 tcp_nodelay;    /* TCP_NODELAY on the source's sends */
 extern volatile u32 tcp_timeout;    /* SO_SNDTIMEO/SO_RCVTIMEO in ms, 0 = none */
 extern volatile u32 tcp_cpu;        /* N+1 pins a connection to hardware thread N */
 extern volatile u32 tcp_prio;       /* absolute thread priority, 0 = leave it */
+extern volatile u32 tcp_sink_pause; /* the sink stops reading while set */
+extern volatile u32 tcp_listen_rcvbuf;  /* SO_RCVBUF on the listeners, before cmd 14 */
+extern volatile u32 tcp_listen_sndbuf;  /* SO_SNDBUF on the listeners, before cmd 14 */
 
 /* Start the listeners. Thread-only -- it allocates and blocks. Returns 0, or the
  * step that failed; calling it again after success does nothing. */
