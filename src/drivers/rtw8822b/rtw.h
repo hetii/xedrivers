@@ -147,6 +147,8 @@ typedef struct {
     u32 rxs_rxdma_status;       /* REG_RXDMA_STATUS, */
     u32 rxs_txdma_status;       /* REG_TXDMA_STATUS */
     u32 rxs_fifo_info;          /* REG_FIFOPAGE_INFO_1 */
+    u32 rx_kicks;               /* receive transfers taken back and queued again */
+    u32 rx_kick_ok;             /* after which the receive went on */
 } RTW_STATS;
 
 extern volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
@@ -185,6 +187,7 @@ typedef struct RTW {
     u32 rx_failing[RTW_RX_COUNT];       /* errors in a row on each transfer */
     volatile u32 rx_parked;             /* transfers left unqueued after too many */
     u32 rx_seen;                        /* the watchdog's last rx_transfers */
+    u32 rx_kicked;                      /* transfers taken back since the last progress */
     u32 rx_quiet;
 
     u32 scan_index;             /* the channel being listened on, while scanning */

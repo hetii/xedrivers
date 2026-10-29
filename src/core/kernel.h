@@ -183,6 +183,9 @@ extern void  UsbdQueueAsyncTransfer(void *device, URB *urb);
 extern void  UsbdQueueCloseDefaultEndpoint(void *device, URB *urb);
 extern void  UsbdQueueCloseEndpoint(void *device, URB *urb);
 extern int   UsbdResetDevice(void *device);
+/* (urb): ordinal 741 -- 17559's 0x800D82E8 takes the controller from urb+18 and
+ * returns at once when urb+17 says it is done. */
+extern void  UsbdCancelAsyncTransfer(URB *urb);
 extern void *UsbdGetRootHubDeviceNode(u32 controller);
 extern void *UsbdGetPortDeviceNode(void *hub, u32 port);
 

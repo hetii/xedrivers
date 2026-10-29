@@ -414,17 +414,31 @@ static void tx_watchdog(RTW *r)
  * nothing short of a reset brings it back. The core then brings it up again and
  * the station joins anew. */
 #define RX_STALL_TICKS  60              /* ~2 s of 33 ms ticks; beacons come every 0.1 s */
+#define RX_KICK_TICKS   4               /* ~0.13 s: take the transfers back first */
 
 static void rx_watchdog(RTW *r)
 {
     u32 i, busy;
 
     if (!r->st->linked || (r->st->rx_transfers != r->rx_seen && r->rx_parked < RTW_RX_COUNT)) {
+        if (r->rx_kicked && r->st->linked)
+            r->st->rx_kick_ok++;
+        r->rx_kicked = 0;
         r->rx_seen = r->st->rx_transfers;
         r->rx_quiet = 0;
         return;
     }
-    if (++r->rx_quiet < RX_STALL_TICKS)
+    if (++r->rx_quiet == RX_KICK_TICKS) {
+        /* first only take the transfers back: each completes cancelled and goes
+         * out again (rx_done), which is all it takes if the controller had stopped
+         * asking for them; the card is reset only if that does nothing */
+        r->st->rx_kicks++;
+        r->rx_kicked = 1;
+        for (i = 0; i < RTW_RX_COUNT; i++)
+            usb_cancel(&r->rx_urb[i]);
+        return;
+    }
+    if (r->rx_quiet < RX_STALL_TICKS)
         return;
     r->rx_quiet = 0;
     r->st->rx_stalls++;

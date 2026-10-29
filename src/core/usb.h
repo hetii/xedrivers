@@ -64,7 +64,8 @@ void  usb_submit(URB *urb);
  * holds it wrecks the controller's lists: every synchronous helper asks this
  * first, and its completion clears Busy. */
 u32   usb_wait_idle(URB *urb, u32 timeout_ms);
-void  usb_spin(volatile u32 *done);    /* up to 1 ms for a transfer just submitted */
+void  usb_spin(volatile u32 *done);
+void  usb_cancel(URB *urb);            /* the controller gives it back, cancelled */    /* up to 1 ms for a transfer just submitted */
 
 /* Fill a request for `dev`'s default endpoint or for `endpoint`. */
 void  usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
@@ -104,6 +105,7 @@ typedef struct {
     u32 unbound_resets;     /* nodes no driver had, reset to be offered again */
     u32 no_slot;            /* devices refused: USB_MAX_DEVICES already owned */
     u32 control_late;       /* control requests refused: the last one still out */
+    u32 cancels;            /* requests taken back (usb_cancel) */
 } USB_STATS;
 
 extern volatile USB_STATS usb_stats;

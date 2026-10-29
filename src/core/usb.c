@@ -23,6 +23,12 @@ static URB *submit_head;
 static URB *submit_tail;
 static KDPC submit_dpc;
 
+/* Requests to cancel, for the USB processor too (usb_cancel). */
+#define CANCEL_MAX 16
+static URB *cancel_list[CANCEL_MAX];
+static volatile u32 cancel_count;
+static KDPC cancel_dpc;
+
 
 static u16 le16(const u8 *p)
 {
@@ -120,6 +126,40 @@ void usb_submit(URB *urb)
     submit_tail = urb;
     KfReleaseSpinLock(&submit_lock, irql);
     KeInsertQueueDpc(&submit_dpc, 0, 0);
+}
+
+static void cancel_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
+{
+    URB *list[CANCEL_MAX];
+    u32 n, i;
+
+    (void)dpc;
+    (void)context;
+    (void)a1;
+    (void)a2;
+    KeAcquireSpinLockAtRaisedIrql(&submit_lock);
+    n = cancel_count;
+    for (i = 0; i < n; i++)
+        list[i] = cancel_list[i];
+    cancel_count = 0;
+    KeReleaseSpinLockFromRaisedIrql(&submit_lock);
+    for (i = 0; i < n; i++)
+        if (list[i]->Busy) {
+            usb_stats.cancels++;
+            UsbdCancelAsyncTransfer(list[i]);
+        }
+}
+
+/* Take back a request the controller holds: it completes, cancelled, as any other
+ * would. Run on the USB processor like a submit. Any IRQL. */
+void usb_cancel(URB *urb)
+{
+    u32 irql = KfAcquireSpinLock(&submit_lock);
+
+    if (cancel_count < CANCEL_MAX)
+        cancel_list[cancel_count++] = urb;
+    KfReleaseSpinLock(&submit_lock, irql);
+    KeInsertQueueDpc(&cancel_dpc, 0, 0);
 }
 
 void usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
@@ -369,6 +409,8 @@ int usb_register(const USB_CLIENT *who)
     wake_ready = 1;
     KeInitializeDpc(&submit_dpc, submit_dpc_routine, 0);
     submit_dpc.TargetNumber = USB_PROCESSOR + 1;
+    KeInitializeDpc(&cancel_dpc, cancel_dpc_routine, 0);
+    cancel_dpc.TargetNumber = USB_PROCESSOR + 1;
 
     /* xerunner: usb-driver-object-f2@1 -- both list words zero or a bug check. */
     driver_object.ListEntry.Flink = 0;
