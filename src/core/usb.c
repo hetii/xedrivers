@@ -146,6 +146,18 @@ void usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
 
 /* --- synchronous control transfers, for the bring-up thread ------------------ */
 
+u32 usb_wait_idle(URB *urb, u32 timeout_ms)
+{
+    u32 waited;
+
+    for (waited = 0; urb->Busy; waited++) {
+        if (waited >= timeout_ms)
+            return 0;
+        usb_wait(1);
+    }
+    return 1;
+}
+
 static void control_complete(URB *urb, u32 status)
 {
     USB_DEV *dev = urb->Dev;
@@ -164,16 +176,9 @@ u32 usb_control(USB_DEV *dev, const u8 setup[8], void *buffer, u32 length,
 
     if (!dev->active || !dev->control)
         return STATUS_UNSUCCESSFUL;
-    /* A request that timed out is still the host controller's: preparing the same
-     * request again would rewrite one the controller holds on its lists (and the
-     * buffer it may still fill), which wrecks them. Wait for it a while longer;
-     * if it does not come back, refuse rather than touch it. */
-    for (waited = 0; dev->control_urb.Busy; waited++) {
-        if (waited >= timeout_ms) {
-            usb_stats.control_late++;
-            return STATUS_UNSUCCESSFUL;
-        }
-        usb_wait(1);
+    if (!usb_wait_idle(&dev->control_urb, timeout_ms)) {
+        usb_stats.control_late++;
+        return STATUS_UNSUCCESSFUL;
     }
 
     dev->control_done = 0;

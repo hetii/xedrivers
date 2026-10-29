@@ -105,6 +105,7 @@ static void tx_complete(URB *urb, u32 status)
     AIC *a = (AIC *)urb->Owner;
 
     a->tx_status = status;
+    urb->Busy = 0;
     mem_sync();
     a->tx_done = 1;
     usb_wake();
@@ -161,6 +162,12 @@ u32 aic_send(AIC *a, u32 id, const void *params, u32 length, u32 cfm_id)
 
     if (!a->running || !a->dev->active || total > AIC_TX_SIZE)
         return STATUS_UNSUCCESSFUL;
+    /* the last command's transfer may have timed out and still be queued: its
+     * buffer and request are not touched until it is back (usb_wait_idle) */
+    if (!usb_wait_idle(&a->tx_urb, TX_TIMEOUT_MS)) {
+        a->st->timeouts++;
+        return STATUS_UNSUCCESSFUL;
+    }
     b[0] = (u8)(total - 4);
     b[1] = (u8)(((total - 4) >> 8) & 0x0F);
     b[2] = AIC_TYPE_CMD_RSP;

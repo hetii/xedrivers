@@ -178,15 +178,9 @@ u32 rtw_bulk_out(RTW *r, u32 ep, const u8 *data, u32 length)
 
     if (ep >= r->out_count || !r->ep_out[ep] || length > RTW_FW_MAX)
         return STATUS_UNSUCCESSFUL;
-    /* as usb_control: a transfer that timed out is not prepared again, nor its
-     * buffer written, until the controller has given it back */
-    for (waited = 0; r->tx_urb.Busy; waited++) {
-        if (waited >= BULK_MS || !r->dev->active) {
-            r->st->bulk_late++;
-            bench_trace("[bulk late]");
-            return STATUS_UNSUCCESSFUL;
-        }
-        usb_wait(1);
+    if (!usb_wait_idle(&r->tx_urb, BULK_MS) || !r->dev->active) {   /* usb.h */
+        r->st->bulk_late++;
+        return STATUS_UNSUCCESSFUL;
     }
     if (data != r->bulk_buf)
         for (i = 0; i < length; i++)
@@ -198,7 +192,6 @@ u32 rtw_bulk_out(RTW *r, u32 ep, const u8 *data, u32 length)
     usb_submit(&r->tx_urb);
     for (waited = 0; !r->tx_done; waited++) {
         if (waited >= BULK_MS || !r->dev->active) {
-            bench_trace("[bulk timeout]");
             r->st->bulk_errors++;
             r->st->bulk_last_error = STATUS_UNSUCCESSFUL;
             return STATUS_UNSUCCESSFUL;

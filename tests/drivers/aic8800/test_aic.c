@@ -205,6 +205,12 @@ static void deliver_answers(void)
 static u8 sent[4096];
 static u32 sent_length, sent_count;
 
+u32 usb_wait_idle(URB *urb, u32 timeout_ms)
+{
+    (void)timeout_ms;
+    return !urb->Busy;
+}
+
 void usb_submit(URB *urb)
 {
     if (urb->Endpoint == EP_BT)

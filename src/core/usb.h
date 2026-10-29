@@ -58,6 +58,13 @@ int   usb_register(const USB_CLIENT *client);
 void *usb_open(USB_DEV *dev, u32 type, u32 address, u32 max_packet, u32 interval);
 void  usb_submit(URB *urb);
 
+/* Thread-only: wait until `urb` is not the host controller's any more, up to
+ * `timeout_ms`; 0 if it still is. A synchronous request that timed out stays
+ * queued, and preparing it again (or writing its buffer) while the controller
+ * holds it wrecks the controller's lists: every synchronous helper asks this
+ * first, and its completion clears Busy. */
+u32   usb_wait_idle(URB *urb, u32 timeout_ms);
+
 /* Fill a request for `dev`'s default endpoint or for `endpoint`. */
 void  usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
                   void *buffer, u32 length, const u8 *setup);
