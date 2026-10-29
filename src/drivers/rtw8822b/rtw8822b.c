@@ -132,6 +132,11 @@ static u32 rtw8822b_start(NET_DEV *nd)
     }
     r->tx_inflight = 0;
     r->tx_lock = 0;
+    /* a fresh firmware takes commands from mailbox 0 and packets from sequence
+     * 0: left where the last bring-up stopped, after a reset the media status
+     * and RA info went to a mailbox it never read, and the link ran at 6M */
+    r->h2c_box = 0;
+    r->h2c_seq = 0;
     for (step = 0; step < RTW_OUT_MAX; step++) {
         r->tx_ep_busy[step] = 0;
         r->tx_open[step] = RTW_TX_COUNT;
