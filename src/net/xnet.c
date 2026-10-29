@@ -342,7 +342,8 @@ static u32 setting_kb(const char *key, u32 fallback)
  * stops for good. The pool is 70 pages, byte 13 of the 76 default config bytes
  * at 0x81600090 (after the 13 of the public XNetStartupParams, so no caller can
  * ask for more; xam allows up to 255), taken when a caller's xnet starts -- the
- * system's before plugins load: raised from DllMain it stayed 270 KB. Over the
+ * system's before plugins load: raised from DllMain it stayed 270 KB (xerunner:
+ * xnet-caller-pool-size@1). Over the
  * wire the pool never filled; over Wi-Fi it did through frames our reorder window
  * dropped (fixed, reorder.c), and still with both directions busy at 128 KB (4
  * each way); at 63 KB that held, as did 8 in with the reader stopped for 3 s.
