@@ -12,47 +12,60 @@ copied from xerunner.
 ## Cards and speeds
 
 Every card measured the same way: the console on the home router (OpenWrt
-ZBT-WE1326; Wi-Fi on 5 GHz channel 36 VHT80, a metre away), the PC wired to it at
-1 Gbit/s. "TCP RAM" is the plugin's own server (`src/bench/tcp`, `tests/tcpbench.py`,
-10 s a run), RAM to RAM with no disk; "FTP" is ftpdll, 64 MB to and from `Hdd1:`.
-Each figure is the range of three or more runs, in MB/s.
+ZBT-WE1326; Wi-Fi on 5 GHz VHT80, a metre away: channel 36 for the AIC8800, channel
+100 for the RTL8822BU, which since 7a95aff sets its TX power from its efuse), the PC
+wired to it at 1 Gbit/s. "TCP RAM" is the plugin's own server (`src/bench/tcp`,
+`tests/tcpbench.py`, 10 s a run), RAM to RAM with no disk; "FTP" is ftpdll, 64 MB to and from `Hdd1:`.
+Each figure is the range of three or more runs; the xedrivers.ini defaults, no
+`xnet_*` options.
 
 | # | card | VID:PID | test | console -> PC | PC -> console |
 |---|---|---|---|---|---|
-| 1 | Realtek RTL8156B, 2.5G Ethernet | `0bda:8156` | TCP RAM, 1-4 streams | 21.8-22.0 | 26.8-27.0 |
-| 2 | Realtek RTL8156B, 2.5G Ethernet | `0bda:8156` | FTP 64 MB | 19.6-19.7 | 20.5 |
-| 3 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 1 stream | 12.9-13.0 | 7.7-8.2 |
-| 4 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 4 streams | 17.5-17.8 | 13.0-13.7 |
-| 5 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | FTP 64 MB | 10.8 | 11.2 |
-| 6 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 1 stream | 10.8-13.9 | 5.5-6.8 |
-| 7 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 4 streams | 16.7-18.9 | 14.6-18.3 |
-| 8 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | FTP 64 MB | 10.6-12.7 | 11.4-13.9 |
+| 1 | Realtek RTL8156B, 2.5G Ethernet | `0bda:8156` | TCP RAM, 1-4 streams | 174–176 Mbit/s (21.8–22.0 MB/s) | 214–216 Mbit/s (26.8–27.0 MB/s) |
+| 2 | Realtek RTL8156B, 2.5G Ethernet | `0bda:8156` | FTP 64 MB | 157–158 Mbit/s (19.6–19.7 MB/s) | 164 Mbit/s (20.5 MB/s) |
+| 3 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 1 stream | 103–104 Mbit/s (12.9–13.0 MB/s) | 62–66 Mbit/s (7.7–8.2 MB/s) |
+| 4 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 4 streams | 140–142 Mbit/s (17.5–17.8 MB/s) | 104–110 Mbit/s (13.0–13.7 MB/s) |
+| 5 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | FTP 64 MB | 86 Mbit/s (10.8 MB/s) | 90 Mbit/s (11.2 MB/s) |
+| 6 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 1 stream | 98–103 Mbit/s (12.3–12.9 MB/s) | 51–54 Mbit/s (6.4–6.8 MB/s) |
+| 7 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 4 streams | 150–152 Mbit/s (18.7–19.0 MB/s) | 117–118 Mbit/s (14.6–14.8 MB/s) |
+| 8 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | FTP 64 MB | 97 Mbit/s (12.1 MB/s) | 97–99 Mbit/s (12.1–12.4 MB/s) |
 
 What a repeated run that came out lower was, so that none of it is taken for a
 regression:
 
-- **RTL8156B at 19.5 / 23.4 (or 18.3 / 21.6)**: an AIC8800 was plugged into the
+- **RTL8156B at 156 / 187 Mbit/s (19.5 / 23.4 MB/s), or 146 / 173 Mbit/s (18.3 /
+  21.6 MB/s)**: an AIC8800 was plugged into the
   same USB host controller and shared its bandwidth. With the RTL8156B alone the
   same build is back at rows 1-2.
 - **AIC8800D80 four streams out of the console at 0**: the card drops off the
   router after minutes of sustained sending ("disconnected due to excessive
   missing ACKs"), whatever card, port, channel or cooling. That is open. The
-  RTL8822BU on the same router ran the same load for 20 minutes (16.6-17.4 MB/s,
-  41 rounds) without one disconnect, so the router and the air are not the cause.
+  RTL8822BU on the same router ran the same load for 20 minutes (133-139 Mbit/s
+  (16.6-17.4 MB/s), 41 rounds) without one disconnect, so the router and the air are not the cause.
   Nor is this driver: both AIC8800D80 dongles on Linux PCs, with aicsemi's own
   driver, against the same router, sent 60-115 Mbit/s for the first 30 s of a 20
   minute upload and 0-1 Mbit/s for the rest, transmitting at VHT-MCS 0, and stayed
   that slow after a pause. The card itself does not hold a sustained upload.
-- **RTL8822BU, the low ends of rows 6-8**: one evening (10.8-11.3, 16.7 / 14.6,
-  FTP 10.6 / 11.4); the high ends the next morning. The same build gave the
-  morning's figures too, run for run the same day, so the difference is the air
-  (the neighbours' 5 GHz traffic), not the code.
+- **RTL8822BU, rows 6-8** were measured on 2026-10-29 on channel 100 with the TX
+  power set (before that, on channel 36 beside the neighbours: 87-111 Mbit/s
+  (10.8-13.9 MB/s) for one stream out, FTP 85-102 Mbit/s (10.6-12.7 MB/s); four
+  streams in reached 146 Mbit/s (18.3 MB/s) on one evening, which three runs of
+  2026-10-29 did not repeat -- not traced yet). A 20 minute
+  soak in each direction afterwards: 152-156 Mbit/s (19.0-19.5 MB/s) out, 122-130
+  Mbit/s (15.2-16.2 MB/s) in, 32 of 32 rounds on the card.
+- **One stream out of the console** is bound by xnet's congestion window, which it
+  clamps to 64 KB (`xnet_cwnd_kb` lifts the clamp, off by default): it goes from 101 Mbit/s (12.6 MB/s) to 124 Mbit/s (15.5 MB/s) at 128 KB and 134 Mbit/s
+  (16.8 MB/s) at 256 KB; eight streams at 128 KB stall the RTL8822BU's receive
+  until its watchdog resets it, ~30 s.
 - **Wi-Fi into the console with one stream** is bound by the console's TCP window
   (17.5 KB) over the radio's round trip, not by the driver. With
-  `xectl.py set tcp_rcvbuf 0xffff` the RTL8822BU carries 11.7-17.2 with one stream
-  and 17.6-21.6 with four. Inbound figures of 15-16 MB/s for the AIC8800 came from
+  `xectl.py set tcp_rcvbuf 0xffff` the RTL8822BU carries 113-115 Mbit/s
+  (14.1-14.4 MB/s) with one stream and 157-160 Mbit/s (19.6-20.0 MB/s) with four;
+  `xnet_rcvbuf_kb = 64` in the ini does the same for every system socket. Inbound
+  figures of 120-128 Mbit/s (15-16 MB/s) for the AIC8800 came from
   that setting, not from the default. Why the RTL8822BU's single stream sits
-  below the AIC8800's at the same window (5.6-6.8 against 8) is not measured yet.
+  below the AIC8800's at the same window (51-54 Mbit/s (6.4-6.8 MB/s) against
+62-66 Mbit/s (7.7-8.2 MB/s)) is not measured yet.
 
 ## What it does
 
