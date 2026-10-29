@@ -16,8 +16,8 @@ ZBT-WE1326; Wi-Fi on 5 GHz VHT80, a metre away: channel 36 for the AIC8800, chan
 100 for the RTL8822BU, which since 7a95aff sets its TX power from its efuse), the PC
 wired to it at 1 Gbit/s. "TCP RAM" is the plugin's own server (`src/bench/tcp`,
 `tests/tcpbench.py`, 10 s a run), RAM to RAM with no disk; "FTP" is ftpdll, 64 MB to and from `Hdd1:`.
-Each figure is the range of three or more runs; the xedrivers.ini defaults, no
-`xnet_*` options.
+Each figure is the range of three or more runs; no `xnet_*` options, and rows 1-8
+from before the 32 KB receive buffer default (xnet's own 16 KB; see below).
 
 | # | card | VID:PID | test | console -> PC | PC -> console |
 |---|---|---|---|---|---|
@@ -53,13 +53,22 @@ regression:
   2026-10-29 did not repeat -- not traced yet). A 20 minute
   soak in each direction afterwards: 152-156 Mbit/s (19.0-19.5 MB/s) out, 122-130
   Mbit/s (15.2-16.2 MB/s) in, 32 of 32 rounds on the card.
+- **The 32 KB receive buffer default** (system sockets, `xnet_rcvbuf_kb = 0` keeps
+  xnet's 16 KB) over the RTL8822BU, PC to console: one stream 85-89 Mbit/s
+  (10.6-11.1 MB/s) against 51-54 (6.4-6.8), four 138-141 Mbit/s (17.3-17.6 MB/s)
+  against 117-118 (14.6-14.8), eight 162-168 Mbit/s (20.3-21.0 MB/s); 16 streams
+  at once still work. Larger windows are faster for few streams (below) but 8
+  connections at 48 or 63 KB stall that listener until a reboot.
 - **RTL8822BU with `xnet_rcvbuf_kb = 63` and `xnet_cwnd_kb = 128`** in the ini
   (2026-10-29, after 7bbb768): one stream 110-112 Mbit/s (13.8-14.0 MB/s) out and
   125-127 Mbit/s (15.6-15.9 MB/s) in, four streams 155-157 Mbit/s (19.4-19.6 MB/s)
   out and 165-170 Mbit/s (20.6-21.3 MB/s) in, FTP 104-105 Mbit/s (13.0-13.1 MB/s)
   out and 105-107 Mbit/s (13.1-13.4 MB/s) in. A 20 minute soak each way:
   148-156 Mbit/s (18.5-19.5 MB/s) out, 149-167 Mbit/s (18.6-20.9 MB/s) in, 32 of
-  32 rounds on the card; 60 cold boots with these settings all joined.
+  32 rounds on the card; 60 cold boots with these settings all joined. Not for
+  many connections, though: 8 streams in stall (above). The clamp alone, with
+  xnet's 63 KB send buffer, measured no gain (one stream out 12.2-12.8 MB/s at 128 KB
+  against 12.3-12.5 without), so it stays off.
 - **One stream out of the console** is bound by xnet's congestion window, which it
   clamps to 64 KB (`xnet_cwnd_kb` lifts the clamp, off by default): it goes from 101 Mbit/s (12.6 MB/s) to 124 Mbit/s (15.5 MB/s) at 128 KB and 134 Mbit/s
   (16.8 MB/s) at 256 KB, with a send buffer as large (`xnet_sndbuf_kb`). Those

@@ -334,12 +334,15 @@ static u32 setting_kb(const char *key, u32 fallback)
  * (shift 1 measured); 64 is refused, since a buffer of exactly 65536 makes xnet
  * advertise a zero window. A send buffer above the largest allowed raises that
  * too. Measured over the RTL8822BU: one TCP stream into the console 8.1 MB/s at
- * 16 KB, 16.1 at 63, 18.4 at 128, 20.7 at 255; but what the open connections'
- * windows add up to has to fit xnet's pool for system sockets -- 4 x 63 KB does,
- * 8 x 63 or 4 x 96 KB stalls them and leaves that listener dead until a reboot.
+ * 16 KB, 16.1 at 63, 18.4 at 128, 20.7 at 255. Above 32 KB many connections
+ * stall: 8 at 48 or 63 KB, or 4 at 96 KB, and that listener stays dead until a
+ * reboot; 16 at 32 KB (512 KB together) and 20 at 16 KB do not, so it is not the
+ * sum. 32 KB is the default (RCVBUF_DEFAULT_KB): one stream in 6.4 -> 11 MB/s,
+ * four 14.6 -> 17.5, eight 19.2 -> 20.6; `xnet_rcvbuf_kb = 0` keeps xnet's 16.
  * Sending is not limited by it (128 and 255 KB moved nothing), nor is ftpdll,
  * which picks its own buffers, nor XBDM, whose listener exists before this runs
- * and passes its 16 KB to what it accepts. Hence off unless asked for. Thread. */
+ * and passes its 16 KB to what it accepts. Thread. */
+#define RCVBUF_DEFAULT_KB   32u
 static void set_buffers(void)
 {
     u8 *xnet = *(u8 **)((u8 *)title_user + USER_CTX_OFF);
@@ -354,7 +357,7 @@ static void set_buffers(void)
     /* only a block that looks like the one measured: 16 KB default, 255 KB most */
     if (block[XNET_DEF_RCVBUF_KB] != XNET_RCVBUF_STOCK || block[XNET_MAX_RCVBUF_KB] != 255)
         return;
-    kb = setting_kb("xnet_rcvbuf_kb", 0);
+    kb = setting_kb("xnet_rcvbuf_kb", RCVBUF_DEFAULT_KB);
     if (kb && kb != 64 && kb <= 255) {
         block[XNET_DEF_RCVBUF_KB] = (u8)kb;
         xnet_stats.rcvbuf_after = kb;
