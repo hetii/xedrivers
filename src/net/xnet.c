@@ -304,7 +304,7 @@ static void link_changed(u32 up)
  * (caller 2: XBDM, ftpdll, dashboard) default receive buffer is 16 KB, which
  * xnet rounds to 17520 bytes on the wire, and with a 3 ms round trip over Wi-Fi
  * that caps one TCP stream into the console at under 6 MB/s. Titles get 63 KB.
- * xerunner: xnet-socket-buffer-defaults@2 */
+ * xerunner: xnet-socket-buffer-defaults@3 */
 #define XNET_BLOCK(caller)      (((caller) + 109u) * 64u)
 #define XNET_SYSTEM             2u
 #define XNET_DEF_RCVBUF_KB      50u
