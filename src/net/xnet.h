@@ -58,6 +58,8 @@ typedef struct {
     u32 rcvbuf_after;       /* and as set from xnet_rcvbuf_kb */
     u32 sndbuf_before;
     u32 sndbuf_after;       /* from xnet_sndbuf_kb, 0 if left */
+    u32 cwnd_kb;            /* the congestion window's clamp, from xnet_cwnd_kb; 0 stock */
+    u32 cwnd_refused;       /* 1: xam's code was not the expected, nothing patched */
     u32 xq_stalls;          /* times the uplink took nothing for ~2 s */
     u32 xq_stall_depth;     /* frames waiting the last time */
 } XNET_STATS;

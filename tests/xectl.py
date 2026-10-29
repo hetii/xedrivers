@@ -152,7 +152,7 @@ STRUCTS = {
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
-                   "xq_high", "link_fallback", "rcvbuf_before", "rcvbuf_after", "sndbuf_before", "sndbuf_after", "xq_stalls", "xq_stall_depth"],
+                   "xq_high", "link_fallback", "rcvbuf_before", "rcvbuf_after", "sndbuf_before", "sndbuf_after", "cwnd_kb", "cwnd_refused", "xq_stalls", "xq_stall_depth"],
 }
 
 
@@ -494,7 +494,10 @@ def status(sym):
         xs["xq_high"], xs["xmit_dropped"], xs["link_fallback"]))
     print("xnet buf system sockets: receive %d KB -> %d KB, send %d KB -> %d KB" % (
         xs["rcvbuf_before"], xs["rcvbuf_after"], xs["sndbuf_before"], xs["sndbuf_after"]))
-    print("xnet q   stalls=%d depth at the last=%d" % (xs["xq_stalls"], xs["xq_stall_depth"]))
+    print("xnet q   stalls=%d depth at the last=%d | cwnd clamp %s" % (
+        xs["xq_stalls"], xs["xq_stall_depth"],
+        "refused (other xam)" if xs["cwnd_refused"] else
+        ("%d KB" % xs["cwnd_kb"]) if xs["cwnd_kb"] else "stock 64 KB"))
     if "debug_tx_stall" in sym:
         for i in range(NET_MAX):
             d = read_struct(sym, "debug_tx_stall", i)

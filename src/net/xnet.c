@@ -378,6 +378,70 @@ static void set_buffers(void)
     mem_sync();
 }
 
+/* --- the congestion window ------------------------------------------------------
+ *
+ * xnet's ACK path grows a connection's congestion window (+0xE4 of the socket)
+ * by an MSS in slow start and by MSS*MSS/cwnd after, and clamps it to 0xFFFF in
+ * r8 (lis r11,0 / ori r8,r11,0xffff), compared by cmplwi r11,0xffff in both
+ * branches: one connection never has more than 64 KB in flight, which at
+ * Wi-Fi's ~4 ms round trip is ~110 Mbit/s however big its buffers.
+ * `xnet_cwnd_kb =` (a multiple of 64, at most 4096; 0 leaves it) makes the clamp
+ * (N << 16) | 0xFFFF: lis r11,N, and the compares against r8 (cmplw r11,r8).
+ * r8's other use, a halfword decrement at 0x817664d0, keeps its low 16 bits.
+ * Only if the three words are the ones of xam 17559. A window above 64 KB also
+ * needs a send buffer that large: the largest allowed for system sockets and
+ * titles goes up with it (xnet_sndbuf_kb sets the system default).
+ * Measured over the RTL8822BU: one stream out 101 Mbit/s (12.6 MB/s) stock, 124
+ * (15.5) at 128 KB, 134 (16.8) at 256 KB; but 8 streams at 128 KB or 4 at 256
+ * KB (~1 MB in flight) stop the card's bulk IN until the receive watchdog
+ * resets it -- hence off unless asked for.
+ * xerunner: xnet-congestion-window-cap@1 */
+#define CWND_LIS            0x81766444u
+#define CWND_CMP_SLOW       0x81766478u
+#define CWND_CMP_AVOID      0x8176651Cu
+#define OP_LIS_R11_0        0x3D600000u
+#define OP_CMPLWI_R11_FFFF  0x2B0BFFFFu
+#define OP_CMPLW_R11_R8     0x7F0B4040u
+#define XNET_TITLE          1u
+
+static void put_code(u32 at, u32 word)
+{
+    *(volatile u32 *)(unsigned long)at = word;
+    KeSweepIcacheRange((void *)(unsigned long)at, 4);
+}
+
+static void set_cwnd(void)
+{
+    volatile u32 *lis = (volatile u32 *)(unsigned long)CWND_LIS;
+    volatile u32 *slow = (volatile u32 *)(unsigned long)CWND_CMP_SLOW;
+    volatile u32 *avoid = (volatile u32 *)(unsigned long)CWND_CMP_AVOID;
+    u8 *xnet = *(u8 **)((u8 *)title_user + USER_CTX_OFF), *block;
+    u32 kb = setting_kb("xnet_cwnd_kb", 0), n, caller, largest;
+
+    if (kb <= 64 || kb > 4096)
+        return;
+    if (*lis != OP_LIS_R11_0 || *slow != OP_CMPLWI_R11_FFFF ||
+        *avoid != OP_CMPLWI_R11_FFFF) {
+        xnet_stats.cwnd_refused = 1;
+        return;
+    }
+    n = (kb + 63) / 64 - 1;
+    put_code(CWND_CMP_SLOW, OP_CMPLW_R11_R8);   /* still 0xFFFF in r8: no change yet */
+    put_code(CWND_CMP_AVOID, OP_CMPLW_R11_R8);
+    put_code(CWND_LIS, OP_LIS_R11_0 | n);
+    xnet_stats.cwnd_kb = (n + 1) * 64;
+
+    largest = xnet_stats.cwnd_kb < 255 ? xnet_stats.cwnd_kb : 255;
+    if (!xnet || !MmIsAddressValid(xnet + XNET_BLOCK(XNET_SYSTEM) + 63))
+        return;
+    for (caller = XNET_TITLE; caller <= XNET_SYSTEM; caller++) {
+        block = xnet + XNET_BLOCK(caller);
+        if (block[XNET_MAX_SNDBUF_KB] < largest)
+            block[XNET_MAX_SNDBUF_KB] = (u8)largest;
+    }
+    mem_sync();
+}
+
 /* --- enable / disable -------------------------------------------------------- */
 
 u32 xnet_enable(void)
@@ -401,6 +465,7 @@ u32 xnet_enable(void)
         return XNET_ERR_NO_USER;
     xnet_stats.user = (u32)(unsigned long)title_user;
     set_buffers();
+    set_cwnd();
 
     saved_xmit_lis = xmit[0];
     saved_xmit_addi = xmit[1];
