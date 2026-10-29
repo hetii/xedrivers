@@ -53,6 +53,13 @@ regression:
   2026-10-29 did not repeat -- not traced yet). A 20 minute
   soak in each direction afterwards: 152-156 Mbit/s (19.0-19.5 MB/s) out, 122-130
   Mbit/s (15.2-16.2 MB/s) in, 32 of 32 rounds on the card.
+- **RTL8822BU with `xnet_rcvbuf_kb = 63` and `xnet_cwnd_kb = 128`** in the ini
+  (2026-10-29, after 7bbb768): one stream 110-112 Mbit/s (13.8-14.0 MB/s) out and
+  125-127 Mbit/s (15.6-15.9 MB/s) in, four streams 155-157 Mbit/s (19.4-19.6 MB/s)
+  out and 165-170 Mbit/s (20.6-21.3 MB/s) in, FTP 104-105 Mbit/s (13.0-13.1 MB/s)
+  out and 105-107 Mbit/s (13.1-13.4 MB/s) in. A 20 minute soak each way:
+  148-156 Mbit/s (18.5-19.5 MB/s) out, 149-167 Mbit/s (18.6-20.9 MB/s) in, 32 of
+  32 rounds on the card; 60 cold boots with these settings all joined.
 - **One stream out of the console** is bound by xnet's congestion window, which it
   clamps to 64 KB (`xnet_cwnd_kb` lifts the clamp, off by default): it goes from 101 Mbit/s (12.6 MB/s) to 124 Mbit/s (15.5 MB/s) at 128 KB and 134 Mbit/s
   (16.8 MB/s) at 256 KB, with a send buffer as large (`xnet_sndbuf_kb`). Those
@@ -63,7 +70,8 @@ regression:
   (17.5 KB) over the radio's round trip, not by the driver. With
   `xectl.py set tcp_rcvbuf 0xffff` the RTL8822BU carries 113-115 Mbit/s
   (14.1-14.4 MB/s) with one stream and 157-160 Mbit/s (19.6-20.0 MB/s) with four;
-  `xnet_rcvbuf_kb = 64` in the ini does the same for every system socket. Inbound
+  `xnet_rcvbuf_kb = 63` in the ini does the same for every system socket (64 is
+  skipped: xnet takes it as a zero window). Inbound
   figures of 120-128 Mbit/s (15-16 MB/s) for the AIC8800 came from
   that setting, not from the default. Why the RTL8822BU's single stream sits
   below the AIC8800's at the same window (51-54 Mbit/s (6.4-6.8 MB/s) against
