@@ -442,8 +442,8 @@ u32 rtw_download_firmware(RTW *r)
 
 /* The 8822B over three bulk OUT endpoints: rqpn_table_8822b[3] and
  * page_table_8822b[3]. */
-#define MAP_NORMAL          1
-#define MAP_LOW             2
+#define MAP_LOW             1           /* enum rtw_dma_mapping: EXTRA 0, LOW 1, */
+#define MAP_NORMAL          2           /* NORMAL 2, HIGH 3 */
 #define MAP_HIGH            3
 #define TXFF_PAGES          (262144 / 128)
 #define RSVD_PAGES          (8 + RSVD_PG_H2C_EXTRAINFO_NUM + RSVD_PG_H2C_STATICINFO_NUM + \
