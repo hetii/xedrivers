@@ -139,6 +139,14 @@ typedef struct {
     u32 stall_open;             /* frames in its open transfer */
     u32 tx_transfers;           /* bulk transfers that carried tx_frames */
     u32 tx_aggregated;          /* transfers of more than one frame */
+    u32 rxs_busy;               /* at the last receive stall: transfers still out, */
+    u32 rxs_parked;             /* left out after errors, */
+    u32 rxs_errors;             /* receive errors so far, the last of them, */
+    u32 rxs_last_error;
+    u32 rxs_rxpkt_num;          /* REG_RXPKT_NUM (frames in the FIFO in its top byte), */
+    u32 rxs_rxdma_status;       /* REG_RXDMA_STATUS, */
+    u32 rxs_txdma_status;       /* REG_TXDMA_STATUS */
+    u32 rxs_fifo_info;          /* REG_FIFOPAGE_INFO_1 */
 } RTW_STATS;
 
 extern volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];

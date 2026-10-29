@@ -417,6 +417,8 @@ static void tx_watchdog(RTW *r)
 
 static void rx_watchdog(RTW *r)
 {
+    u32 i, busy;
+
     if (!r->st->linked || (r->st->rx_transfers != r->rx_seen && r->rx_parked < RTW_RX_COUNT)) {
         r->rx_seen = r->st->rx_transfers;
         r->rx_quiet = 0;
@@ -426,6 +428,16 @@ static void rx_watchdog(RTW *r)
         return;
     r->rx_quiet = 0;
     r->st->rx_stalls++;
+    for (i = 0, busy = 0; i < RTW_RX_COUNT; i++)
+        busy += r->rx_urb[i].Busy != 0;
+    r->st->rxs_busy = busy;
+    r->st->rxs_parked = r->rx_parked;
+    r->st->rxs_errors = r->st->rx_errors;
+    r->st->rxs_last_error = r->st->rx_last_error;
+    r->st->rxs_rxpkt_num = rtw_read32(r, REG_RXPKT_NUM);
+    r->st->rxs_rxdma_status = rtw_read32(r, REG_RXDMA_STATUS);
+    r->st->rxs_txdma_status = rtw_read32(r, REG_TXDMA_STATUS);
+    r->st->rxs_fifo_info = rtw_read32(r, 0x0230);
     UsbdResetDevice(r->dev->device);
 }
 

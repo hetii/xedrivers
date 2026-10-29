@@ -83,7 +83,9 @@ STRUCTS = {
                   "h2c_busy", "ra_mask", "ra_rate_id", "ampdu", "rx_largest",
                   "tx_inflight_now", "txpwr_ofdm6", "txpwr_vht2_mcs7", "iqk_runs", "iqk_ms",
                   "tx_stalls", "rx_stalls", "stall_inflight", "stall_ep_busy", "stall_open",
-                  "tx_transfers", "tx_aggregated"],
+                  "tx_transfers", "tx_aggregated", "rxs_busy", "rxs_parked", "rxs_errors",
+                  "rxs_last_error", "rxs_rxpkt_num", "rxs_rxdma_status", "rxs_txdma_status",
+                  "rxs_fifo_info"],
     "rtw_sta_stats": ["state", "scans", "probes", "auths", "auth_status", "assocs",
                       "assoc_status", "aid", "joins", "timeouts", "deauths",
                       "deauth_reason", "beacon_losses", "rx_data", "rx_eapol",
@@ -332,6 +334,10 @@ def status(sym):
                 r["tx_inflight_now"], r["txpwr_ofdm6"], r["txpwr_vht2_mcs7"],
                 r["iqk_runs"], r["iqk_ms"], r["tx_transfers"], r["tx_aggregated"],
                 r["tx_stalls"], r["rx_stalls"], r["stall_inflight"], r["stall_ep_busy"], r["stall_open"]))
+            if r["rx_stalls"]:
+                print("rtw rxs  busy=%d parked=%d errors=%d/%#x rxpkt_num=%#010x rxdma=%#010x txdma=%#010x fifo=%#010x" % (
+                    r["rxs_busy"], r["rxs_parked"], r["rxs_errors"], r["rxs_last_error"],
+                    r["rxs_rxpkt_num"], r["rxs_rxdma_status"], r["rxs_txdma_status"], r["rxs_fifo_info"]))
             if "rtw_sta_stats" in sym:
                 t = read_struct(sym, "rtw_sta_stats", i)
                 states = ["idle", "scanning", "probing", "auth", "assoc", "joined"]

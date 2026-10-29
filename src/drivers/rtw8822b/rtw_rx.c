@@ -44,6 +44,7 @@ static void rx_done(URB *urb, u32 status)
     u8 *b = r->rx_buf[i];
     PROF_START(t);
 
+    urb->Busy = 0;                      /* the controller is done with it */
     if (!r->rx_running || !r->dev->active)
         return;
     if (!NT_SUCCESS(status)) {
