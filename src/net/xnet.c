@@ -347,12 +347,19 @@ static u32 setting_kb(const char *key, u32 fallback)
  * wire the pool never filled; over Wi-Fi it did through frames our reorder window
  * dropped (fixed, reorder.c), and still with both directions busy at 128 KB (4
  * each way); at 63 KB that held, as did 8 in with the reader stopped for 3 s.
- * Hence 63 KB (RCVBUF_DEFAULT_KB): one stream in 8.5 -> 16.1 MB/s, eight 23.4,
- * four in beside four out 4.5 -> 10.7; `xnet_rcvbuf_kb = 0` keeps xnet's 16.
+ * 63 KB held that on the stock pool; with the pool 768 KB larger (extend_pool) 128
+ * KB did too, and 128 KB of send buffer with it, whose data is not in the pool
+ * (the stall that came with it was the host controller's, rtw8822b.c). Hence 128
+ * KB each way by default (RCVBUF_/SNDBUF_DEFAULT_KB; `xnet_rcvbuf_kb = 0` or
+ * `xnet_sndbuf_kb = 0` keeps xnet's 16 / 63), measured over the RTL8822BU: one
+ * stream in 68 -> 170 Mbit/s, out 117 -> 148, eight in 170 -> 205, four in beside
+ * four out 34 -> 92 in; 30 cold boots, a 20 minute soak each way, ftpdll 13 -> 15
+ * MB/s. Over the wire every figure stayed at the USB ceiling.
  * Sending is not limited by it (128 and 255 KB moved nothing), nor is ftpdll,
  * which picks its own buffers, nor XBDM, whose listener exists before this runs
  * and passes its 16 KB to what it accepts. Thread. */
-#define RCVBUF_DEFAULT_KB   63u
+#define RCVBUF_DEFAULT_KB   128u
+#define SNDBUF_DEFAULT_KB   128u
 static void set_buffers(void)
 {
     u8 *xnet = *(u8 **)((u8 *)title_user + USER_CTX_OFF);
@@ -372,7 +379,7 @@ static void set_buffers(void)
         block[XNET_DEF_RCVBUF_KB] = (u8)kb;
         xnet_stats.rcvbuf_after = kb;
     }
-    kb = setting_kb("xnet_sndbuf_kb", 0);
+    kb = setting_kb("xnet_sndbuf_kb", SNDBUF_DEFAULT_KB);
     if (kb && kb != 64 && kb <= 255) {
         if (kb > block[XNET_MAX_SNDBUF_KB])
             block[XNET_MAX_SNDBUF_KB] = (u8)kb;
@@ -469,7 +476,8 @@ static void set_cwnd(void)
  * tenth found no socket: system xnet has 16); xnet_rcvbuf_kb 128, which stopped
  * every connection with four each way at once on the stock pool, held five such
  * runs, 8 in with the reader stopped for 3 s, one stream in 18.7 MB/s (16.1 at
- * 63); 255 KB with 8 in, 2 MB of windows, still stopped. Off until validated.
+ * 63); 255 KB with 8 in, 2 MB of windows, still stopped. 768 KB by default
+ * (POOL_EXTRA_DEFAULT_KB), with the 128 KB buffers (set_buffers).
  * xerunner: xnet-caller-pool-size@1 */
 #define POOL_SYSTEM_OFF     0x828u
 #define POOL_STOCK_BYTES    (70u * 4096u)
@@ -481,6 +489,7 @@ static void set_cwnd(void)
 #define XNET_LOCK_TAKE      0x81763388u
 #define XNET_LOCK_GIVE      0x81763410u
 #define POOL_EXTRA_MAX_KB   2048u
+#define POOL_EXTRA_DEFAULT_KB 768u
 
 static const u32 lock_take_code[4] = { 0x7D8802A6u, 0x4BFCA039u, 0x9421FF80u, 0x7C7B1B78u };
 static const u32 lock_give_code[4] = { 0x7D8802A6u, 0x4BFC9FB9u, 0x9421FF90u, 0x3D6081ACu };
@@ -507,7 +516,7 @@ static void put_header(u8 *b, u32 in_use, u32 tag, u32 units, u32 before)
 static void extend_pool(void)
 {
     u8 *xnet = *(u8 **)((u8 *)title_user + USER_CTX_OFF), *mem, *region, *blk, *last;
-    u32 kb = setting_kb("xnet_pool_kb", 0), units, irql, *head, *first;
+    u32 kb = setting_kb("xnet_pool_kb", POOL_EXTRA_DEFAULT_KB), units, irql, *head, *first;
     u32 (*take)(void *) = (u32 (*)(void *))(unsigned long)XNET_LOCK_TAKE;
     void (*give)(void *, u32) = (void (*)(void *, u32))(unsigned long)XNET_LOCK_GIVE;
 

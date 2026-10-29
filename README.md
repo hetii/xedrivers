@@ -53,21 +53,26 @@ regression:
   2026-10-29 did not repeat -- not traced yet). A 20 minute
   soak in each direction afterwards: 152-156 Mbit/s (19.0-19.5 MB/s) out, 122-130
   Mbit/s (15.2-16.2 MB/s) in, 32 of 32 rounds on the card.
-- **The xnet defaults** (system sockets; 2026-10-29): a 63 KB receive buffer
-  (`xnet_rcvbuf_kb = 0` keeps xnet's 16 KB) and the congestion window clamp at
-  256 KB (`xnet_cwnd_kb = 0` keeps the stock 64 KB; with xnet's 63 KB send buffer
-  it changes nothing until a program asks for more). Over the RTL8822BU, PC to
-  console: one stream 129 Mbit/s (16.1 MB/s) against 68 (8.5), eight 187 Mbit/s
-  (23.4 MB/s), four in alongside four out 82-93 Mbit/s (10.3-11.6 MB/s) in and
-  85-86 Mbit/s (10.6-10.8 MB/s) out, against 34-37 (4.3-4.6) in. Why no more:
-  xnet keeps about 270 KB of data for all system sockets, sent and received
-  together (a 70-page pool, xam's default, taken before plugins load), and
+- **The xnet defaults** (system sockets; 2026-10-29): 128 KB receive and send
+  buffers (`xnet_rcvbuf_kb`, `xnet_sndbuf_kb`; 0 keeps xnet's 16 / 63 KB), the
+  congestion window clamp at 256 KB (`xnet_cwnd_kb`, 0 keeps 64 KB) and 768 KB
+  more in the pool system sockets' data comes from (`xnet_pool_kb`, 0 keeps
+  xnet's 280 KB). Over the RTL8822BU against the stock stack: one stream in 170
+  Mbit/s (21.2 MB/s) against 68 (8.5), out 148 Mbit/s (18.5 MB/s) against 117
+  (14.6), eight in 202-206 Mbit/s (25.3-25.8 MB/s) against 170 (21.3), four in
+  beside four out 91-93 Mbit/s in against 34-37; ftpdll 118-122 Mbit/s (14.8-15.3
+  MB/s) in, 113-114 Mbit/s (14.1-14.3 MB/s) out. 30 of 30 cold boots joined; a 20
+  minute soak each way, 32 of 32 rounds on the card: 146-151 Mbit/s (18.3-18.9
+  MB/s) out, 188-193 Mbit/s (23.5-24.1 MB/s) in. Over the RTL8156B nothing moved
+  but two-way traffic (41 / 148 -> 106 / 106 Mbit/s): the wire was at the USB
+  ceiling already. What sets the limits: xnet keeps the data of all system
+  sockets in one pool, 280 KB as xam makes it (taken before plugins load), and
   without SACK it stops every connection for good once that fills with data
-  waiting for a lost segment or an ACK. Over Wi-Fi it did, first through frames
-  the reorder window dropped (fixed in 1b3e3f9: 8 streams in at 63 KB went from a
-  stall within a few runs to 184-188 Mbit/s (23.0-23.5 MB/s) in 10 of 10), and
-  still with both directions busy at 128 KB; 63 KB held that, and a reader
-  stopped for 3 s. Over the wire it never came, even at 255 KB.
+  waiting for a lost segment or an ACK -- over Wi-Fi first through frames the
+  reorder window dropped (1b3e3f9), then with large windows both ways; the
+  plugin adds to that pool (37b555c). And the console's USB host controller,
+  under heavy sending, stops asking for the card's receive transfers: they are
+  taken back and queued again after ~130 ms (910f141), not the card reset.
 - **A program that runs few connections** can ask for more on its listening
   socket (SO_RCVBUF/SO_SNDBUF before listen()): over Wi-Fi one stream in 171
   Mbit/s (21.4 MB/s) at 255 KB, one out 151 Mbit/s (18.9 MB/s) at 255 KB, eight in
