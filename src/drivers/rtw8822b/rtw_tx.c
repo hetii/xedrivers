@@ -39,7 +39,9 @@ static void put32(u8 *p, u32 v)
 }
 
 #define FRAME_MAX       (2048 - RTW_TX_DESC_SIZE)  /* a descriptor and the frame, one at a time */
-#define EP_DIRECT       4           /* transfers out on an endpoint before frames join */
+#define EP_DIRECT       1           /* transfers out on an endpoint before frames join: 1
+                                     * against 4 put the console's ACKs in fewer
+                                     * transfers, 8 streams in 27.8 -> 28.5 MB/s */
 
 static u32 align8(u32 n)
 {

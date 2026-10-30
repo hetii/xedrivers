@@ -48,8 +48,11 @@
 #define RTW_EP_LOW          2                   /* best effort, background */
 #define RTW_OUT_MAX         4
 #define RTW_TX_COUNT        16
-#define RTW_TX_SLOT         12296       /* six descriptors and frames (RTW_TX_AGG), 8 to pad */
-#define RTW_TX_AGG          6           /* frames to a transfer (usb_tx_agg_desc_num is 3) */
+#define RTW_TX_SLOT         32776       /* RTW_TX_AGG descriptors and frames, 8 to pad */
+#define RTW_TX_AGG          16          /* frames to a transfer: on a clean channel 6 -> 10
+                                         * -> 16 took one stream out 19.6 -> 21.0 -> 21.1
+                                         * MB/s, four 18.9 -> 19.7 -> 20.0 (rtw88 stops at
+                                         * 3, its usb_tx_agg_desc_num; the card takes more) */
 #define RTW_RX_COUNT        8
 #define RTW_RX_SIZE         20480       /* rtw88 takes 32 KB; one EHCI qTD carries 20 */
 
