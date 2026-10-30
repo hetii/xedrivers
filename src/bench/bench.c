@@ -6,6 +6,8 @@
 #include "bench.h"
 #include "config.h"
 #include "prof.h"
+#include "xnet.h"
+#include "../drivers/rtw8822b/rtw.h"
 #if XE_BENCH_HISTORY
 #include "history.h"
 #endif
@@ -40,9 +42,34 @@ void bench_init(void)
     prof_init();
 }
 
+/* A heartbeat on the UART every ~6 s for a boot hunt: <seconds, xnet pool added
+ * KB, receive kicks, xnet frames in>, all hex -- whether the worker still runs,
+ * and how far the network got, on a boot that ends unreachable. */
+static void heartbeat(u32 tick)
+{
+    static const char hex[] = "0123456789abcdef";
+    char m[40];
+    u32 v[4], i, k, at = 0;
+
+    if (tick % 300)
+        return;
+    v[0] = tick / 50;
+    v[1] = xnet_stats.pool_added_kb;
+    v[2] = rtw_stats[0].rx_kicks;
+    v[3] = xnet_stats.rx_delivered;
+    m[at++] = '<';
+    for (i = 0; i < 4; i++) {
+        for (k = 0; k < 6; k++)
+            m[at++] = hex[(v[i] >> (20 - 4 * k)) & 15];
+        m[at++] = i < 3 ? ' ' : '>';
+    }
+    m[at] = 0;
+    bench_trace(m);
+}
+
 void bench_tick(u32 tick)
 {
-    (void)tick;
+    heartbeat(tick);
     PROF_STAMP();
 #if XE_BENCH_HISTORY
     history_tick(tick);
