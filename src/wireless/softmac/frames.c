@@ -20,16 +20,14 @@
 #define IE_VHT_OP       192
 #define IE_VENDOR       221
 
-#define HT_CAP_INFO     0x1963u     /* LDPC, 20/40, SGI 20 and 40, RX STBC 1, 7935-byte
-                                     * A-MSDU, DSSS/CCK in 40. SM power save (bits
-                                     * 2-3) is 0, "static": the AP sends to the
-                                     * console on one stream only (VHT NSS 1). Set
-                                     * to 3, disabled (0x196F, as mac80211 sends),
-                                     * the AP went to two streams, 585-867 Mbit/s,
-                                     * and 8 streams in fell from 175 to 126 Mbit/s
-                                     * (15.7 MB/s) whatever the AP's power or rate:
-                                     * something on this side does not keep up with
-                                     * two-stream reception yet (2026-10-30). */
+#define HT_CAP_INFO     0x196Fu     /* LDPC, 20/40, SM power save disabled, SGI 20
+                                     * and 40, RX STBC 1, 7935-byte A-MSDU, DSSS/CCK
+                                     * in 40. SM power save is bits 2-3; 0 there,
+                                     * "static", had the AP send on one stream only
+                                     * (VHT NSS 1, 433 Mbit/s); 3, disabled, as
+                                     * mac80211 sends, gives two (NSS 2, 867): on a
+                                     * clean channel 8 streams in 218 -> 222 Mbit/s,
+                                     * 4 streams 200 -> 205. */
 #define HT_AMPDU_PARAMS 0x13u       /* 64 KB, 2 us spacing */
 #define VHT_CAP_INFO    0x03C001B2u /* 11454-byte MPDU, RX LDPC, SGI 80, TX STBC,
                                      * RX STBC 1, +HTC-VHT, A-MPDU exponent 7 */
