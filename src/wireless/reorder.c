@@ -20,7 +20,6 @@
  */
 
 #include "reorder.h"
-#include "bench.h"
 
 #define SEQ_MASK 0xFFFu
 
@@ -28,7 +27,6 @@
 static void skip(WL_REORDER_TID *q, u32 seq)
 {
     seq &= SEQ_MASK;
-    bench_wl_frame(BENCH_WL_FLUSH, seq, 0, 0);
     q->skipped[seq >> 3] |= (u8)(1u << (seq & 7));
 }
 
@@ -149,7 +147,6 @@ void wl_reorder_in(WL_REORDER *r, u32 tid, u32 seq, u8 *frame, u32 length)
                 r->deliver(r->context, frame, length);
                 return;
             }
-            bench_wl_frame(BENCH_WL_LATE, seq, frame, length);
             return;
         }
         if (++q->late_run < WL_REORDER_RESYNC) {
@@ -188,7 +185,6 @@ void wl_reorder_in(WL_REORDER *r, u32 tid, u32 seq, u8 *frame, u32 length)
     index = seq & (WL_REORDER_WINDOW - 1);
     if (q->slot[index] != WL_REORDER_NONE) {
         r->st->late++;                      /* the same one twice */
-        bench_wl_frame(BENCH_WL_LATE, seq, frame, length);
         return;
     }
     if (!r->free_count) {

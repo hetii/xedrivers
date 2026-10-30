@@ -44,7 +44,6 @@ u32 tcp_start(void);
  * bytes in flight. Any IRQL. */
 void tcp_flight_out(const u8 *frame, u32 length);
 void tcp_flight_in(const u8 *frame, u32 length);
-void tcp_trace_wl(u32 kind, u32 seq80211, const u8 *eth, u32 length);
 
 enum {
     TCP_OK = 0,

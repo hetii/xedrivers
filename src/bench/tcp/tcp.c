@@ -429,24 +429,6 @@ static const u8 *tcp_of(const u8 *f, u32 length, u32 *payload)
  * length }. 4 MB from tcp_start, sink_trace pointing at it, sink_trace_at the
  * next entry (it wraps). */
 
-static void trace(u32 number, u32 port, u32 word, u32 length);
-
-/* The SoftMAC's steps (bench.h BENCH_WL_*) into the same trace: the last word is
- * kind << 28 | 802.11 sequence << 16 | frame length; a frame that is not TCP to
- * PORT_SINK, or none, goes with port 0. */
-void tcp_trace_wl(u32 kind, u32 seq80211, const u8 *eth, u32 length)
-{
-    u32 payload = 0, port = 0, number = 0;
-    const u8 *t = eth ? tcp_of(eth, length, &payload) : 0;
-
-    if (t && ((u32)t[2] << 8 | t[3]) == PORT_SINK) {
-        port = (u32)t[0] << 8 | t[1];
-        number = be32(t + 4);
-    }
-    trace(number, port, payload & 0x7FFFu, kind << 28 | (seq80211 & 0xFFFu) << 16 |
-                                           (length & 0xFFFFu));
-}
-
 static void trace(u32 number, u32 port, u32 word, u32 length)
 {
     volatile u32 *e;

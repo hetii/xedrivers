@@ -11,7 +11,6 @@
 
 #include "station.h"
 #include "wpa.h"
-#include "bench.h"
 
 #define ETHERTYPE_EAPOL 0x888Eu
 #define HDR_LEN         24
@@ -142,7 +141,6 @@ static void deliver(WL_STA *s, const u8 *da_in, const u8 *sa_in, u8 *p, u32 leng
     s->st->rx_data++;
     /* a group frame is numbered apart from the session's and is not reordered */
     if (tid < WL_REORDER_TIDS && (s->rx_ba >> tid) & 1 && !(da_in[0] & 1)) {
-        bench_wl_frame(BENCH_WL_IN, seq, eth, 14 + length - SNAP_LEN);
         wl_reorder_in(&s->reorder, tid, seq, eth, 14 + length - SNAP_LEN);
     } else {
         net_frame_in(s->nd, eth, 14 + length - SNAP_LEN);
@@ -177,7 +175,6 @@ void wl_sta_rx_data(WL_STA *s, u8 *f, u32 length, u32 decrypted)
         u32 i = tid < WL_REORDER_TIDS ? tid : WL_REORDER_TIDS, sc = f[22] | f[23] << 8;
 
         if ((f[1] & FC_RETRY) && s->last_seq_ctrl[i] == sc) {
-            bench_wl_frame(BENCH_WL_DUP, sc >> 4, 0, 0);
             s->st->rx_duplicates++;
             return;
         }
