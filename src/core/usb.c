@@ -162,6 +162,46 @@ void usb_cancel(URB *urb)
     KeInsertQueueDpc(&cancel_dpc, 0, 0);
 }
 
+void usb_rx_watch_init(USB_RX_WATCH *w, URB *urbs, u32 count, u32 kick_ticks,
+                       u32 reset_ticks, volatile u32 *kicks, volatile u32 *kick_ok)
+{
+    w->urbs = urbs;
+    w->count = count;
+    w->kick_ticks = kick_ticks;
+    w->reset_ticks = reset_ticks;
+    w->seen = 0;
+    w->quiet = 0;
+    w->kicked = 0;
+    w->kicks = kicks;
+    w->kick_ok = kick_ok;
+}
+
+u32 usb_rx_watch(USB_RX_WATCH *w, u32 watched, u32 progress)
+{
+    u32 i;
+
+    if (!watched || progress != w->seen) {
+        if (w->kicked && watched && w->kick_ok)
+            (*w->kick_ok)++;
+        w->kicked = 0;
+        w->seen = progress;
+        w->quiet = 0;
+        return 0;
+    }
+    if (++w->quiet >= w->kick_ticks && w->kick_ticks && !w->kicked) {
+        if (w->kicks)
+            (*w->kicks)++;
+        w->kicked = 1;
+        for (i = 0; i < w->count; i++)
+            usb_cancel(&w->urbs[i]);
+        return 0;
+    }
+    if (w->quiet < w->reset_ticks)
+        return 0;
+    w->quiet = 0;
+    return 1;
+}
+
 void usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
                  void *buffer, u32 length, const u8 *setup)
 {

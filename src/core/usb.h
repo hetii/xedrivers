@@ -65,7 +65,33 @@ void  usb_submit(URB *urb);
  * first, and its completion clears Busy. */
 u32   usb_wait_idle(URB *urb, u32 timeout_ms);
 void  usb_spin(volatile u32 *done);
-void  usb_cancel(URB *urb);            /* the controller gives it back, cancelled */    /* up to 1 ms for a transfer just submitted */
+void  usb_cancel(URB *urb);            /* the controller gives it back, cancelled */
+
+/* A driver's ring of receive requests, watched (usb_rx_watch). Under heavy
+ * sending this console's host controller can stop asking for a device's bulk IN
+ * requests, the device holding data and no error ever coming; taking them back
+ * (usb_cancel) and queuing them again -- which a ring that queues a request again
+ * on any completion does by itself -- starts it again. Only if that does nothing
+ * is the device to be reset. Ticks are the driver's own. */
+typedef struct {
+    URB *urbs;              /* the ring, `count` of them */
+    u32 count;
+    u32 kick_ticks;         /* ticks without progress before taking them back, 0 never */
+    u32 reset_ticks;        /* and before a reset is due */
+    u32 seen;               /* the progress count last time */
+    u32 quiet;              /* ticks without progress */
+    u32 kicked;             /* taken back since the last progress */
+    volatile u32 *kicks;    /* the driver's counters, or 0 */
+    volatile u32 *kick_ok;
+} USB_RX_WATCH;
+
+void  usb_rx_watch_init(USB_RX_WATCH *w, URB *urbs, u32 count, u32 kick_ticks,
+                        u32 reset_ticks, volatile u32 *kicks, volatile u32 *kick_ok);
+
+/* Once a tick: `watched` 0 when no traffic is to be expected (counters start
+ * over); `progress` the driver's count of receive completions, which should
+ * not move when the ring is not working (all parked, say). 1: reset the device. */
+u32   usb_rx_watch(USB_RX_WATCH *w, u32 watched, u32 progress);    /* up to 1 ms for a transfer just submitted */
 
 /* Fill a request for `dev`'s default endpoint or for `endpoint`. */
 void  usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,

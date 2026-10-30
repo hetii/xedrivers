@@ -186,9 +186,8 @@ typedef struct RTW {
     volatile u32 rx_running;
     u32 rx_failing[RTW_RX_COUNT];       /* errors in a row on each transfer */
     volatile u32 rx_parked;             /* transfers left unqueued after too many */
-    u32 rx_seen;                        /* the watchdog's last rx_transfers */
-    u32 rx_kicked;                      /* transfers taken back since the last progress */
-    u32 rx_quiet;
+    USB_RX_WATCH rx_watch;              /* the receive ring, watched by the core */
+    u32 rx_watch_tx;                    /* tx_frames at its last tick */
 
     u32 scan_index;             /* the channel being listened on, while scanning */
     u32 scan_ticks;

@@ -408,39 +408,31 @@ static void tx_watchdog(RTW *r)
     wl_sta_lost(&r->sta);
 }
 
-/* Linked and no receive transfer for RX_STALL_TICKS, or every one parked after
- * errors: the card's bulk IN has stopped (seen under four outbound streams with
- * ~1 MB in flight: frames waiting in its FIFO, every transfer queued), and
- * nothing short of a reset brings it back. The core then brings it up again and
- * the station joins anew. */
+/* Linked and no receive transfer for a while, or every one parked after errors:
+ * the core's watch (usb_rx_watch) takes the transfers back after RX_KICK_TICKS,
+ * which has always been enough when the host controller had stopped asking for
+ * them under heavy sending (frames waiting in the card's FIFO, every transfer
+ * queued, no error); after RX_STALL_TICKS the card is reset, and the core then
+ * brings it up again and the station joins anew. */
 #define RX_STALL_TICKS  60              /* ~2 s of 33 ms ticks; beacons come every 0.1 s */
-#define RX_KICK_TICKS   4               /* ~0.13 s: take the transfers back first */
+#define RX_KICK_TICKS   4               /* ~0.13 s */
 
 static void rx_watchdog(RTW *r)
 {
-    u32 i, busy;
+    u32 i, busy, sending;
 
-    if (!r->st->linked || (r->st->rx_transfers != r->rx_seen && r->rx_parked < RTW_RX_COUNT)) {
-        if (r->rx_kicked && r->st->linked)
-            r->st->rx_kick_ok++;
-        r->rx_kicked = 0;
-        r->rx_seen = r->st->rx_transfers;
-        r->rx_quiet = 0;
+    if (!r->rx_watch.urbs)
+        usb_rx_watch_init(&r->rx_watch, r->rx_urb, RTW_RX_COUNT, RX_KICK_TICKS,
+                          RX_STALL_TICKS, &r->st->rx_kicks, &r->st->rx_kick_ok);
+    /* the transfers are taken back only while sending, which is when the
+     * controller stops (an idle link can go 130 ms without a receive transfer);
+     * the reset after RX_STALL_TICKS stands either way */
+    sending = r->tx_inflight || r->st->tx_frames != r->rx_watch_tx;
+    r->rx_watch_tx = r->st->tx_frames;
+    r->rx_watch.kick_ticks = sending ? RX_KICK_TICKS : 0;
+    if (!usb_rx_watch(&r->rx_watch, r->st->linked,
+                      r->rx_parked < RTW_RX_COUNT ? r->st->rx_transfers : r->rx_watch.seen))
         return;
-    }
-    if (++r->rx_quiet == RX_KICK_TICKS) {
-        /* first only take the transfers back: each completes cancelled and goes
-         * out again (rx_done), which is all it takes if the controller had stopped
-         * asking for them; the card is reset only if that does nothing */
-        r->st->rx_kicks++;
-        r->rx_kicked = 1;
-        for (i = 0; i < RTW_RX_COUNT; i++)
-            usb_cancel(&r->rx_urb[i]);
-        return;
-    }
-    if (r->rx_quiet < RX_STALL_TICKS)
-        return;
-    r->rx_quiet = 0;
     r->st->rx_stalls++;
     for (i = 0, busy = 0; i < RTW_RX_COUNT; i++)
         busy += r->rx_urb[i].Busy != 0;
