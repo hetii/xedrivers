@@ -13,11 +13,12 @@ copied from xerunner.
 
 Every card measured the same way: the console on the home router (OpenWrt
 ZBT-WE1326; Wi-Fi on 5 GHz VHT80, a metre away: channel 36 for the AIC8800, channel
-100 for the RTL8822BU, which since 7a95aff sets its TX power from its efuse), the PC
+116 for the RTL8822BU, which since 7a95aff sets its TX power from its efuse), the PC
 wired to it at 1 Gbit/s. "TCP RAM" is the plugin's own server (`src/bench/tcp`,
 `tests/tcpbench.py`, 10 s a run), RAM to RAM with no disk; "FTP" is ftpdll, 64 MB to and from `Hdd1:`.
-Each figure is the range of three or more runs; no `xnet_*` options, and rows 1-8
-from before the 32 KB receive buffer default (xnet's own 16 KB; see below).
+Each figure is the range of three or more runs; no `xnet_*` options. Rows 1-5 are
+from before the xnet defaults of 2026-10-29 (xnet's own 16 KB receive buffer, see
+below); rows 6-8 are of 2026-10-30, with them, on channel 116.
 
 | # | card | VID:PID | test | console -> PC | PC -> console |
 |---|---|---|---|---|---|
@@ -26,9 +27,9 @@ from before the 32 KB receive buffer default (xnet's own 16 KB; see below).
 | 3 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 1 stream | 103–104 Mbit/s (12.9–13.0 MB/s) | 62–66 Mbit/s (7.7–8.2 MB/s) |
 | 4 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | TCP RAM, 4 streams | 140–142 Mbit/s (17.5–17.8 MB/s) | 104–110 Mbit/s (13.0–13.7 MB/s) |
 | 5 | AICSemi AIC8800D80, Wi-Fi 6 | `a69c:8d81` | FTP 64 MB | 86 Mbit/s (10.8 MB/s) | 90 Mbit/s (11.2 MB/s) |
-| 6 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 1 stream | 98–103 Mbit/s (12.3–12.9 MB/s) | 51–54 Mbit/s (6.4–6.8 MB/s) |
-| 7 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 4 streams | 150–152 Mbit/s (18.7–19.0 MB/s) | 117–118 Mbit/s (14.6–14.8 MB/s) |
-| 8 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | FTP 64 MB | 97 Mbit/s (12.1 MB/s) | 97–99 Mbit/s (12.1–12.4 MB/s) |
+| 6 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 1 stream | 168 Mbit/s (21.0 MB/s) | 176–182 Mbit/s (22.0–22.8 MB/s) |
+| 7 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | TCP RAM, 4 streams | 159 Mbit/s (19.9 MB/s) | 206–210 Mbit/s (25.8–26.2 MB/s) |
+| 8 | Realtek RTL8822BU, Wi-Fi 5 | `0bda:b812` | FTP 64 MB | 111–112 Mbit/s (13.9–14.0 MB/s) | 131–132 Mbit/s (16.4–16.5 MB/s) |
 
 What a repeated run that came out lower was, so that none of it is taken for a
 regression:
@@ -46,13 +47,18 @@ regression:
   driver, against the same router, sent 60-115 Mbit/s for the first 30 s of a 20
   minute upload and 0-1 Mbit/s for the rest, transmitting at VHT-MCS 0, and stayed
   that slow after a pause. The card itself does not hold a sustained upload.
-- **RTL8822BU, rows 6-8** were measured on 2026-10-29 on channel 100 with the TX
-  power set (before that, on channel 36 beside the neighbours: 87-111 Mbit/s
-  (10.8-13.9 MB/s) for one stream out, FTP 85-102 Mbit/s (10.6-12.7 MB/s); four
-  streams in reached 146 Mbit/s (18.3 MB/s) on one evening, which three runs of
-  2026-10-29 did not repeat -- not traced yet). A 20 minute
-  soak in each direction afterwards: 152-156 Mbit/s (19.0-19.5 MB/s) out, 122-130
-  Mbit/s (15.2-16.2 MB/s) in, 32 of 32 rounds on the card.
+- **RTL8822BU, rows 6-8** (2026-10-30): eight streams in 227-229 Mbit/s (28.4-28.6
+  MB/s), near the USB host controller's ~240; a 20 minute soak each way, 32 of 32
+  rounds on the card: 160 Mbit/s (20.0-20.1 MB/s) out, 208-210 Mbit/s (26.0-26.2
+  MB/s) in. What took them there besides the xnet defaults below: the reorder
+  window no longer drops frames it gave up on (1b3e3f9), receive transfers taken
+  back when the host controller stops asking for them under heavy sending
+  (910f141, 708337c), SM power save disabled in the HT capability so the AP
+  sends on two streams, not one (07acc02), 16 frames to a transfer aggregated from
+  the first one out (c32d023, one stream out 157 -> 169 Mbit/s), and channel 116:
+  channel 100 had turned 28% busy with the console idle and cost 20-30%. Two
+  rows of the 2026-10-29 table for comparison, stock xnet: one stream in 51-54
+  Mbit/s (6.4-6.8 MB/s), FTP in 97-99 Mbit/s (12.1-12.4 MB/s).
 - **The xnet defaults** (system sockets; 2026-10-29): 128 KB receive and send
   buffers (`xnet_rcvbuf_kb`, `xnet_sndbuf_kb`; 0 keeps xnet's 16 / 63 KB), the
   congestion window clamp at 256 KB (`xnet_cwnd_kb`, 0 keeps 64 KB) and 768 KB
