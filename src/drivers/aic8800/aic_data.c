@@ -261,7 +261,8 @@ static void reorder_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
  * at TEMP_CAP_MAX. A transfer of less than about 20 s goes at the full rate.
  * Measured, ten minutes of four streams out: 116/110 held 110-112 (119 at most),
  * 25-31 Mbit/s after the first two minutes, no disconnect; 120/115 reached 126
- * for 28-34 Mbit/s, too near the stop for what it adds. */
+ * for 28-34 Mbit/s, too near the stop for what it adds.
+ * xerunner: aic8800-throughput-findings@2 */
 #define MM_SET_VENDOR_SWCONFIG_REQ  AIC_MSG(0u, 135u)
 #define MM_SET_VENDOR_SWCONFIG_CFM  AIC_MSG(0u, 136u)
 #define TEMP_COMP_GET_REQ   2u

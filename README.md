@@ -40,7 +40,18 @@ regression:
   same build is back at rows 1-2.
 - **AIC8800D80 four streams out of the console at 0**: the card drops off the
   router after minutes of sustained sending ("disconnected due to excessive
-  missing ACKs"), whatever card, port, channel or cooling. That is open. The
+  missing ACKs"), whatever card, port, channel or cooling. The cause, found
+  2026-11-01: heat. The firmware's temperature reading (TEMP_COMP_GET) goes from
+  92 to 127, as far as it reads, in about 25 s of sending flat out, and the radio
+  then stops both ways for some 40 s; receiving at 119 Mbit/s it settles at 108.
+  Its rate control held VHT-MCS 9 at 94-99% success up to the stop, and neither
+  its temperature compensation nor 6 dBm instead of 14-18 slowed the rise. The
+  driver now reads the temperature every second and caps sending from 116 on
+  (aic_data.c): a cool card sends 144 Mbit/s (18.0 MB/s) for the first 20 s or
+  so, then what the card can hold -- ten minutes of four streams out without a
+  disconnect, 25-31 Mbit/s (3.1-3.8 MB/s) after the first two minutes;
+  five 256 MB FTP downloads in a row 54, 38, 29, 28, 24 Mbit/s (6.8 down to 3.1
+  MB/s), the rate falling as the whole dongle warms. The
   RTL8822BU on the same router ran the same load for 20 minutes (133-139 Mbit/s
   (16.6-17.4 MB/s), 41 rounds) without one disconnect, so the router and the air are not the cause.
   Nor is this driver: both AIC8800D80 dongles on Linux PCs, with aicsemi's own
