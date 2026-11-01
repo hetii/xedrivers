@@ -122,7 +122,8 @@ STRUCTS = {
                   "data_rx_out_of_order", "reorder_held", "reorder_late", "reorder_jumps",
                   "reorder_timeouts", "reorder_full", "reorder_resyncs",
                   "reorder_ended", "reorder_rescued", "unexp0", "unexp1", "unexp2", "unexp3", "join_width", "join_center1",
-                  "assoc_ht_cap", "assoc_vht_cap", "ap_vht_oper", "rx_kicks", "rx_kick_ok"],
+                  "assoc_ht_cap", "assoc_vht_cap", "ap_vht_oper", "rx_kicks", "rx_kick_ok",
+                  "chip_temp", "chip_temp_max", "tx_cap_kbps", "tx_capped", "tx_cap_lowest", "temp_failures"],
     "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
                   "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
                   "no_gtk", "pending", "applied", "psk_ready"],
@@ -414,6 +415,10 @@ def status(sym):
                       a["assoc_ht_cap"], a["assoc_vht_cap"], a["ap_vht_oper"]))
             if a["rx_kicks"]:
                 print("aic kick  receive taken back %d times, went on after %d" % (a["rx_kicks"], a["rx_kick_ok"]))
+            print("aic temp  %d (most %d, %d unanswered) | transmit cap %s, lowest %d kbit/s, waited %d" % (
+                a["chip_temp"], a["chip_temp_max"], a["temp_failures"],
+                "%d kbit/s" % a["tx_cap_kbps"] if a["tx_cap_kbps"] else "off",
+                a["tx_cap_lowest"], a["tx_capped"]))
     if "wl_config" in sym:
         names_max = 4
         raw = read(sym["wl_config"], 8 + 4 * names_max + names_max * 33 + 4)

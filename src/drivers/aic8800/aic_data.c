@@ -86,11 +86,47 @@ static void tx_complete(URB *urb, u32 status)
         net_tx_done(a->nd);
 }
 
+/* The transmit cap of the temperature watch (aic_data_tick): bytes go out as the
+ * time base refills a budget at tx_cap_kbps, at most CAP_BURST ahead. */
+#define TB_PER_US   50u                     /* the 50 MHz time base */
+#define CAP_BURST   65536
+
+static u32 time_base(void)
+{
+    u32 t = 0;
+
+#if defined(__powerpc__)
+    __asm__ volatile("mftb %0" : "=r"(t));
+#endif
+    return t;
+}
+
+static u32 cap_allows(AIC *a)
+{
+    u32 kbps = a->st->tx_cap_kbps, us;
+
+    if (!kbps)
+        return 1;
+    us = (time_base() - a->cap_last) / TB_PER_US;
+    if (us) {
+        a->cap_last += us * TB_PER_US;
+        if (us > 20000u)
+            us = 20000u;
+        a->cap_budget += (s32)(us * (kbps / 8u) / 1000u);
+        if (a->cap_budget > CAP_BURST)
+            a->cap_budget = CAP_BURST;
+    }
+    if (a->cap_budget > 0)
+        return 1;
+    a->st->tx_capped++;
+    return 0;
+}
+
 u32 aic_data_tx_space(AIC *a)
 {
     u32 i;
 
-    if (!a->joined)
+    if (!a->joined || !cap_allows(a))
         return 0;
     for (i = 0; i < AIC_DATA_TX_COUNT; i++)
         if (!a->data_tx_urb[i].Busy)
@@ -157,6 +193,7 @@ u32 aic_data_xmit(AIC *a, const u8 *frame, u32 length)
         b[total++] = 0;
 
     usb_prepare(&a->data_tx_urb[slot], a->dev, a->ep_data_out, tx_complete, b, total, 0);
+    a->cap_budget -= (s32)total;
     a->st->data_tx_frames++;
     a->nd->st->tx_frames++;
     __sync_fetch_and_add(&a->nd->st->tx_inflight, 1);
@@ -210,12 +247,91 @@ static void reorder_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
  * link can go a long while without a receive transfer. */
 #define DATA_RX_KICK_TICKS  6               /* ~120 ms of 20 ms worker ticks */
 
+/* The AIC8800D80 does not hold a sustained upload: sending flat out, its own
+ * temperature reading (TEMP_COMP_GET of MM_SET_VENDOR_SWCONFIG, answered with the
+ * compensation off) went from 92 to 127, as far as it reads, in about 25 s, and a
+ * few seconds later the radio stopped both ways for some 40 s -- frames and the
+ * access point's ACKs alike, so the access point dropped the station ("excessive
+ * missing ACKs"). Receiving at 119 Mbit/s it settled at 108. The firmware's rate
+ * control held VHT-MCS 9 at 94-99% success up to the stop: no fixed rate helps;
+ * the temperature compensation on, or 6 dBm instead of 14-18, did not slow the
+ * rise. Sending capped to 32 Mbit/s it settled at 110 for two minutes; at 45 or
+ * so it reached 127 again. Hence a watch: read every TEMP_TICKS; from TEMP_HOT on
+ * cap what goes out, lower it while it stays hot, raise it once cool, and lift it
+ * at TEMP_CAP_MAX. A transfer of less than about 20 s goes at the full rate.
+ * Measured, ten minutes of four streams out: 116/110 held 110-112 (119 at most),
+ * 25-31 Mbit/s after the first two minutes, no disconnect; 120/115 reached 126
+ * for 28-34 Mbit/s, too near the stop for what it adds. */
+#define MM_SET_VENDOR_SWCONFIG_REQ  AIC_MSG(0u, 135u)
+#define MM_SET_VENDOR_SWCONFIG_CFM  AIC_MSG(0u, 136u)
+#define TEMP_COMP_GET_REQ   2u
+#define TEMP_TICKS          50u             /* 1 s */
+#define TEMP_RETRY_TICKS    500u            /* 10 s */
+#define TEMP_HOT            116u
+#define TEMP_COOL           110u
+#define TEMP_CAP_FIRST      100000u         /* kbit/s */
+#define TEMP_CAP_MIN        12000u
+#define TEMP_CAP_MAX        400000u
+
+static void temperature(AIC *a)
+{
+    u8 p[4] = { TEMP_COMP_GET_REQ, 0, 0, 0 };
+    u32 t, cap = a->st->tx_cap_kbps;
+
+    if (a->temp_unknown || ++a->temp_ticks < (a->temp_retry ? TEMP_RETRY_TICKS : TEMP_TICKS))
+        return;
+    a->temp_ticks = 0;
+    if (!NT_SUCCESS(aic_send(a, MM_SET_VENDOR_SWCONFIG_REQ, p, 4,
+                             MM_SET_VENDOR_SWCONFIG_CFM))) {
+        /* unanswered this time (the USB host, a busy firmware): the cap stays
+         * as it is and the next reading comes TEMP_RETRY_TICKS later; each
+         * try holds the worker for aic_send's CFM_TIMEOUT_MS */
+        a->st->temp_failures++;
+        a->temp_retry = 1;
+        if (!a->st->chip_temp_max && a->st->temp_failures >= 3)
+            a->temp_unknown = 1;            /* never answered: taken as unknown */
+        return;
+    }
+    a->temp_retry = 0;
+    if (a->cfm_len < 6 || a->cfm[0] != TEMP_COMP_GET_REQ) {
+        a->temp_unknown = 1;                /* a firmware without the reading */
+        a->st->tx_cap_kbps = 0;
+        return;
+    }
+    t = (u32)(s32)(signed char)a->cfm[5];   /* { swconfig id, status, degree } */
+    a->st->chip_temp = t;
+    if (t > a->st->chip_temp_max && t < 0x80000000u)
+        a->st->chip_temp_max = t;
+    if (t >= TEMP_HOT && t < 0x80000000u) {
+        if (!cap) {
+            cap = TEMP_CAP_FIRST;
+            a->cap_last = time_base();
+            a->cap_budget = 0;
+        } else {
+            cap -= cap / 4u;
+        }
+        if (cap < TEMP_CAP_MIN)
+            cap = TEMP_CAP_MIN;
+    } else if (cap && t <= TEMP_COOL) {
+        cap += cap / 8u;
+        if (cap >= TEMP_CAP_MAX)
+            cap = 0;
+    }
+    if (cap && (!a->st->tx_cap_lowest || cap < a->st->tx_cap_lowest))
+        a->st->tx_cap_lowest = cap;
+    a->st->tx_cap_kbps = cap;
+}
+
 void aic_data_tick(AIC *a)
 {
     u32 sending;
 
     if (!a->data_running)
         return;
+    temperature(a);
+    /* frames held by the cap go on: nothing else may come back to ask */
+    if (a->st->tx_cap_kbps && cap_allows(a))
+        net_tx_done(a->nd);
     if (!a->data_rx_watch.urbs)
         usb_rx_watch_init(&a->data_rx_watch, a->data_rx_urb, AIC_DATA_RX_COUNT,
                           DATA_RX_KICK_TICKS, 0xFFFFFFFFu, &a->st->rx_kicks,

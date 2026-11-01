@@ -174,6 +174,12 @@ typedef struct {
     u32 ap_vht_oper;            /* the AP's VHT operation: width, centre 1, centre 2 */
     u32 rx_kicks;               /* data receive transfers taken back (USB_RX_WATCH) */
     u32 rx_kick_ok;             /* after which the receive went on */
+    u32 chip_temp;              /* the firmware's temperature reading, 127 its most */
+    u32 chip_temp_max;
+    u32 tx_cap_kbps;            /* the transmit cap the temperature set, 0: none */
+    u32 tx_capped;              /* times a frame waited for the cap */
+    u32 tx_cap_lowest;
+    u32 temp_failures;          /* readings not answered */
 } AIC_STATS;
 
 extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
@@ -245,6 +251,11 @@ typedef struct AIC {
     URB data_rx_urb[AIC_DATA_RX_COUNT];
     USB_RX_WATCH data_rx_watch;         /* the data receive ring, watched by the core */
     u32 data_rx_watch_tx;               /* data_tx_frames at its last tick */
+    u32 temp_ticks;                     /* worker ticks since the last reading */
+    u32 temp_unknown;                   /* the firmware has no reading: no cap */
+    u32 temp_retry;                     /* the last reading was not answered */
+    u32 cap_last;                       /* time base at the cap's last refill */
+    s32 cap_budget;                     /* bytes the cap lets go now */
     u8 *data_rx_buf[AIC_DATA_RX_COUNT];
     u32 data_rx_consecutive_errors;
     URB data_tx_urb[AIC_DATA_TX_COUNT];
