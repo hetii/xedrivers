@@ -122,7 +122,7 @@ STRUCTS = {
                   "data_rx_out_of_order", "reorder_held", "reorder_late", "reorder_jumps",
                   "reorder_timeouts", "reorder_full", "reorder_resyncs",
                   "reorder_ended", "reorder_rescued", "unexp0", "unexp1", "unexp2", "unexp3", "join_width", "join_center1",
-                  "assoc_ht_cap", "assoc_vht_cap", "ap_vht_oper"],
+                  "assoc_ht_cap", "assoc_vht_cap", "ap_vht_oper", "rx_kicks", "rx_kick_ok"],
     "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
                   "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
                   "no_gtk", "pending", "applied", "psk_ready"],
@@ -412,6 +412,8 @@ def status(sym):
                 print("aic link width=%d center1=%d | our ht_cap=%#06x vht_cap=%#010x | "
                       "ap vht_oper=%#08x" % (a["join_width"], a["join_center1"],
                       a["assoc_ht_cap"], a["assoc_vht_cap"], a["ap_vht_oper"]))
+            if a["rx_kicks"]:
+                print("aic kick  receive taken back %d times, went on after %d" % (a["rx_kicks"], a["rx_kick_ok"]))
     if "wl_config" in sym:
         names_max = 4
         raw = read(sym["wl_config"], 8 + 4 * names_max + names_max * 33 + 4)

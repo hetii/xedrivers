@@ -172,6 +172,8 @@ typedef struct {
     u32 assoc_ht_cap;           /* what our association request offered */
     u32 assoc_vht_cap;
     u32 ap_vht_oper;            /* the AP's VHT operation: width, centre 1, centre 2 */
+    u32 rx_kicks;               /* data receive transfers taken back (USB_RX_WATCH) */
+    u32 rx_kick_ok;             /* after which the receive went on */
 } AIC_STATS;
 
 extern volatile AIC_STATS aic_stats[USB_MAX_DEVICES];
@@ -241,6 +243,8 @@ typedef struct AIC {
     void *ep_data_out;
     void *ep_data_in;
     URB data_rx_urb[AIC_DATA_RX_COUNT];
+    USB_RX_WATCH data_rx_watch;         /* the data receive ring, watched by the core */
+    u32 data_rx_watch_tx;               /* data_tx_frames at its last tick */
     u8 *data_rx_buf[AIC_DATA_RX_COUNT];
     u32 data_rx_consecutive_errors;
     URB data_tx_urb[AIC_DATA_TX_COUNT];

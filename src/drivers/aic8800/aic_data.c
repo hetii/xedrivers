@@ -204,10 +204,26 @@ static void reorder_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
 
 /* From the worker, every tick: a hole that has held frames back for long enough
  * is let go by the DPC, where the receive path cannot be running at the same time. */
+/* The host controller can stop asking for the data receive transfers under heavy
+ * sending (USB_RX_WATCH): taken back after DATA_RX_KICK_TICKS without one while
+ * sending. No reset from here: the firmware passes no beacons up, so an idle
+ * link can go a long while without a receive transfer. */
+#define DATA_RX_KICK_TICKS  6               /* ~120 ms of 20 ms worker ticks */
+
 void aic_data_tick(AIC *a)
 {
+    u32 sending;
+
     if (!a->data_running)
         return;
+    if (!a->data_rx_watch.urbs)
+        usb_rx_watch_init(&a->data_rx_watch, a->data_rx_urb, AIC_DATA_RX_COUNT,
+                          DATA_RX_KICK_TICKS, 0xFFFFFFFFu, &a->st->rx_kicks,
+                          &a->st->rx_kick_ok);
+    sending = a->st->data_tx_frames != a->data_rx_watch_tx;
+    a->data_rx_watch_tx = a->st->data_tx_frames;
+    a->data_rx_watch.kick_ticks = sending ? DATA_RX_KICK_TICKS : 0;
+    usb_rx_watch(&a->data_rx_watch, a->joined, a->st->data_rx_transfers);
     if (wl_reorder_tick(&a->reorder) && !__sync_lock_test_and_set(&a->reorder_dpc_queued, 1))
         KeInsertQueueDpc(&a->reorder_dpc, 0, 0);
 }
@@ -335,6 +351,7 @@ static void rx_complete(URB *urb, u32 status)
 {
     AIC *a = (AIC *)urb->Owner;
 
+    urb->Busy = 0;                      /* the controller is done with it */
     if (!a->data_running || !a->dev->active)
         return;
     if (!NT_SUCCESS(status)) {

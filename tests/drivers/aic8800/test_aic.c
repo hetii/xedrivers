@@ -211,6 +211,25 @@ u32 usb_wait_idle(URB *urb, u32 timeout_ms)
     return !urb->Busy;
 }
 
+void usb_rx_watch_init(USB_RX_WATCH *w, URB *urbs, u32 count, u32 kick_ticks,
+                       u32 reset_ticks, volatile u32 *kicks, volatile u32 *kick_ok)
+{
+    w->urbs = urbs;
+    w->count = count;
+    w->kick_ticks = kick_ticks;
+    w->reset_ticks = reset_ticks;
+    w->kicks = kicks;
+    w->kick_ok = kick_ok;
+}
+
+u32 usb_rx_watch(USB_RX_WATCH *w, u32 watched, u32 progress)
+{
+    (void)w;
+    (void)watched;
+    (void)progress;
+    return 0;
+}
+
 void usb_submit(URB *urb)
 {
     if (urb->Endpoint == EP_BT)
