@@ -43,9 +43,15 @@ typedef struct {
     u32 worker_ticks;
     u32 claim_attempts;
     u32 claim_found;
+    u32 build_commit;       /* the first 8 hex digits of the commit built from */
+    u32 build_dirty;        /* 1: tracked files differed from that commit */
 } XE_STATE;
 
-volatile XE_STATE xe_state = { 0, XE_VERSION };
+#ifndef XE_BUILD_COMMIT
+#define XE_BUILD_COMMIT 0u
+#define XE_BUILD_DIRTY  1u
+#endif
+volatile XE_STATE xe_state = { 0, XE_VERSION, 0, 0, 0, XE_BUILD_COMMIT, XE_BUILD_DIRTY };
 volatile XE_CONFIG xe_config = { 0x58434647u, XE_MODE, XE_ADVERTISE, XE_IP,
                                    XE_TRANSPORT };
 

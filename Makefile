@@ -108,7 +108,12 @@ AIC_FW       ?= /lib/firmware/aic8800D80
 AIC_FW_FILES := fw_patch_table_8800d80_u02.bin fw_adid_8800d80_u02.bin \
                 fw_patch_8800d80_u02.bin fw_patch_8800d80_u02_ext0.bin \
                 fmacfw_8800d80_u02.bin fmacfw_8800d80_h_u02.bin
-FLAGS_LINE := DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST))
+# The commit the plugin is built from and whether tracked files differed from it,
+# kept in the image (xe_state.build_commit / build_dirty) so what runs on the
+# console says what it was built from (tools/xectl.py status, bench --record).
+GIT_COMMIT := $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-8),0)
+GIT_DIRTY  := $(if $(shell git status --porcelain --untracked-files=no 2>/dev/null),1,0)
+FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST))
 
 .PHONY: all clean test lint kit push push-fw deploy
 
@@ -147,6 +152,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
 	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u $(BENCH_FLAGS) \
+	    -D XE_BUILD_COMMIT=0x$(GIT_COMMIT)u -D XE_BUILD_DIRTY=$(GIT_DIRTY)u \
 	    --name $(NAME).dll --into $(BUILD)
 	@mv $(BUILD)/plugin.xex $@
 	@echo "  -> $@"

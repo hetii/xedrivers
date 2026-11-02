@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tables of the kept results (results/wired.jsonl, results/wifi.jsonl), which
-`tools/xectl.py bench ... --record` appends to.
+`tools/xectl.py bench ... --record` writes: one line for each set of conditions
+and direction, the newest; git log -p on the file gives the older ones.
 
     results.py                 print both tables (Markdown)
     results.py --readme        rewrite them in README.md between the markers

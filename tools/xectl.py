@@ -23,10 +23,12 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py bench ftp [up|down|both] [--mb 256] [--login U:P] [--dir Hdd1/xedrivers]
     xectl.py bench sockets [--count 80] how many TCP connections the console holds
 
-A bench with --record [--note TEXT] appends one line per result to
-results/wired.jsonl or results/wifi.jsonl, with what the console runs read back
-from it (card, transport or channel, xnet settings) and the commit; without it,
-nothing is kept. tools/results.py turns those files into tables.
+A bench with --record [--note TEXT] keeps one line per result in
+results/wired.jsonl or results/wifi.jsonl, in place of an older one under the same
+conditions (git keeps the history), with what the console runs read back from it:
+card, transport or channel, xnet settings, and the commit its plugin was built
+from (refused for a build of uncommitted changes). Without it, nothing is kept.
+tools/results.py turns those files into tables.
 
 Environment: XE_HOST (the console's address, required), XERUNNER (the xerunner
 CLI; default `xerunner` on PATH, else ../xerunner/.venv/bin/xerunner).
@@ -62,7 +64,8 @@ PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up', 'tx_wait', 'turna
 
 STRUCTS = {
     "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls", "tx_wait_ticks_hi", "tx_wait_ticks_lo", "tx_wait_bytes_hi", "tx_wait_bytes_lo", "tx_wait_calls", "turnaround_ticks_hi", "turnaround_ticks_lo", "turnaround_bytes_hi", "turnaround_bytes_lo", "turnaround_calls"],
-    "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found"],
+    "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found",
+                 "build_commit", "build_dirty"],
     "net_state": ["start_result", "start_count", "mode", "xnet_status",
                   "console_mac_status", "console_mac_needed", "console_mac_read0",
                   "console_mac_read1", "console_mac_from_config"],
@@ -276,8 +279,9 @@ def status(sym):
     names = {v: k for k, v in MODES.items()}
     drivers = driver_names(sym)
     up = uplink_index(sym)
-    print("plugin   magic=%08x version=%08x ticks=%d" % (
-        st["magic"], st["version"], st["worker_ticks"]))
+    print("plugin   magic=%08x version=%08x ticks=%d built from %08x%s" % (
+        st["magic"], st["version"], st["worker_ticks"], st["build_commit"],
+        " with uncommitted changes" if st["build_dirty"] else ""))
     print("config   mode=%s advertise=0x%02x ip=%s" % (
         names.get(cf["mode"], cf["mode"]), cf["advertise"], ip(cf["ip"])))
     print("running  mode=%s start=%d/%#x claims=%d/%d xnet=%#x uplink=%s mac=%s" % (
@@ -773,23 +777,40 @@ def context(sym):
     return ctx
 
 
-def commit():
-    def git(*a):
-        return subprocess.run(["git", "-C", ROOT, *a], capture_output=True,
-                              text=True).stdout.strip()
-    head = git("rev-parse", "--short", "HEAD")
-    return head + ("+" if git("status", "--porcelain", "--untracked-files=no") else "")
+def built_from(sym):
+    """The commit the running plugin was built from, read off the console. A record
+    is only kept for a build of committed code, which git can give back."""
+    st = read_struct(sym, "xe_state")
+    if st["build_dirty"] or not st["build_commit"]:
+        raise SystemExit("the plugin on the console was built from uncommitted changes "
+                         "(or by hand): commit, make, push, boot, then --record")
+    return "%08x" % st["build_commit"]
+
+
+CONDITIONS = ("card", "kind", "link_mbps", "transport", "band_ghz", "channel", "width_mhz",
+              "xnet", "test", "streams", "direction")
 
 
 def record(ctx, test, streams, direction, bytes_per_s, note):
-    row = {"date": time.strftime("%Y-%m-%d"), "commit": commit(), **ctx,
+    """One result in results/<kind>.jsonl, in place of an older one under the same
+    conditions: the file holds the current figure for each, git its history."""
+    row = {"date": time.strftime("%Y-%m-%d"), "commit": ctx["commit"],
+           **{k: v for k, v in ctx.items() if k != "commit"},
            "test": test, "streams": streams, "direction": direction,
            "mbit_s": round(bytes_per_s * 8 / 1e6, 1), "mbyte_s": round(bytes_per_s / 1e6, 2)}
     if note:
         row["note"] = note
+    key = [row.get(k) for k in CONDITIONS]
+    path = os.path.join(RESULTS, ctx["kind"] + ".jsonl")
     os.makedirs(RESULTS, exist_ok=True)
-    with open(os.path.join(RESULTS, ctx["kind"] + ".jsonl"), "a") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    kept = []
+    if os.path.exists(path):
+        with open(path) as f:
+            kept = [line for line in f if line.strip() and
+                    [json.loads(line).get(k) for k in CONDITIONS] != key]
+    kept.append(json.dumps(row, ensure_ascii=False) + "\n")
+    with open(path, "w") as f:
+        f.writelines(kept)
 
 
 DIRECTION = {"down": "console->pc", "up": "pc->console"}
@@ -811,7 +832,7 @@ def bench(sym, argv):
     a = ap.parse_args(argv)
     if not HOST:
         raise SystemExit("set XE_HOST to the console's address")
-    ctx = context(sym) if a.record else None
+    ctx = dict(context(sym), commit=built_from(sym)) if a.record else None
     ways = ["down", "up"] if a.which == "both" else [a.which]
     if a.test == "sockets":
         opened, alive = sockets_run(a.count)
