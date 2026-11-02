@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tables of the kept results (results/wired.jsonl, results/wifi.jsonl), which
+"""Tables of the kept results (docs/speedtest.jsonl, wired and Wi-Fi rows), which
 `tools/xectl.py bench ... --record` writes: one line for each set of conditions
 and direction, the newest; git log -p on the file gives the older ones.
 
@@ -20,15 +20,14 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RESULTS = os.path.join(ROOT, "results")
+RESULTS = os.path.join(ROOT, "docs", "speedtest.jsonl")
 
 
 def load(kind):
-    path = os.path.join(RESULTS, kind + ".jsonl")
-    if not os.path.exists(path):
+    if not os.path.exists(RESULTS):
         return []
-    with open(path) as f:
-        return [json.loads(line) for line in f if line.strip()]
+    with open(RESULTS) as f:
+        return [r for r in (json.loads(line) for line in f if line.strip()) if r["kind"] == kind]
 
 
 def xnet_text(x):

@@ -24,8 +24,8 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py bench sockets [--count 80] how many TCP connections the console holds
 
 Every bench result is set against the kept one under the same conditions and the
-difference printed. With --record [--note TEXT] it is kept in results/wired.jsonl
-or results/wifi.jsonl, in place of the old one, when better by more than
+difference printed. With --record [--note TEXT] it is kept in docs/speedtest.jsonl,
+in place of the old one, when better by more than
 --tolerance (3%); within it nothing changes; worse by more is refused as a
 possible regression unless --accept-lower REASON. --repeat N takes the median of
 N runs. A record carries what the console runs, read back from it: card,
@@ -54,7 +54,7 @@ ELF = os.path.join(ROOT, "build", "plugin.elf")
 HOST = os.environ.get("XE_HOST", "")
 XERUNNER = (os.environ.get("XERUNNER") or shutil.which("xerunner") or
             os.path.join(ROOT, "..", "xerunner", ".venv", "bin", "xerunner"))
-RESULTS = os.path.join(ROOT, "results")
+RESULTS = os.path.join(ROOT, "docs", "speedtest.jsonl")
 
 CMD = {"ping": 1, "reset": 2, "claim": 3, "blast": 4, "mode": 5, "restart": 6,
        "advertise": 7, "reg_read": 8, "reg_write": 9, "phy_read": 10, "phy_write": 11,
@@ -792,7 +792,7 @@ CONDITIONS = ("card", "kind", "link_mbps", "transport", "band_ghz", "channel", "
 
 
 def kept_rows(kind):
-    path = os.path.join(RESULTS, kind + ".jsonl")
+    path = RESULTS                  # wired and Wi-Fi rows together; "kind" tells them apart
     if not os.path.exists(path):
         return path, []
     with open(path) as f:
@@ -839,7 +839,7 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
     elif a.note:
         row["note"] = a.note
     rows = [r for r in rows if [r.get(k) for k in CONDITIONS] != key] + [row]
-    os.makedirs(RESULTS, exist_ok=True)
+    os.makedirs(os.path.dirname(RESULTS), exist_ok=True)
     with open(path, "w") as f:
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
     print("     kept in %s" % os.path.relpath(path, ROOT))
