@@ -42,6 +42,13 @@ static void put32(u8 *p, u32 v)
 #define EP_DIRECT       1           /* transfers out on an endpoint before frames join: 1
                                      * against 4 put the console's ACKs in fewer
                                      * transfers, 8 streams in 27.8 -> 28.5 MB/s */
+#define EP_KEEP_OUT     4           /* a completion sends the open aggregate only below
+                                     * this many out. Sending it at every completion
+                                     * kept ~14 transfers out of ~1.8 frames each under
+                                     * load (7540 a second); now they leave full, 16
+                                     * frames (915 a second): 8 streams out 156 -> 170
+                                     * Mbit/s, 1, 2, 4 and 8 alike; one stream out, in,
+                                     * and FTP unchanged (2026-11-03, 5 GHz ch 116) */
 
 static u32 align8(u32 n)
 {
@@ -111,10 +118,11 @@ static void tx_done(URB *urb, u32 status)
     } else {
         r->st->tx_done++;
     }
-    /* what joined while this endpoint was busy goes now */
+    /* what joined while this endpoint was busy goes now, unless EP_KEEP_OUT are
+     * still out (then it fills on, and goes when full or when fewer are out) */
     irql = KfAcquireSpinLock(&r->tx_lock);
     r->tx_ep_busy[ep]--;
-    next = close_open(r, ep, &length);
+    next = r->tx_ep_busy[ep] < EP_KEEP_OUT ? close_open(r, ep, &length) : RTW_TX_COUNT;
     KfReleaseSpinLock(&r->tx_lock, irql);
     if (next != RTW_TX_COUNT)
         submit(r, next, length);

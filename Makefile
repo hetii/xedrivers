@@ -111,16 +111,17 @@ FW_DIR := $(PKG)/firmware
 # src/core/file.h), SHA-256, and where it comes from, at a fixed commit. Nothing is
 # taken from this machine's /lib/firmware, so every build packs the same bytes.
 # These are the files the drivers were tested with:
-# - RTL8822BU: linux-firmware 338684a0 ("rtw88: Add firmware file for driver
-#   rtw88"), v27.2.0. linux-firmware has v30.20.0 since a50c068b, not tried yet.
+# - RTL8822BU: linux-firmware a50c068b ("rtw88: 8822b: Update firmware to
+#   v30.20.0"). A/B against v27.2.0 (338684a0) on the console, 2026-11-02: the same
+#   within 2% each way, TCP and FTP.
 # - AIC8800D80: aicsemi's USB driver package as radxa-pkg/aic8800 keeps it
 #   (src/USB/driver_fw/fw); the bytes the driver's usbmon checks were made
 #   against. Not in linux-firmware.
 LINUX_FW := https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain
-LINUX_FW_COMMIT := 338684a0c7760644031483311464c7cf5b3aac94
+LINUX_FW_COMMIT := a50c068b4977be0845596e8294b47199ed2c5e2b
 AIC_FW   := https://raw.githubusercontent.com/radxa-pkg/aic8800/d9c72efd382ccdbf2f1fdb09d2d4f3cc212edd9d/src/USB/driver_fw/fw
 define FIRMWARE
-rtw88/rtw8822b_fw.bin 378ff7b43ae7da18a0311175abc351a1758d25ce553b44f3c5694758efbea84c $(LINUX_FW)/rtw88/rtw8822b_fw.bin?id=$(LINUX_FW_COMMIT)
+rtw88/rtw8822b_fw.bin a72da690597bfa99d8eb6fc2ab090d18d8ad92ac2befd35db1c9e3662d8d8418 $(LINUX_FW)/rtw88/rtw8822b_fw.bin?id=$(LINUX_FW_COMMIT)
 aic8800D80/fw_patch_table_8800d80_u02.bin 9decb77435b7e9713e33e32da483d683b7329ed93b672b2d1b134031d7da5f67 $(AIC_FW)/aic8800D80/fw_patch_table_8800d80_u02.bin
 aic8800D80/fw_adid_8800d80_u02.bin a526cbd02fcdc495f049f3ad6b5933cb08cd984b16790c716a060d582fee1a56 $(AIC_FW)/aic8800D80/fw_adid_8800d80_u02.bin
 aic8800D80/fw_patch_8800d80_u02.bin f0e2f5bbc17bc327ca7f1574ff55370dfd863d931514347bb4abc18a74f6218f $(AIC_FW)/aic8800D80/fw_patch_8800d80_u02.bin
