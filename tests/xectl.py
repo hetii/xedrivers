@@ -156,7 +156,7 @@ STRUCTS = {
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
-                   "xq_high", "link_fallback", "rcvbuf_before", "rcvbuf_after", "sndbuf_before", "sndbuf_after", "cwnd_kb", "cwnd_refused", "xq_stalls", "xq_stall_depth", "pool_added_kb", "pool_refused", "tcp_sockets_before", "tcp_sockets_after", "tcp_sockets_refused"],
+                   "xq_high", "link_fallback", "rcvbuf_before", "rcvbuf_after", "sndbuf_before", "sndbuf_after", "cwnd_kb", "cwnd_refused", "xq_stalls", "xq_stall_depth", "pool_added_kb", "pool_refused", "tcp_sockets_before", "tcp_sockets_after", "tcp_sockets_refused", "title_pool_pages", "title_pool_refused"],
 }
 
 
@@ -518,6 +518,8 @@ def status(sym):
         " (refused %d)" % xs["pool_refused"] if xs["pool_refused"] else "",
         xs["tcp_sockets_before"], xs["tcp_sockets_after"] or "left",
         " (refused %d)" % xs["tcp_sockets_refused"] if xs["tcp_sockets_refused"] else ""))
+    print("xnet mem titles' pool %d KB by default%s" % (xs["title_pool_pages"] * 4,
+        " (refused %d)" % xs["title_pool_refused"] if xs["title_pool_refused"] else ""))
     if "debug_tx_stall" in sym:
         for i in range(NET_MAX):
             d = read_struct(sym, "debug_tx_stall", i)

@@ -557,6 +557,39 @@ static void extend_pool(void)
     xnet_stats.pool_added_kb = (units * POOL_UNIT) >> 10;
 }
 
+/* --- titles' pool ----------------------------------------------------------------
+ *
+ * A title (Aurora, a game) gets its own xnet with its own pool, the same 70 pages
+ * as the system's (byte 13 of the default configuration, xerunner:
+ * xnet-caller-pool-size@1), taken when the title's xnet starts -- after this
+ * plugin, so setting the byte first gives every title started afterwards a larger
+ * one. xnet_title_pool_kb (0 or none: left; at most 1020) sets it, from the
+ * worker's first moments; it costs the title that much memory. Only over the
+ * default configuration as measured on 17559. */
+#define XNET_DEFAULT_CFG        0x81600090u
+#define XNET_CFG_POOL_PAGES     13u
+
+static const u8 default_cfg[16] = { 0, 0, 8, 32, 16, 16, 8, 32, 64, 2, 3, 8, 2, 70, 4, 4 };
+
+void xnet_title_pool(void)
+{
+    volatile u8 *cfg = (volatile u8 *)(unsigned long)XNET_DEFAULT_CFG;
+    u32 kb = setting_kb("xnet_title_pool_kb", 0), i;
+
+    xnet_stats.title_pool_pages = cfg[XNET_CFG_POOL_PAGES];
+    if (!kb)
+        return;
+    for (i = 0; i < sizeof(default_cfg); i++)
+        if (cfg[i] != default_cfg[i]) {
+            xnet_stats.title_pool_refused = 1;
+            return;
+        }
+    kb = kb > 1020u ? 1020u : kb < 16u ? 16u : kb;
+    cfg[XNET_CFG_POOL_PAGES] = (u8)(kb / 4u);
+    mem_sync();
+    xnet_stats.title_pool_pages = cfg[XNET_CFG_POOL_PAGES];
+}
+
 /* --- how many system sockets ---------------------------------------------------
  *
  * The caller block (XNET_BLOCK) keeps, besides the buffer sizes, the most datagram

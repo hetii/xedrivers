@@ -25,6 +25,10 @@
  * Returns 0, or a non-zero step code if a thunk did not match (XNET_ERR_*). */
 u32  xnet_enable(void);
 
+/* From the worker's start: a larger pool for titles started afterwards, from
+ * xnet_title_pool_kb. */
+void xnet_title_pool(void);
+
 /* Restore every thunk this patched. Safe to call when not enabled. */
 void xnet_disable(void);
 
@@ -67,6 +71,8 @@ typedef struct {
     u32 tcp_sockets_before; /* most TCP sockets of system callers, as found */
     u32 tcp_sockets_after;  /* and as set from xnet_tcp_sockets, 0 if left */
     u32 tcp_sockets_refused; /* 1: not the block expected, 2: no memory */
+    u32 title_pool_pages;   /* the default pool of a title's xnet, 4 KB pages */
+    u32 title_pool_refused; /* 1: the default configuration was not the expected */
 } XNET_STATS;
 
 extern volatile u32 xnet_rx_iface;

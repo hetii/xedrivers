@@ -79,7 +79,10 @@ regression:
   (57 connections at once measured), but only with `xnet_rcvbuf_kb` sized to the
   pool, about 1 MB over the connections receiving at once: at 128 KB, 32 streams
   into the console fell to 11 Mbit/s and left connections that never closed; at
-  32 KB, 32-48 streams carried 286-289 Mbit/s (35.7-36.1 MB/s). Over the RTL8822BU against the stock stack: one stream in 170
+  32 KB, 32-48 streams carried 286-289 Mbit/s (35.7-36.1 MB/s). Titles (Aurora,
+  games) have a pool of their own, 280 KB too; `xnet_title_pool_kb` (off by
+  default) enlarges it for every title started after the plugin (Aurora: 1020 KB,
+  ran as before); what a title gains from it is not measured yet. Over the RTL8822BU against the stock stack: one stream in 170
   Mbit/s (21.2 MB/s) against 68 (8.5), out 148 Mbit/s (18.5 MB/s) against 117
   (14.6), eight in 202-206 Mbit/s (25.3-25.8 MB/s) against 170 (21.3), four in
   beside four out 91-93 Mbit/s in against 34-37; ftpdll 118-122 Mbit/s (14.8-15.3

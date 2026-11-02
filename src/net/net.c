@@ -437,6 +437,7 @@ static u32 set_mode(u32 mode)
 
 void net_layer_init(void)
 {
+    xnet_title_pool();                  /* before a title's xnet starts */
     set_mode(xe_config.mode == XE_MODE_XNET ? XE_MODE_DROP : xe_config.mode);
     xe_config.mode = XE_MODE;
 }
