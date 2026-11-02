@@ -647,23 +647,29 @@ def history(sym, last):
 #
 # TCP against the plugin's own server (src/bench/tcp, `make bench=tcp`, started with
 # `cmd 14`), RAM to RAM: down = console -> PC from port 5201, up = PC -> console
-# into port 5202. The rate is the bytes moved over a steady window on this side;
-# the first half second (connection setup, slow start) is left out. --pace caps
-# each stream this side sends (Linux SO_MAX_PACING_RATE).
+# into port 5202. Every stream runs in one window, the same for all of them,
+# TCP_SETTLE after they start (connection setup, slow start, buffers filling), so
+# a stream that connected late is not counted over a window of its own. Down is
+# what this side received in it; up is what the console's server received
+# (tcp_stats.recv, read at both ends of the window), not what went into this
+# side's socket buffers. --pace caps each stream this side sends (Linux
+# SO_MAX_PACING_RATE).
 
-TCP_WARMUP = 0.5
+TCP_SETTLE = 2.0
 SO_MAX_PACING_RATE = 47
 
 
-def tcp_stream(port, seconds, out, index, up, pace):
-    s = socket.create_connection((HOST, port), timeout=10)
+def tcp_stream(port, begin, end, out, index, up, pace):
+    try:
+        s = socket.create_connection((HOST, port), timeout=10)
+    except OSError:
+        out[index] = -1                     # never connected
+        return
     if pace:
         s.setsockopt(socket.SOL_SOCKET, SO_MAX_PACING_RATE, int(pace * 1e6))
     s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF if up else socket.SO_RCVBUF, 4 << 20)
     block = bytes(256 << 10) if up else None
     counted = 0
-    begin = time.time() + TCP_WARMUP
-    end = begin + seconds
     try:
         while True:
             now = time.time()
@@ -681,17 +687,37 @@ def tcp_stream(port, seconds, out, index, up, pace):
     out[index] = counted
 
 
-def tcp_run(streams, seconds, up, pace=0.0):
-    """Bytes per second moved by `streams` connections."""
+def console_received(sym):
+    """The console server's received bytes, and when (the middle of the read)."""
+    before = time.time()
+    t = read_struct(sym, "tcp_stats")
+    return (t["recv_hi"] << 32 | t["recv_lo"]), (before + time.time()) / 2
+
+
+def tcp_run(streams, seconds, up, pace=0.0, sym=None):
+    """Bytes per second moved by `streams` connections over one common window."""
     out = [0] * streams
+    begin = time.time() + TCP_SETTLE
+    end = begin + seconds
     threads = [threading.Thread(target=tcp_stream,
-                                args=(5202 if up else 5201, seconds, out, i, up, pace))
+                                args=(5202 if up else 5201, begin, end, out, i, up, pace))
                for i in range(streams)]
     for t in threads:
         t.start()
+    first = last = None
+    if up and sym is not None:
+        time.sleep(max(0.0, begin - time.time()))
+        first = console_received(sym)
+        time.sleep(max(0.0, end - time.time()))
+        last = console_received(sym)
     for t in threads:
         t.join()
-    return sum(out) / seconds
+    failed = out.count(-1)
+    if failed:
+        print("     %d of %d streams never connected" % (failed, streams))
+    if first and last:
+        return (last[0] - first[0]) / (last[1] - first[1])
+    return sum(n for n in out if n > 0) / seconds
 
 
 def ftp_run(up, mb, login, folder):
@@ -891,7 +917,7 @@ def bench(sym, argv):
         return
     for n in (int(x) for x in a.streams.split(",")):
         for w in ways:
-            runs = [tcp_run(n, a.seconds, w == "up", a.pace if w == "up" else 0)
+            runs = [tcp_run(n, a.seconds, w == "up", a.pace if w == "up" else 0, sym)
                     for _ in range(a.repeat)]
             rate = median(runs)
             print("tcp  %-4s x%-3d %s  %6.1f Mbit/s (%5.1f MB/s)%s" % (
