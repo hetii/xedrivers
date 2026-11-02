@@ -612,7 +612,8 @@ void xnet_title_pool(void)
  * about 1 MB) fell to 11-20 Mbit/s and left connections that never closed --
  * their FINs dropped with the rest -- and 4 streams after them at 1 Mbit/s,
  * ftpdll still at 126; at xnet_rcvbuf_kb = 32 the same 32 and 48 streams carried
- * 286-289 Mbit/s (35.7-36.1 MB/s) and closed, one stream 110 instead of 179. So
+ * on and closed, one stream 110 instead of 179 (their sum, 286-289 Mbit/s, was
+ * counted by a bench tool that gave every stream its own window, too high). So
  * the stock 16 stays the default (TCP_SOCKETS_DEFAULT 0): more is for a setup
  * that also sizes xnet_rcvbuf_kb to the pool, about 1 MB over the connections
  * that receive at once. */

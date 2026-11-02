@@ -54,9 +54,9 @@ stack, not the throughput.
 
 ## Issues
 
-- **NCM is not the default.** On the RTL8156B it gains 3 to 6% in and about 3% out
-  at eight streams or more, but is slower with one stream at 128 KB buffers. Older
-  measurements are in the comments of `cdc_net.c`.
+- **NCM is not the default.** On the RTL8156B it is 2 to 4% faster over TCP both
+  ways, but FTP uploads to the console fall from 164 to 104 Mbit/s (20.5 to
+  13.0 MB/s). Older measurements are in the comments of `cdc_net.c`.
 - **`cdc_rx_cpu` stays 0.** Moving receive to another processor (`cdc_rx_cpu` 1)
   once stopped the console's network until a power cycle, under the plugin's TCP
   server at full rate. With FTP every value worked but gained nothing.
