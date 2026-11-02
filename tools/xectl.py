@@ -23,11 +23,14 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py bench ftp [up|down|both] [--mb 256] [--login U:P] [--dir Hdd1/xedrivers]
     xectl.py bench sockets [--count 80] how many TCP connections the console holds
 
-A bench with --record [--note TEXT] keeps one line per result in
-results/wired.jsonl or results/wifi.jsonl, in place of an older one under the same
-conditions (git keeps the history), with what the console runs read back from it:
-card, transport or channel, xnet settings, and the commit its plugin was built
-from (refused for a build of uncommitted changes). Without it, nothing is kept.
+Every bench result is set against the kept one under the same conditions and the
+difference printed. With --record [--note TEXT] it is kept in results/wired.jsonl
+or results/wifi.jsonl, in place of the old one, when better by more than
+--tolerance (3%); within it nothing changes; worse by more is refused as a
+possible regression unless --accept-lower REASON. --repeat N takes the median of
+N runs. A record carries what the console runs, read back from it: card,
+transport or channel, xnet settings, and the commit its plugin was built from
+(none for a build of uncommitted changes). git log -p keeps the older figures.
 tools/results.py turns those files into tables.
 
 Environment: XE_HOST (the console's address, required), XERUNNER (the xerunner
@@ -778,39 +781,73 @@ def context(sym):
 
 
 def built_from(sym):
-    """The commit the running plugin was built from, read off the console. A record
-    is only kept for a build of committed code, which git can give back."""
+    """The commit the running plugin was built from, read off the console, and
+    whether its tree had uncommitted changes."""
     st = read_struct(sym, "xe_state")
-    if st["build_dirty"] or not st["build_commit"]:
-        raise SystemExit("the plugin on the console was built from uncommitted changes "
-                         "(or by hand): commit, make, push, boot, then --record")
-    return "%08x" % st["build_commit"]
+    return "%08x" % st["build_commit"], bool(st["build_dirty"] or not st["build_commit"])
 
 
 CONDITIONS = ("card", "kind", "link_mbps", "transport", "band_ghz", "channel", "width_mhz",
               "xnet", "test", "streams", "direction")
 
 
-def record(ctx, test, streams, direction, bytes_per_s, note):
-    """One result in results/<kind>.jsonl, in place of an older one under the same
-    conditions: the file holds the current figure for each, git its history."""
+def kept_rows(kind):
+    path = os.path.join(RESULTS, kind + ".jsonl")
+    if not os.path.exists(path):
+        return path, []
+    with open(path) as f:
+        return path, [json.loads(line) for line in f if line.strip()]
+
+
+def keep(ctx, test, streams, direction, bytes_per_s, a):
+    """Set one result against the kept one under the same conditions, say how far
+    apart they are, and with --record keep it: in place of the old when better
+    by more than the tolerance, never when within it (noise), and when worse by
+    more only with --accept-lower REASON -- a drop is a regression until shown
+    otherwise. The file holds the current figure for each set of conditions; git
+    log -p the older ones."""
     row = {"date": time.strftime("%Y-%m-%d"), "commit": ctx["commit"],
-           **{k: v for k, v in ctx.items() if k != "commit"},
+           **{k: v for k, v in ctx.items() if k not in ("commit", "dirty")},
            "test": test, "streams": streams, "direction": direction,
            "mbit_s": round(bytes_per_s * 8 / 1e6, 1), "mbyte_s": round(bytes_per_s / 1e6, 2)}
-    if note:
-        row["note"] = note
     key = [row.get(k) for k in CONDITIONS]
-    path = os.path.join(RESULTS, ctx["kind"] + ".jsonl")
+    path, rows = kept_rows(ctx["kind"])
+    old = next((r for r in rows if [r.get(k) for k in CONDITIONS] == key), None)
+    if old:
+        change = (row["mbit_s"] - old["mbit_s"]) / old["mbit_s"] * 100 if old["mbit_s"] else 0.0
+        verdict = ("within" if abs(change) <= a.tolerance else
+                   "better" if change > 0 else "WORSE")
+        print("     on file %.0f Mbit/s (%s, %s): %+.1f%%, %s +-%.0f%%" % (
+            old["mbit_s"], old["date"], old["commit"], change,
+            verdict, a.tolerance))
+    else:
+        verdict = "new"
+    if not a.record:
+        return
+    if ctx["dirty"]:
+        raise SystemExit("not kept: the plugin on the console was built from uncommitted "
+                         "changes (or by hand); commit, make, push, boot, then --record")
+    if verdict == "within":
+        return
+    if verdict == "WORSE":
+        if not a.accept_lower:
+            print("     not kept: possibly a regression (was %.0f at %s, now %.0f at %s); "
+                  "--repeat to be sure, or --accept-lower REASON" % (
+                      old["mbit_s"], old["commit"], row["mbit_s"], row["commit"]))
+            return
+        row["note"] = "lower accepted: " + a.accept_lower
+    elif a.note:
+        row["note"] = a.note
+    rows = [r for r in rows if [r.get(k) for k in CONDITIONS] != key] + [row]
     os.makedirs(RESULTS, exist_ok=True)
-    kept = []
-    if os.path.exists(path):
-        with open(path) as f:
-            kept = [line for line in f if line.strip() and
-                    [json.loads(line).get(k) for k in CONDITIONS] != key]
-    kept.append(json.dumps(row, ensure_ascii=False) + "\n")
     with open(path, "w") as f:
-        f.writelines(kept)
+        f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    print("     kept in %s" % os.path.relpath(path, ROOT))
+
+
+def median(values):
+    v = sorted(values)
+    return v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2
 
 
 DIRECTION = {"down": "console->pc", "up": "pc->console"}
@@ -827,33 +864,41 @@ def bench(sym, argv):
     ap.add_argument("--login", default=os.environ.get("XE_FTP", "xboxftp:xboxftp"))
     ap.add_argument("--dir", default="Hdd1/xedrivers")
     ap.add_argument("--count", type=int, default=80)
+    ap.add_argument("--repeat", type=int, default=1, help="runs; the median counts")
+    ap.add_argument("--tolerance", type=float, default=3.0, help="percent taken as noise")
     ap.add_argument("--record", action="store_true", help="keep the results")
+    ap.add_argument("--accept-lower", default="", metavar="REASON",
+                    help="keep a result worse than the kept one, saying why")
     ap.add_argument("--note", default="")
     a = ap.parse_args(argv)
     if not HOST:
         raise SystemExit("set XE_HOST to the console's address")
-    ctx = dict(context(sym), commit=built_from(sym)) if a.record else None
     ways = ["down", "up"] if a.which == "both" else [a.which]
     if a.test == "sockets":
         opened, alive = sockets_run(a.count)
         print("sockets  %d connections held (asked %d), %d still taking data" % (
             opened, a.count, alive))
         return
+    commit, dirty = built_from(sym)
+    ctx = dict(context(sym), commit=commit, dirty=dirty)
     if a.test == "ftp":
         for w in sorted(ways, key=lambda w: w != "up"):     # the file goes up first
-            rate = ftp_run(w == "up", a.mb, a.login, a.dir)
-            print("ftp  %-4s %s  %d MB  %6.1f Mbit/s (%5.1f MB/s)" % (
-                w, DIRECTION[w], a.mb, rate * 8 / 1e6, rate / 1e6))
-            if ctx:
-                record(ctx, "ftp %d MB" % a.mb, 1, DIRECTION[w], rate, a.note)
+            runs = [ftp_run(w == "up", a.mb, a.login, a.dir) for _ in range(a.repeat)]
+            rate = median(runs)
+            print("ftp  %-4s %s  %d MB  %6.1f Mbit/s (%5.1f MB/s)%s" % (
+                w, DIRECTION[w], a.mb, rate * 8 / 1e6, rate / 1e6,
+                "  median of %d" % a.repeat if a.repeat > 1 else ""))
+            keep(ctx, "ftp %d MB" % a.mb, 1, DIRECTION[w], rate, a)
         return
     for n in (int(x) for x in a.streams.split(",")):
         for w in ways:
-            rate = tcp_run(n, a.seconds, w == "up", a.pace if w == "up" else 0)
-            print("tcp  %-4s x%-3d %s  %6.1f Mbit/s (%5.1f MB/s)" % (
-                w, n, DIRECTION[w], rate * 8 / 1e6, rate / 1e6))
-            if ctx:
-                record(ctx, "tcp ram", n, DIRECTION[w], rate, a.note)
+            runs = [tcp_run(n, a.seconds, w == "up", a.pace if w == "up" else 0)
+                    for _ in range(a.repeat)]
+            rate = median(runs)
+            print("tcp  %-4s x%-3d %s  %6.1f Mbit/s (%5.1f MB/s)%s" % (
+                w, n, DIRECTION[w], rate * 8 / 1e6, rate / 1e6,
+                "  median of %d" % a.repeat if a.repeat > 1 else ""))
+            keep(ctx, "tcp ram", n, DIRECTION[w], rate, a)
 
 
 def main(argv):
