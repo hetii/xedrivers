@@ -131,7 +131,7 @@ DHCP, XBDM, FTP, titles.
 ## Measured
 
 Console card on a 1 Gbit/s home router, the PC on the same router at 1 Gbit/s; the
-card is on the console's USB 2.0 port (the UDP generator, XBDM getmemex, curl; speedtest.py and ramxfer.py now in xerunner/handoff).
+card is on the console's USB 2.0 port (the UDP generator, XBDM getmemex, curl).
 
 | what | RTL8156 (this driver) | onboard port (100M) |
 |---|---|---|
@@ -280,6 +280,13 @@ console's network until a power cycle; with FTP every value worked. It stays 0.
 
 ## Building
 
+Building and the unit tests need only `gcc-powerpc-linux-gnu` and `python3`: the
+packer and the kernel's and xam's ordinal tables are in `kit/`. Working with a
+console -- `tools/xectl.py`, `make deploy`, `make kit` -- needs
+[xerunner](../xerunner) for XBDM and the knowledge base: `XE_HOST` is the
+console's address, `XERUNNER` the CLI (default: `xerunner` on PATH, then
+`../xerunner`), `XERUNNER_HOME` its tree for `make kit`.
+
     make                                   the plugin for people: xnet, advertise 2500
     make bench=history,stack               ... with the tuning tools named
     make bench=all                         ... with every one
@@ -287,8 +294,38 @@ console's network until a power cycle; with FTP every value worked. It stays 0.
     make MODE=standalone ADVERTISE=1000 IP=192.168.50.2 bench=stack
     make bench=tcp                         add the RAM-to-RAM TCP server
     make test                              host unit tests
-    make push                              put it on the Usb: medium (Orange Pi)
     make DRIVERS=cdc                       only the drivers named (default: all)
+    make kit                               regenerate kit/ from xerunner (a new kernel build)
+    make push                              put it on a USB-gadget medium (PI=user@host)
+    make deploy HOST=...                   push, then xerunner console test-plugin
+
+A build records the commit it came from (`tools/xectl.py status`: "built from").
+
+## Results
+
+Kept measurements live in `results/wired.jsonl` and `results/wifi.jsonl`, one line
+per set of conditions and direction, written only by `tools/xectl.py bench tcp|ftp
+... --record`. Every bench is set against the line on file and the difference
+printed; `--record` keeps a better result (beyond `--tolerance`, 3%), leaves one
+within it alone and refuses a worse one as a possible regression unless
+`--accept-lower REASON`. A record names the commit the running plugin was built
+from and is refused for a build of uncommitted changes; `git log -p results/`
+holds the older figures. `tools/results.py` prints the tables, `--readme` writes
+them here:
+
+<!-- results:wired -->
+| Card | Transport, link | xnet | Test | Streams | Console -> PC | PC -> console | Date, commit | Note |
+|---|---|---|---|---|---|---|---|---|
+| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 155 Mbit/s (19.4 MB/s) | 164 Mbit/s (20.5 MB/s) | 2026-11-02, f3c17c5 / 2026-11-02, f3c17c5 |  |
+| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 176 Mbit/s (22.0 MB/s) | 216 Mbit/s (27.0 MB/s) | 2026-11-02, f3c17c5 / 2026-11-02, e52cd1a8 |  |
+| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 175 Mbit/s (21.9 MB/s) | 216 Mbit/s (27.1 MB/s) | 2026-11-02, f3c17c5 / 2026-11-02, f3c17c5 |  |
+| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 186 Mbit/s (23.3 MB/s) | 226 Mbit/s (28.2 MB/s) | 2026-11-02, f3c17c5 / 2026-11-02, f3c17c5 |  |
+<!-- /results:wired -->
+
+<!-- results:wifi -->
+| Card | Band, channel, width | xnet | Test | Streams | Console -> PC | PC -> console | Date, commit | Note |
+|---|---|---|---|---|---|---|---|---|
+<!-- /results:wifi -->
 
 ## The bench
 
@@ -300,10 +337,10 @@ with every tool, and none of their cycles):
 | `src/bench/` | what | used by |
 |---|---|---|
 | `history/` | flight recorder: frames, bytes, in-flight, drops every 200 ms, ~100 s | `xectl.py history` |
-| `stack/` | `MODE=standalone`: ARP/ICMP/UDP echo/discard and the UDP generator | `speedtest.py`, `phoneblast.py`, `xectl.py blast` |
+| `stack/` | `MODE=standalone`: ARP/ICMP/UDP echo/discard and the UDP generator | `xectl.py blast` |
 | `debug/` | commands 15-17: thread priority by id, read/write any word (MMIO too) | `xectl.py cmd 15/16/17` |
 | `prof/` | where the stage timers sum up (hooks in `src/core/prof.h`) | `xectl.py prof` |
-| `tcp/` | the RAM-to-RAM TCP server, the plugin's only imports from xam | `tcpbench.py` |
+| `tcp/` | the RAM-to-RAM TCP server, the plugin's only imports from xam | `xectl.py bench tcp\|sockets` |
 
 The core reaches it only through `src/core/bench.h` -- an init, a tick, unknown
 commands and the standalone mode -- which without any tool is empty inlines.
@@ -600,9 +637,12 @@ the USB stack that are spared, not the throughput.
 | `drop` | nowhere (bring the card up only) |
 
 `ADVERTISE` is the fastest link offered: `2500`, `1000`, `100`, or `default` (the
-card's firmware choice). `TRANSPORT` is `ecm` (default) or `ncm`. Both work and both stop at the
-console's USB ceilings (~31 MB/s in, ~24 MB/s out); NCM is no faster and, with
-16 KB blocks, slower for FTP uploads -- the measurements are in `src/drivers/cdc/cdc_net.c`.
+card's firmware choice). `TRANSPORT` is `ecm` (default) or `ncm`. Both work; the
+RTL8156B itself stops at ~28 MB/s in over ECM and ~30 over NCM (the console's USB
+takes at least 36, measured with the RTL8822BU), ~24 MB/s out either way. NCM
+gains 3-6% in and ~3% out from eight streams up but is slower with one stream at
+128 KB buffers, so ECM stays the default -- older measurements are in
+`src/drivers/cdc/cdc_net.c`.
 
 Both can be changed on a running console, no rebuild or reboot:
 
@@ -612,8 +652,9 @@ Both can be changed on a running console, no rebuild or reboot:
     tools/xectl.py phy 0xa400            read a PHY register (OCP address)
     tools/xectl.py blast 100000          UDP generator: 100000 datagrams to the peer
 
-`rtlreg.py` (xerunner/handoff) reads the same registers on the twin card under Linux, for
-comparing what Linux r8152 programs with what the console has.
+A host-side register tool (kept outside this repository) read the same registers on
+the twin card under Linux, for comparing what Linux r8152 programs with what the
+console has.
 
 ## Installing
 

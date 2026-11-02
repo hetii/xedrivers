@@ -74,9 +74,9 @@ def main(argv):
     path = os.path.join(ROOT, "README.md")
     text = open(path).read()
     for kind, body in tables.items():
-        pattern = re.compile(r"(<!-- results:%s -->\n).*?(\n<!-- /results:%s -->)" % (kind, kind),
+        pattern = re.compile(r"(<!-- results:%s -->\n)(?:.*?\n)?(<!-- /results:%s -->)" % (kind, kind),
                              re.S)
-        text = pattern.sub(lambda m: m.group(1) + body + m.group(2), text)
+        text = pattern.sub(lambda m: m.group(1) + body + "\n" + m.group(2), text)
     open(path, "w").write(text)
     return 0
 
