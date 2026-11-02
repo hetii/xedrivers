@@ -56,11 +56,12 @@ def table(kind):
     out = [head, "|" + "---|" * 9]
     for key in sorted(rows, key=lambda k: (k[0], k[1], k[3], k[4], k[2])):
         d = rows[key]
-        newest = max(d.values(), key=lambda r: r["date"])
         notes = "; ".join(sorted({r["note"] for r in d.values() if r.get("note")}))
-        out.append("| %s | %s | %s | %s | %d | %s | %s | %s, %s | %s |" % (
+        when = " / ".join("%s, %s" % (r["date"], r["commit"])
+                          for r in (d.get("console->pc"), d.get("pc->console")) if r)
+        out.append("| %s | %s | %s | %s | %d | %s | %s | %s | %s |" % (
             key[0], key[1], key[2], key[3], key[4], speed(d.get("console->pc")),
-            speed(d.get("pc->console")), newest["date"], newest["commit"], notes))
+            speed(d.get("pc->console")), when, notes))
     return "\n".join(out)
 
 
