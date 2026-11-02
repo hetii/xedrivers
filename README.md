@@ -74,7 +74,12 @@ regression:
   buffers (`xnet_rcvbuf_kb`, `xnet_sndbuf_kb`; 0 keeps xnet's 16 / 63 KB), the
   congestion window clamp at 256 KB (`xnet_cwnd_kb`, 0 keeps 64 KB) and 768 KB
   more in the pool system sockets' data comes from (`xnet_pool_kb`, 0 keeps
-  xnet's 280 KB). Over the RTL8822BU against the stock stack: one stream in 170
+  xnet's 280 KB). System callers have 16 TCP sockets in all (about nine
+  connections beside the listeners); `xnet_tcp_sockets = 64` gives them up to 255
+  (57 connections at once measured), but only with `xnet_rcvbuf_kb` sized to the
+  pool, about 1 MB over the connections receiving at once: at 128 KB, 32 streams
+  into the console fell to 11 Mbit/s and left connections that never closed; at
+  32 KB, 32-48 streams carried 286-289 Mbit/s (35.7-36.1 MB/s). Over the RTL8822BU against the stock stack: one stream in 170
   Mbit/s (21.2 MB/s) against 68 (8.5), out 148 Mbit/s (18.5 MB/s) against 117
   (14.6), eight in 202-206 Mbit/s (25.3-25.8 MB/s) against 170 (21.3), four in
   beside four out 91-93 Mbit/s in against 34-37; ftpdll 118-122 Mbit/s (14.8-15.3

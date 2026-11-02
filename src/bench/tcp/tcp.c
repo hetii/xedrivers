@@ -65,7 +65,7 @@ extern int NetDll_WSAGetLastError(void);
 
 #define PORT_SOURCE  5201
 #define PORT_SINK    5202
-#define SLOTS        16
+#define SLOTS        64
 #define SLOT_BYTES   0x10000u       /* the most one send or recv can carry */
 
 volatile u32 tcp_chunk = 0x8000;
@@ -119,6 +119,7 @@ typedef struct {
 static SLOT slots[SLOTS];
 static LISTENER listeners[2];
 static u8 *source_bytes;            /* what the source sends, shared, read-only */
+static u8 *sink_bytes;              /* where every sink reads to, thrown away */
 
 static void sleep_ms(u32 ms)
 {
@@ -358,14 +359,16 @@ u32 tcp_start(void)
     if (tcp_stats.started)
         return TCP_OK;
 
+    /* two buffers for every slot: the sinks throw what they read into one away,
+     * the sources only read the other, so SLOTS connections need no SLOTS of them */
+    source_bytes = (u8 *)ExAllocatePoolTypeWithTag(SLOT_BYTES, 0x50435458u, 2);
+    sink_bytes = (u8 *)ExAllocatePoolTypeWithTag(SLOT_BYTES, 0x50435458u, 2);
+    if (!source_bytes || !sink_bytes)
+        return fail(TCP_ERR_POOL);
     for (i = 0; i < SLOTS; i++) {
-        slots[i].buffer = (u8 *)ExAllocatePoolTypeWithTag(SLOT_BYTES, 0x50435458u,
-                                                          2);
+        slots[i].buffer = sink_bytes;
         slots[i].socket = INVALID_SOCKET;
-        if (!slots[i].buffer)
-            return fail(TCP_ERR_POOL);
     }
-    source_bytes = slots[0].buffer;     /* the source only ever reads it */
     if (tcp_trace)                      /* 4 MB: only when asked, memory is short */
         sink_trace = (volatile u32 *)MmAllocatePhysicalMemory(2, TRACE_COUNT * 16, 4);
     for (i = 0; i < SLOT_BYTES; i++)

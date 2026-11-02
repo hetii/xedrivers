@@ -557,6 +557,80 @@ static void extend_pool(void)
     xnet_stats.pool_added_kb = (units * POOL_UNIT) >> 10;
 }
 
+/* --- how many system sockets ---------------------------------------------------
+ *
+ * The caller block (XNET_BLOCK) keeps, besides the buffer sizes, the most datagram
+ * (+48) and stream (+49) sockets and how many of each are open (+8, +12; checked
+ * against the limits when one is reserved, 0x81742CF0), and at +40 one table of
+ * socket pointers for both kinds together, (+48 + +49) words, taken when the
+ * caller's xnet starts (0x81747F68). A socket goes in the first empty word
+ * (0x81742DF8, under the xnet lock, from socket creation at 0x8174559C), and its
+ * handle carries the word's index, which a lookup (0x81742EB8, 0x81742F58)
+ * checks against +48 + +49 before reading +40. Nothing else reads +49 for these
+ * sockets. System callers -- ftpdll, XBDM, the dashboard, this plugin -- have 16
+ * stream sockets in all: with the larger pool, nine connections plus the
+ * listeners took them. So a larger table (from xnet_tcp_sockets, at most 255 as
+ * +49 is a byte), the open ones copied, goes in under the lock before +49 is
+ * raised; the old one is left, as a lookup may still be reading it. A socket
+ * costs pool memory only once data waits in it. Measured over the RTL8822BU, 64
+ * sockets: 57 connections at once against 9, all of them carrying. But the
+ * stock limit was also what kept the receive windows inside the pool (above):
+ * 32 or 48 streams into the console at the 128 KB default (4-6 MB of windows on
+ * about 1 MB) fell to 11-20 Mbit/s and left connections that never closed --
+ * their FINs dropped with the rest -- and 4 streams after them at 1 Mbit/s,
+ * ftpdll still at 126; at xnet_rcvbuf_kb = 32 the same 32 and 48 streams carried
+ * 286-289 Mbit/s (35.7-36.1 MB/s) and closed, one stream 110 instead of 179. So
+ * the stock 16 stays the default (TCP_SOCKETS_DEFAULT 0): more is for a setup
+ * that also sizes xnet_rcvbuf_kb to the pool, about 1 MB over the connections
+ * that receive at once. */
+#define XNET_BLOCK_TABLE        40u
+#define XNET_MAX_DGRAM          48u
+#define XNET_MAX_STREAM         49u
+#define TCP_SOCKETS_STOCK       16u
+#define TCP_SOCKETS_DEFAULT     0u      /* leave xnet's */
+
+static void more_sockets(void)
+{
+    u8 *xnet = *(u8 **)((u8 *)title_user + USER_CTX_OFF), *block;
+    u32 n = setting_kb("xnet_tcp_sockets", TCP_SOCKETS_DEFAULT), old, total, i, irql;
+    u32 **table, *fresh;
+    u32 (*take)(void *) = (u32 (*)(void *))(unsigned long)XNET_LOCK_TAKE;
+    void (*give)(void *, u32) = (void (*)(void *, u32))(unsigned long)XNET_LOCK_GIVE;
+
+    if (!xnet || !MmIsAddressValid(xnet + XNET_BLOCK(XNET_SYSTEM) + 63))
+        return;
+    block = xnet + XNET_BLOCK(XNET_SYSTEM);
+    xnet_stats.tcp_sockets_before = block[XNET_MAX_STREAM];
+    if (!n || n <= block[XNET_MAX_STREAM] || xnet_stats.tcp_sockets_after)
+        return;
+    if (n > 255u)
+        n = 255u;
+    table = (u32 **)(block + XNET_BLOCK_TABLE);
+    if (block[XNET_MAX_STREAM] != TCP_SOCKETS_STOCK || !*table ||
+        !MmIsAddressValid(*table) ||
+        !code_is(XNET_LOCK_TAKE, lock_take_code) || !code_is(XNET_LOCK_GIVE, lock_give_code)) {
+        xnet_stats.tcp_sockets_refused = 1;
+        return;
+    }
+    total = block[XNET_MAX_DGRAM] + n;
+    fresh = (u32 *)ExAllocatePoolTypeWithTag(total * 4u, 0x4E455465u, 2);  /* 'NETe' */
+    if (!fresh) {
+        xnet_stats.tcp_sockets_refused = 2;
+        return;
+    }
+    irql = take((void *)(unsigned long)XNET_LOCK);
+    old = block[XNET_MAX_DGRAM] + block[XNET_MAX_STREAM];
+    for (i = 0; i < total; i++)
+        fresh[i] = i < old ? (*table)[i] : 0;
+    mem_sync();
+    *table = fresh;                     /* the table first: no handle reaches past old yet */
+    mem_sync();
+    block[XNET_MAX_STREAM] = (u8)n;
+    mem_sync();
+    give((void *)(unsigned long)XNET_LOCK, irql);
+    xnet_stats.tcp_sockets_after = n;
+}
+
 /* --- enable / disable -------------------------------------------------------- */
 
 u32 xnet_enable(void)
@@ -582,6 +656,7 @@ u32 xnet_enable(void)
     set_buffers();
     set_cwnd();
     extend_pool();
+    more_sockets();
 
     saved_xmit_lis = xmit[0];
     saved_xmit_addi = xmit[1];

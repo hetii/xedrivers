@@ -64,6 +64,9 @@ typedef struct {
     u32 xq_stall_depth;     /* frames waiting the last time */
     u32 pool_added_kb;      /* added to the system sockets' pool, from xnet_pool_kb */
     u32 pool_refused;       /* 1: not the xam laid out as expected, 2: no memory */
+    u32 tcp_sockets_before; /* most TCP sockets of system callers, as found */
+    u32 tcp_sockets_after;  /* and as set from xnet_tcp_sockets, 0 if left */
+    u32 tcp_sockets_refused; /* 1: not the block expected, 2: no memory */
 } XNET_STATS;
 
 extern volatile u32 xnet_rx_iface;
