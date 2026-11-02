@@ -1,0 +1,57 @@
+# Build the package (build/xedrivers/: the plugin and its firmware), run the unit
+# tests, keep the package as an artifact of every run, and on a tag v* publish it
+# as a release.
+
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-powerpc-linux-gnu zip
+
+      # The firmware is pinned by hash in the Makefile (FIRMWARE); fetch it only
+      # when the pins change.
+      - uses: actions/cache@v4
+        with:
+          path: build/xedrivers/firmware
+          key: firmware-${{ hashFiles('Makefile') }}
+
+      - name: Build
+        run: make
+
+      - name: Unit tests
+        run: make test
+
+      - name: Package
+        id: package
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then version="${GITHUB_REF_NAME}"; else version="$(git rev-parse --short=8 HEAD)"; fi
+          echo "name=xedrivers-${version}" >> "$GITHUB_OUTPUT"
+          (cd build && zip -r "../xedrivers-${version}.zip" xedrivers)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: build/xedrivers/
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" "${{ steps.package.outputs.name }}.zip" --title "${GITHUB_REF_NAME}" --generate-notes
+
+permissions:
+  contents: write

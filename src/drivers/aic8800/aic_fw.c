@@ -9,15 +9,15 @@
  *   3. the Wi-Fi firmware (fmacfw) at 0x120000, its patch configuration, and
  *      DBG_START_APP: the chip leaves the bus and comes back running it.
  *
- * The files are those Linux loads from /lib/firmware/aic8800D80, looked for in an
- * aic8800D80 directory beside the plugin (file.h). Revision U01 chips, which need
+ * The files are those Linux loads from /lib/firmware/aic8800D80, looked for in
+ * firmware\\aic8800D80 beside the plugin (file.h). Revision U01 chips, which need
  * other files, are only recognised.
  */
 
 #include "aic.h"
 #include "file.h"
 
-#define DIR                 "aic8800D80\\"
+#define DIR                 FIRMWARE_DIR "aic8800D80\\"
 #define PATCH_TABLE         DIR "fw_patch_table_8800d80_u02.bin"
 #define ADID                DIR "fw_adid_8800d80_u02.bin"
 #define PATCH               DIR "fw_patch_8800d80_u02.bin"

@@ -387,7 +387,7 @@ static u32 load_file(RTW *r)
     return got;
 }
 
-/* __rtw_download_firmware. The image comes from rtw8822b_fw.bin beside the plugin;
+/* __rtw_download_firmware. The image comes from firmware\\rtw88\\rtw8822b_fw.bin beside the plugin;
  * it stays in memory for a later bring-up. */
 u32 rtw_download_firmware(RTW *r)
 {

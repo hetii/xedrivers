@@ -27,7 +27,7 @@
 #include "softmac.h"
 
 #define RTW_VENDOR          0x0BDAu
-#define RTW_FW_FILE         "rtw8822b_fw.bin"   /* rtw88/rtw8822b_fw.bin in linux-firmware */
+#define RTW_FW_FILE         "firmware\\rtw88\\rtw8822b_fw.bin"  /* FIRMWARE_DIR (file.h), as in linux-firmware */
 #define RTW_FW_MAX          (256u * 1024)
 
 #define RTW_TX_DESC_SIZE    48

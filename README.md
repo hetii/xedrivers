@@ -42,8 +42,9 @@ Android phones that tether over RNDIS should work too.
 
 ### What you need
 
-- `gcc-powerpc-linux-gnu` and `python3`. A build and the unit tests need nothing
-  else: the packer and the ordinal tables are in `kit/`.
+- `gcc-powerpc-linux-gnu`, `python3`, `curl` and `sha256sum`. A build and the unit
+  tests need nothing else: the packer and the ordinal tables are in `kit/`, and the
+  firmware is fetched (see below).
 - [xerunner](../xerunner), only to work with a running console (`tools/xectl.py`,
   `make deploy`, `make kit`).
 
@@ -60,11 +61,33 @@ Environment for working with a console:
 On Debian or Ubuntu:
 
 ```sh
-sudo apt install gcc-powerpc-linux-gnu python3 make
-make            # build/xedrivers.xex
+sudo apt install gcc-powerpc-linux-gnu python3 make curl
+make            # the package: build/xedrivers/
 make test       # host unit tests
 make lint       # cppcheck and clang-tidy
 ```
+
+`make` builds the whole package, ready to copy to the console:
+
+```text
+build/xedrivers/
+    xedrivers.xex
+    firmware/
+        rtw88/rtw8822b_fw.bin
+        aic8800D80/...
+```
+
+Before building, it checks every firmware file against the SHA-256 pinned in the
+Makefile (`FIRMWARE`). A missing or different file is fetched from its source at a
+fixed commit:
+
+| Firmware | Source |
+|---|---|
+| RTL8822BU | [linux-firmware](https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git) |
+| AIC8800D80 | AICSemi's USB driver package, as [radxa-pkg/aic8800](https://github.com/radxa-pkg/aic8800) keeps it |
+
+Nothing is taken from the machine's own `/lib/firmware`, so every build packs the
+same files. The pins are the versions the drivers were tested with.
 
 Options:
 
@@ -89,10 +112,13 @@ Lab targets (they need xerunner and the bench described in `CLAUDE.md`):
 
 ```sh
 make kit                     # regenerate kit/ from xerunner, for a new kernel build
-make push PI=root@host       # copy the plugin to a USB-gadget medium
-make push-fw PI=root@host    # copy the AIC8800 firmware there
+make push PI=root@host       # copy the package's plugin to a USB-gadget medium
+make push-fw PI=root@host    # copy the package's firmware there
 make deploy HOST=...         # push, then boot it with xerunner console test-plugin
 ```
+
+A release build is made by GitHub Actions (`.github/workflows/build.yml`): every
+run keeps the package as an artifact, and a tag `v*` publishes it as a release.
 
 Every build records the commit it was made from. `tools/xectl.py status` shows it
 as "built from", with a mark when the tree had uncommitted changes.
@@ -120,35 +146,41 @@ empty inline functions.
 
 Without xerunner, by hand:
 
-1. Build with `make`. The plugin is `build/xedrivers.xex`.
-2. Copy it into a `plugin` directory on the console:
-   - on a USB stick: `Usb:\plugin\xedrivers.xex`, or
-   - on the hard disk: `Hdd:\plugin\xedrivers.xex`.
+1. Get the package: a release's zip, or `build/xedrivers/` from `make`.
+2. Copy the whole `xedrivers` directory into DashLaunch's `plugin` directory:
+   - on a USB stick: `Usb:\plugin\xedrivers\`, or
+   - on the hard disk: `Hdd:\plugin\xedrivers\`.
 
    Any FTP server on the console works (ftpdll, Aurora's), or write the stick on a
    PC.
-3. A Wi-Fi card needs its firmware in the same directory. Take it from
-   [linux-firmware](https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git)
-   or from the vendor's Linux driver.
-
-   | Card | Files |
-   |---|---|
-   | RTL8822BU | `rtw8822b_fw.bin` (linux-firmware `rtw88/rtw8822b_fw.bin`) |
-   | AIC8800D80 | directory `aic8800D80` with `fw_patch_table_8800d80_u02.bin`, `fw_adid_8800d80_u02.bin`, `fw_patch_8800d80_u02.bin`, `fw_patch_8800d80_u02_ext0.bin`, `fmacfw_8800d80_u02.bin`, `fmacfw_8800d80_h_u02.bin` (Linux `/lib/firmware/aic8800D80`) |
-
-4. Put `xedrivers.ini` in the same directory if needed (see Configuration). Wi-Fi
-   needs it to know which network to join.
+3. The firmware is already in `xedrivers\firmware`. That directory is laid out as
+   linux-firmware, so newer files from Linux can replace it, or any of its
+   subdirectories, as they are. They must be uncompressed: some distributions keep
+   `/lib/firmware` as `.zst` (unpack with `zstd -d`).
+4. Put `xedrivers.ini` beside the plugin if needed (see Configuration). Wi-Fi needs
+   it to know which network to join.
 5. Add the plugin to DashLaunch's `launch.ini`, on a free plugin slot:
 
    ```ini
    [Plugins]
-   plugin3 = Usb:\plugin\xedrivers.xex
+   plugin3 = Usb:\plugin\xedrivers\xedrivers.xex
    ```
 
 6. Restart the console.
 
-Files are looked for first in the plugin's own directory, then in `\plugin` on the
-USB devices and on the hard disk.
+The result on a USB stick:
+
+```text
+Usb:\plugin\xedrivers\
+    xedrivers.xex
+    xedrivers.ini
+    firmware\
+        rtw88\rtw8822b_fw.bin
+        aic8800D80\fmacfw_8800d80_u02.bin, ...
+```
+
+Files are looked for first in the plugin's own directory, then in
+`\plugin\xedrivers` on the USB devices and on the hard disk.
 
 > Load a new or untested build from `Usb:` only. If it hangs the boot, pull the
 > stick and the console starts without it. A plugin that hangs the boot from `Hdd:`

@@ -12,13 +12,13 @@
 
 volatile FILE_STATS file_stats;
 
-/* Where else a plugin and its files are usually put: the first USB drives and the
- * hard disk, each with the directory DashLaunch's examples use. */
+/* Where else the plugin and its files are usually put: the first USB drives and the
+ * hard disk, each in DashLaunch's plugin directory, in a directory of its own. */
 static const char *const fallback_dirs[] = {
-    "\\Device\\Mass0\\plugin",
-    "\\Device\\Mass1\\plugin",
-    "\\Device\\Mass2\\plugin",
-    "\\Device\\Harddisk0\\Partition1\\plugin",
+    "\\Device\\Mass0\\plugin\\xedrivers",
+    "\\Device\\Mass1\\plugin\\xedrivers",
+    "\\Device\\Mass2\\plugin\\xedrivers",
+    "\\Device\\Harddisk0\\Partition1\\plugin\\xedrivers",
 };
 
 static char plugin_dir[96];
