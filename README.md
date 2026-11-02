@@ -340,6 +340,16 @@ transport or Wi-Fi channel, xnet settings, test, streams and direction. With
 <!-- results:wifi -->
 | Card | Band, channel, width | xnet | Test | Streams | Console -> PC | PC -> console | Date, commit | Note |
 |---|---|---|---|---|---|---|---|---|
+| rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 32 Mbit/s (4.0 MB/s) | 88 Mbit/s (11.0 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 45 Mbit/s (5.6 MB/s) | 121 Mbit/s (15.1 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 45 Mbit/s (5.6 MB/s) | 132 Mbit/s (16.5 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 42 Mbit/s (5.2 MB/s) | 132 Mbit/s (16.5 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 110 Mbit/s (13.8 MB/s) | 118 Mbit/s (14.7 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 161 Mbit/s (20.2 MB/s) | 165 Mbit/s (20.7 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 159 Mbit/s (19.9 MB/s) | 198 Mbit/s (24.7 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 157 Mbit/s (19.6 MB/s) | 203 Mbit/s (25.4 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 32 / snd 128 / cwnd 256 KB, pool +767 KB, 64 TCP sockets | tcp ram | 8 | 158 Mbit/s (19.8 MB/s) | 189 Mbit/s (23.6 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 32 / snd 128 / cwnd 256 KB, pool +767 KB, 64 TCP sockets | tcp ram | 32 | 152 Mbit/s (19.0 MB/s) | 205 Mbit/s (25.6 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
 <!-- /results:wifi -->
 
 ## Credits

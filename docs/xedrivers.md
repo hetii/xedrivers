@@ -114,7 +114,7 @@ onboard port.
 | Direction | Ceiling | Measured with |
 |---|---|---|
 | out of the console | 23.3 MB/s at the Ethernet MTU | both RTL8156B and RTL8822BU stop at 21 to 24 MB/s |
-| into the console | not known; at least 28 MB/s | the RTL8156B stops at 27 to 28 MB/s by the console's own count, at 1 to 32 streams |
+| into the console | not known; at least 28 MB/s | RTL8156B 27 to 28 MB/s (NCM 27.9), RTL8822BU 25 to 26 MB/s at 8 to 32 streams |
 
 Outbound, sweeping the frame size fits 10.9 us a transfer plus 36.9 ns a byte (78
 to 1486 byte frames). The per-byte term dominates, so packing more frames into a
@@ -123,8 +123,8 @@ transfer moves nothing out.
 The RTL8822BU's 286 to 289 Mbit/s (36 MB/s) in, at 32 to 48 streams, came from a
 bench tool that counted every stream over its own window (fixed 2026-11-02, `xectl
 bench tcp` now counts one window, up at the console). The RTL8156B, counted the same
-wrong way, read 344 Mbit/s where the console received 220. Into the console the
-ceiling is to be measured again.
+wrong way, read 344 Mbit/s where the console received 220. Counted right, the
+RTL8822BU carries 205 Mbit/s (25.6 MB/s) in at 32 streams.
 
 The EHCI controllers (0x7FEA3000 and 0x7FEA5000, read with `xectl.py cmd 16`):
 
