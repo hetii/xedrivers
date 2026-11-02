@@ -92,7 +92,7 @@ enum {
     AIC_STEP_BT_RESET = 40,     /* the Bluetooth controller, aic_bt.c */
 };
 
-/* One device slot's; read by tests/xectl.py. */
+/* One device slot's; read by tools/xectl.py. */
 typedef struct {
     u32 product;
     u32 step;

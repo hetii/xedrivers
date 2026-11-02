@@ -19,23 +19,37 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py omni                       what a wireless card registered by cmd 21 was asked
     xectl.py prof [SECONDS]             where a frame's time goes (bench=prof)
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
+    xectl.py bench tcp [up|down|both] [--streams 1,4] [--seconds S] [--pace MB/s]
+    xectl.py bench ftp [up|down|both] [--mb 256] [--login U:P] [--dir Hdd1/xedrivers]
+    xectl.py bench sockets [--count 80] how many TCP connections the console holds
 
-Environment: XE_HOST (default 192.168.1.210), XERUNNER (path to the CLI).
+A bench with --record [--note TEXT] appends one line per result to
+results/wired.jsonl or results/wifi.jsonl, with what the console runs read back
+from it (card, transport or channel, xnet settings) and the commit; without it,
+nothing is kept. tools/results.py turns those files into tables.
+
+Environment: XE_HOST (the console's address, required), XERUNNER (the xerunner
+CLI; default `xerunner` on PATH, else ../xerunner/.venv/bin/xerunner).
 """
 
+import argparse
 import json
 import os
+import shutil
+import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ELF = os.path.join(ROOT, "build", "plugin.elf")
-HOST = os.environ.get("XE_HOST", "192.168.1.210")
-XERUNNER = os.environ.get(
-    "XERUNNER", os.path.join(ROOT, "..", "xerunner", ".venv", "bin", "xerunner"))
+HOST = os.environ.get("XE_HOST", "")
+XERUNNER = (os.environ.get("XERUNNER") or shutil.which("xerunner") or
+            os.path.join(ROOT, "..", "xerunner", ".venv", "bin", "xerunner"))
+RESULTS = os.path.join(ROOT, "results")
 
 CMD = {"ping": 1, "reset": 2, "claim": 3, "blast": 4, "mode": 5, "restart": 6,
        "advertise": 7, "reg_read": 8, "reg_write": 9, "phy_read": 10, "phy_write": 11,
@@ -172,6 +186,8 @@ def symbols():
 
 
 def xerunner(group, sub, *positional):
+    if not HOST:
+        raise SystemExit("set XE_HOST to the console's address")
     done = subprocess.run([XERUNNER, group, sub, "--host", HOST, "--json", "--",
                            *positional], capture_output=True, text=True)
     if done.returncode:
@@ -620,12 +636,214 @@ def history(sym, last):
         prev = r
 
 
+# --- benches -------------------------------------------------------------------
+#
+# TCP against the plugin's own server (src/bench/tcp, `make bench=tcp`, started with
+# `cmd 14`), RAM to RAM: down = console -> PC from port 5201, up = PC -> console
+# into port 5202. The rate is the bytes moved over a steady window on this side;
+# the first half second (connection setup, slow start) is left out. --pace caps
+# each stream this side sends (Linux SO_MAX_PACING_RATE).
+
+TCP_WARMUP = 0.5
+SO_MAX_PACING_RATE = 47
+
+
+def tcp_stream(port, seconds, out, index, up, pace):
+    s = socket.create_connection((HOST, port), timeout=10)
+    if pace:
+        s.setsockopt(socket.SOL_SOCKET, SO_MAX_PACING_RATE, int(pace * 1e6))
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF if up else socket.SO_RCVBUF, 4 << 20)
+    block = bytes(256 << 10) if up else None
+    counted = 0
+    begin = time.time() + TCP_WARMUP
+    end = begin + seconds
+    try:
+        while True:
+            now = time.time()
+            if now >= end:
+                break
+            n = s.send(block) if up else len(s.recv(1 << 20))
+            if n <= 0:
+                break
+            if now >= begin:
+                counted += n
+    except OSError:
+        pass
+    finally:
+        s.close()
+    out[index] = counted
+
+
+def tcp_run(streams, seconds, up, pace=0.0):
+    """Bytes per second moved by `streams` connections."""
+    out = [0] * streams
+    threads = [threading.Thread(target=tcp_stream,
+                                args=(5202 if up else 5201, seconds, out, i, up, pace))
+               for i in range(streams)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return sum(out) / seconds
+
+
+def ftp_run(up, mb, login, folder):
+    """FTP to or from the console's disk with curl, what installing a game does;
+    curl's average over the whole transfer, the disk included. Bytes per second."""
+    name = "xectl-%d.bin" % mb
+    url = "ftp://%s@%s/%s/%s" % (login, HOST, folder, name)
+    if up:
+        src = os.path.join("/dev/shm" if os.path.isdir("/dev/shm") else "/tmp", name)
+        if not os.path.exists(src) or os.path.getsize(src) != mb << 20:
+            with open(src, "wb") as f:
+                f.write(os.urandom(mb << 20))
+        args = ["-T", src, "--ftp-create-dirs", "-w", "%{speed_upload}"]
+    else:
+        args = ["-o", os.devnull, "-w", "%{speed_download}"]
+    done = subprocess.run(["curl", "-s", "--max-time", "900", *args, url],
+                          capture_output=True, text=True)
+    if done.returncode:
+        raise SystemExit("curl failed (%d): %s" % (done.returncode, url))
+    return float(done.stdout.strip() or 0)
+
+
+def sockets_run(count):
+    """Open up to `count` connections to the TCP server's sink, each sending a
+    little, hold them, then check each still takes data. (opened, still sending)"""
+    conns, failed = [], 0
+    for _ in range(count):
+        s = socket.socket()
+        s.settimeout(4)
+        try:
+            s.connect((HOST, 5202))
+            s.sendall(b"x" * 1000)
+            conns.append(s)
+        except OSError:
+            s.close()
+            failed += 1
+            if failed >= 3:
+                break
+    time.sleep(3)
+    alive = 0
+    for s in conns:
+        try:
+            s.sendall(b"y" * 4000)
+            alive += 1
+        except OSError:
+            pass
+    for s in conns:
+        s.close()
+    return len(conns), alive
+
+
+BW_MHZ = {0: 20, 1: 40, 2: 80, 3: 160}
+
+
+def context(sym):
+    """What the console runs, for a result record: the uplink's card and how it is
+    attached, and the xnet settings in force."""
+    drivers = driver_names(sym)
+    slot = uplink_index(sym)
+    ns = read_struct(sym, "net_stats", slot or 0)
+    card = drivers.get(ns["driver"], "onboard") if slot is not None else "onboard"
+    ctx = {"card": card, "kind": "wired", "link_mbps": ns["speed_mbps"]}
+    if card == "cdc" and "cdc_stats" in sym:
+        ctx["transport"] = "ncm" if read_struct(sym, "cdc_stats", slot)["transport"] else "ecm"
+    elif card == "rtl8156":
+        ctx["transport"] = "ecm"
+    elif card == "rtw8822b" and "rtw_sta_stats" in sym:
+        t = read_struct(sym, "rtw_sta_stats", slot)
+        ctx.update(kind="wifi", channel=t["channel"], width_mhz=BW_MHZ.get(t["bw"], t["bw"]))
+    elif card == "aic8800" and "aic_stats" in sym:
+        a = read_struct(sym, "aic_stats", slot)
+        freq = a["join_freq"]
+        ch = (freq - 2407) // 5 if freq < 3000 else (freq - 5000) // 5
+        ctx.update(kind="wifi", channel=ch, width_mhz=BW_MHZ.get(a["join_width"], a["join_width"]))
+    if ctx["kind"] == "wifi":
+        ctx["band_ghz"] = 2.4 if ctx["channel"] <= 14 else 5
+    xs = read_struct(sym, "xnet_stats")
+    ctx["xnet"] = {
+        "rcvbuf_kb": xs["rcvbuf_after"] or xs["rcvbuf_before"],
+        "sndbuf_kb": xs["sndbuf_after"] or xs["sndbuf_before"],
+        "cwnd_kb": xs["cwnd_kb"] or 64,
+        "pool_extra_kb": xs["pool_added_kb"],
+        "tcp_sockets": xs["tcp_sockets_after"] or xs["tcp_sockets_before"],
+        "title_pool_kb": xs["title_pool_pages"] * 4,
+    }
+    return ctx
+
+
+def commit():
+    def git(*a):
+        return subprocess.run(["git", "-C", ROOT, *a], capture_output=True,
+                              text=True).stdout.strip()
+    head = git("rev-parse", "--short", "HEAD")
+    return head + ("+" if git("status", "--porcelain", "--untracked-files=no") else "")
+
+
+def record(ctx, test, streams, direction, bytes_per_s, note):
+    row = {"date": time.strftime("%Y-%m-%d"), "commit": commit(), **ctx,
+           "test": test, "streams": streams, "direction": direction,
+           "mbit_s": round(bytes_per_s * 8 / 1e6, 1), "mbyte_s": round(bytes_per_s / 1e6, 2)}
+    if note:
+        row["note"] = note
+    os.makedirs(RESULTS, exist_ok=True)
+    with open(os.path.join(RESULTS, ctx["kind"] + ".jsonl"), "a") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+DIRECTION = {"down": "console->pc", "up": "pc->console"}
+
+
+def bench(sym, argv):
+    ap = argparse.ArgumentParser(prog="xectl.py bench")
+    ap.add_argument("test", choices=["tcp", "ftp", "sockets"])
+    ap.add_argument("which", nargs="?", default="both", choices=["down", "up", "both"])
+    ap.add_argument("--streams", default="1,4")
+    ap.add_argument("--seconds", type=float, default=10)
+    ap.add_argument("--pace", type=float, default=0, help="MB/s per stream sent")
+    ap.add_argument("--mb", type=int, default=256)
+    ap.add_argument("--login", default=os.environ.get("XE_FTP", "xboxftp:xboxftp"))
+    ap.add_argument("--dir", default="Hdd1/xedrivers")
+    ap.add_argument("--count", type=int, default=80)
+    ap.add_argument("--record", action="store_true", help="keep the results")
+    ap.add_argument("--note", default="")
+    a = ap.parse_args(argv)
+    if not HOST:
+        raise SystemExit("set XE_HOST to the console's address")
+    ctx = context(sym) if a.record else None
+    ways = ["down", "up"] if a.which == "both" else [a.which]
+    if a.test == "sockets":
+        opened, alive = sockets_run(a.count)
+        print("sockets  %d connections held (asked %d), %d still taking data" % (
+            opened, a.count, alive))
+        return
+    if a.test == "ftp":
+        for w in sorted(ways, key=lambda w: w != "up"):     # the file goes up first
+            rate = ftp_run(w == "up", a.mb, a.login, a.dir)
+            print("ftp  %-4s %s  %d MB  %6.1f Mbit/s (%5.1f MB/s)" % (
+                w, DIRECTION[w], a.mb, rate * 8 / 1e6, rate / 1e6))
+            if ctx:
+                record(ctx, "ftp %d MB" % a.mb, 1, DIRECTION[w], rate, a.note)
+        return
+    for n in (int(x) for x in a.streams.split(",")):
+        for w in ways:
+            rate = tcp_run(n, a.seconds, w == "up", a.pace if w == "up" else 0)
+            print("tcp  %-4s x%-3d %s  %6.1f Mbit/s (%5.1f MB/s)" % (
+                w, n, DIRECTION[w], rate * 8 / 1e6, rate / 1e6))
+            if ctx:
+                record(ctx, "tcp ram", n, DIRECTION[w], rate, a.note)
+
+
 def main(argv):
     if not argv:
         print(__doc__)
         return 1
     sym = symbols()
     what, rest = argv[0], argv[1:]
+    if what == "bench":
+        bench(sym, rest)
+        return 0
     num = lambda s: int(s, 0)
     if what == "status":
         status(sym)

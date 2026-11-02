@@ -17,7 +17,7 @@
  * stats are read back the same
  * way. Their addresses come from the linked ELF (build/plugin.elf), fixed because
  * the image is linked at a fixed base with no relocations
- * (xerunner: plugin-debug-channel-f1@1). tests/xectl.py wraps all of it.
+ * (xerunner: plugin-debug-channel-f1@1). tools/xectl.py wraps all of it.
  */
 
 #include "kernel.h"

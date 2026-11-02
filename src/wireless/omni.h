@@ -21,7 +21,7 @@
 #include "wireless.h"
 #include "net.h"
 
-/* Read by tests/xectl.py. */
+/* Read by tools/xectl.py. */
 typedef struct {
     u32 registered;         /* 1, or what NicRegisterDevice refused with */
     u32 attached;           /* the kernel made it its wireless device */

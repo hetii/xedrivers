@@ -27,7 +27,7 @@
  *
  * Measured on the console to a Xiaomi phone (MaxPacketsPerTransfer 15, 23700
  * bytes, alignment 16), UDP of 1472-byte payloads to the phone's broadcast
- * address (tests/phoneblast.py): one frame a transfer 21.2 MB/s, 13588 frames/s;
+ * address (tools/xectl.py blast): one frame a transfer 21.2 MB/s, 13588 frames/s;
  * packed 24.5 MB/s, 15600 frames/s, about eleven a transfer, whatever
  * rndis_tx_eager (1, 2, 4, 8). That is what the phone's USB side accepted; what
  * it did with the frames after is not seen from here. After bring-up the interrupt endpoint
@@ -68,7 +68,7 @@ enum {
     RNDIS_STEP_ENDPOINTS,
 };
 
-/* Read by tests/xectl.py; field order is its STRUCTS["rndis_stats"]. */
+/* Read by tools/xectl.py; field order is its STRUCTS["rndis_stats"]. */
 typedef struct {
     u32 init_status;
     u32 max_packets;        /* MaxPacketsPerTransfer the device takes from us */

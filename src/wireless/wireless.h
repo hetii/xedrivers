@@ -134,7 +134,7 @@ typedef struct {
     void (*tick)(WL_LINK *l);
     /* The card is gone. Any IRQL up to DISPATCH. */
     void (*gone)(WL_LINK *l);
-    /* By command (tests/xectl.py): join the scan table's entry `index`, or leave;
+    /* By command (tools/xectl.py): join the scan table's entry `index`, or leave;
      * a mode in which the dashboard decides refuses both. */
     u32  (*join)(WL_LINK *l, u32 index);
     u32  (*leave)(WL_LINK *l);

@@ -1,6 +1,6 @@
 /* Native test of the PHY advertisement mapping (rtl_advert_regs): the same three
  * register values Linux r8152 writes for each speed set, checked against what the
- * twin card under r8152 actually held (tests/rtlreg.py dump):
+ * twin card under r8152 actually held (rtlreg.py in xerunner/handoff dump):
  *   advertise all -> ADVERTISE 0x1de1, CTRL1000 0x0200, 10GBT_CTRL 0x0081. */
 
 #include <stdio.h>

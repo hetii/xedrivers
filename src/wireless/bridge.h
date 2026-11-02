@@ -7,7 +7,7 @@
 
 #include "wireless.h"
 
-/* Read by tests/xectl.py. */
+/* Read by tools/xectl.py. */
 typedef struct {
     u32 scans;              /* scans the automatic join started */
     u32 joins;              /* joins it asked for */
@@ -23,7 +23,7 @@ void wl_bridge_start(WL_BRIDGE *b, const WL_CARD *card);
 /* Every worker tick while the card is up. */
 void wl_bridge_tick(WL_BRIDGE *b, const WL_CARD *card);
 
-/* By command (tests/xectl.py): join the scan table's entry `index` with the
+/* By command (tools/xectl.py): join the scan table's entry `index` with the
  * configured passphrase, or leave and stay off until joined again. */
 u32 wl_bridge_join(WL_BRIDGE *b, const WL_CARD *card, u32 index);
 u32 wl_bridge_leave(WL_BRIDGE *b, const WL_CARD *card);

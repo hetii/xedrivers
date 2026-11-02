@@ -4,7 +4,7 @@
  * The console's SHA-1, HMAC-SHA1 and AES are not here, so this file stands in for
  * them with deterministic nonsense. That is deliberate: whether the real ones
  * compute the right values is checked on the console itself against the worked
- * examples in IEEE 802.11i and RFC 3394 (tests/xectl.py cmd 19 and 20), and what
+ * examples in IEEE 802.11i and RFC 3394 (tools/xectl.py cmd 19 and 20), and what
  * is left to test here is the protocol -- the part those checks cannot see.
  */
 

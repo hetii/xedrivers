@@ -9,7 +9,7 @@
  * The card answers these in every configuration -- the control endpoint is served
  * by its MCU whatever personality the bulk endpoints have -- which is what lets the
  * CDC-ECM transport still choose the link speed. Checked from the host with
- * tests/rtlreg.py against the twin card under Linux r8152.
+ * rtlreg.py in xerunner/handoff against the twin card under Linux r8152.
  *
  * Thread-only: every call waits for its control transfer.
  */
@@ -61,7 +61,7 @@ void rtl_advert_regs(u32 advertise, u32 *adv, u32 *ctrl1000, u32 *ctrl10g);
 
 void rtl_forget_page(USB_DEV *dev);     /* after a reset the window is the card's default */
 
-/* Read by tests/xectl.py. */
+/* Read by tools/xectl.py. */
 typedef struct {
     u32 chip_version;       /* PLA_TCR0 >> 16, e.g. 0x7710 for an RTL8156B */
     u32 advertise_status;   /* of the last advertisement write */

@@ -2,7 +2,7 @@
  *
  * Chosen at build time (`make MODE=xnet ADVERTISE=2500 IP=10.36.0.2`, see the
  * Makefile) and changeable while it runs through the debug channel
- * (tests/xectl.py mode|advertise ...). `xe_config` lives at a fixed address in the
+ * (tools/xectl.py mode|advertise ...). `xe_config` lives at a fixed address in the
  * image, so it can also simply be read back to see what a running plugin is doing.
  */
 

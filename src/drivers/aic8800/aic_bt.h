@@ -9,7 +9,7 @@ struct AIC;
 
 #define AIC_BT_COMMAND_MAX  260     /* three header bytes and up to 255 parameters */
 
-/* What the controller said about itself; read by tests/xectl.py. */
+/* What the controller said about itself; read by tools/xectl.py. */
 typedef struct {
     u32 up;
     u32 commands;

@@ -33,7 +33,7 @@
  * NCM transmit once sent nothing at all: wNdpOutPayloadRemainder applies to the
  * payload after the 14-byte Ethernet header (see place() in cdc.c), and frames
  * placed by it as their own offset are accepted and dropped by the RTL8156B.
- * Found by capturing Linux cdc_ncm with usbmon (tests/usbmon_dump.py).
+ * Found by capturing Linux cdc_ncm with usbmon (usbmon_dump.py, xerunner/handoff).
  * So NCM works and stays selectable (TRANSPORT=ncm, NTB_SIZE), and ECM ships.
  *
  * ECM: a transfer is one frame, ended by a short packet; a frame of exactly n*512

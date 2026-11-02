@@ -13,7 +13,7 @@
 #define HISTORY       512
 #define HISTORY_EVERY 10
 
-/* Field order is tests/xectl.py's history(). */
+/* Field order is tools/xectl.py's history(). */
 typedef struct {
     u32 tick;
     u32 rx_frames;

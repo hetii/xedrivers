@@ -2,7 +2,7 @@
  * a plain build compiles every macro here to nothing.
  *
  * Each slot sums the ticks spent inside one stage, the calls and the bytes they
- * handled. tests/xectl.py prof takes two snapshots and turns the difference into
+ * handled. tools/xectl.py prof takes two snapshots and turns the difference into
  * microseconds a call, nanoseconds a byte and the share of wall time; `stamp` is
  * the time base when the worker last ran, so the wall time comes from the console's
  * own clock. Stages nest -- the transmit completion includes the copies and

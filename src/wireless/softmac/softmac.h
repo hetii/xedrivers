@@ -85,7 +85,7 @@ enum {
 
 #define WL_STA_IES_MAX  512     /* the joined network's elements, as it beacons them */
 
-/* Read by tests/xectl.py. */
+/* Read by tools/xectl.py. */
 typedef struct {
     u32 state;
     u32 scans;

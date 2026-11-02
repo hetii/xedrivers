@@ -15,7 +15,7 @@ Every card measured the same way: the console on the home router (OpenWrt
 ZBT-WE1326; Wi-Fi on 5 GHz VHT80, a metre away: channel 36 for the AIC8800, channel
 116 for the RTL8822BU, which since 7a95aff sets its TX power from its efuse), the PC
 wired to it at 1 Gbit/s. "TCP RAM" is the plugin's own server (`src/bench/tcp`,
-`tests/tcpbench.py`, 10 s a run), RAM to RAM with no disk; "FTP" is ftpdll, 64 MB to and from `Hdd1:`.
+`tools/xectl.py bench tcp`, 10 s a run), RAM to RAM with no disk; "FTP" is ftpdll, 64 MB to and from `Hdd1:`.
 Each figure is the range of three or more runs; no `xnet_*` options. Rows 1-5 are
 from before the xnet defaults of 2026-10-29 (xnet's own 16 KB receive buffer, see
 below); rows 6-8 are of 2026-10-30, with them, on channel 116.
@@ -131,7 +131,7 @@ DHCP, XBDM, FTP, titles.
 ## Measured
 
 Console card on a 1 Gbit/s home router, the PC on the same router at 1 Gbit/s; the
-card is on the console's USB 2.0 port (`tests/speedtest.py`, `tests/ramxfer.py`, curl).
+card is on the console's USB 2.0 port (the UDP generator, XBDM getmemex, curl; speedtest.py and ramxfer.py now in xerunner/handoff).
 
 | what | RTL8156 (this driver) | onboard port (100M) |
 |---|---|---|
@@ -210,7 +210,7 @@ limit; the console's EHCI controller is (above).
 ### Where a frame's time goes
 
 `make bench=prof` times each stage with the time base (`src/core/prof.h`) and
-`tests/xectl.py prof 5` reads it. During the TCP runs below, single stream:
+`tools/xectl.py prof 5` reads it. During the TCP runs below, single stream:
 
 | stage | console -> PC (15.0k frames/s) | PC -> console (18.5k frames/s) |
 |---|---|---|
@@ -232,9 +232,9 @@ limit either.
 `src/bench/tcp/` serves two ports out of RAM on the console's own stack -- 5201 sends,
 5202 reads and discards, a thread a connection -- with xam's socket calls imported
 by ordinal (the kit packs xam as a second import library). It is built
-only with `make bench=tcp` and started with `tests/xectl.py cmd 14`; a plain build has
+only with `make bench=tcp` and started with `tools/xectl.py cmd 14`; a plain build has
 no xam imports at all, so the driver never depends on xam to load. Measured with
-`tests/tcpbench.py`, router at 1 Gbit/s:
+`tools/xectl.py bench tcp`, router at 1 Gbit/s:
 
 | | console -> PC | PC -> console |
 |---|---|---|
@@ -254,7 +254,7 @@ named, and the gap to his 32 MB/s socket figure is now 5 MB/s, inbound.
 ### Writing to the console: what holds FTP uploads
 
 Measured 2026-10-19, 256 MB from the PC's RAM to `Hdd1` with ftpdll
-(`tests/ftpbench.sh`), and the same path with no disk (`tests/tcpbench.py`):
+(`tools/xectl.py bench ftp`), and the same path with no disk (`tools/xectl.py bench tcp`):
 
 | transport | TCP, RAM to RAM: out / in | FTP to and from Hdd1: up / down |
 |---|---|---|
@@ -343,7 +343,7 @@ MAC, filter and link state answered at the first try, the phone packs several
 received frames into one transfer (70 in 39), and in xnet mode the console took
 an address from the phone's DHCP and served FTP to a client on the phone. The
 console sends to a phone at 24.5 MB/s with several frames packed into one
-transfer (21.2 one a transfer; tests/phoneblast.py, UDP to the phone's broadcast
+transfer (21.2 one a transfer; tools/xectl.py blast, UDP to the phone's broadcast
 address, rate as the phone's USB side accepted it). Offered 16 KB transfers, the phone held received frames back to fill them, and an
 FTP upload from it crawled at 75-90 KB/s; offered 2048 bytes, as Linux
 rndis_host does (`rndis_rx_max`), it sends one frame a transfer and an 80 MB and a
@@ -368,7 +368,7 @@ it from the `aic8800D80` directory beside the plugin (`make push-fw` puts Linux'
 files there) and starts it, and the chip comes back as `a69c:8d81` with the Wi-Fi
 firmware running. Both phases send exactly the messages aicsemi's Linux driver
 sends, checked against its own usbmon recording (`tests/drivers/aic8800/`). Scans
-fill a table of networks (`tests/xectl.py status`); `xectl.py cmd 31 <index>` joins
+fill a table of networks (`tools/xectl.py status`); `xectl.py cmd 31 <index>` joins
 one, `cmd 32` leaves. Open networks only so far: a secured one needs the WPA2 key
 exchange, which is not written yet, and is refused.
 
@@ -606,13 +606,13 @@ console's USB ceilings (~31 MB/s in, ~24 MB/s out); NCM is no faster and, with
 
 Both can be changed on a running console, no rebuild or reboot:
 
-    tests/xectl.py status
-    tests/xectl.py mode xnet
-    tests/xectl.py advertise 1000
-    tests/xectl.py phy 0xa400            read a PHY register (OCP address)
-    tests/xectl.py blast 100000          UDP generator: 100000 datagrams to the peer
+    tools/xectl.py status
+    tools/xectl.py mode xnet
+    tools/xectl.py advertise 1000
+    tools/xectl.py phy 0xa400            read a PHY register (OCP address)
+    tools/xectl.py blast 100000          UDP generator: 100000 datagrams to the peer
 
-`tests/rtlreg.py` reads the same registers on the twin card under Linux, for
+`rtlreg.py` (xerunner/handoff) reads the same registers on the twin card under Linux, for
 comparing what Linux r8152 programs with what the console has.
 
 ## Installing

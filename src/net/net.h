@@ -36,7 +36,7 @@ u32  net_command(u32 what, volatile u32 *args);
  * arrival, net_detached on removal. */
 void net_register(void);
 
-/* Read by tests/xectl.py. */
+/* Read by tools/xectl.py. */
 typedef struct {
     u32 start_result;
     u32 start_count;
@@ -55,7 +55,7 @@ extern volatile NET_STATE net_state;
 #define NET_MAX USB_MAX_DEVICES
 
 /* What every driver reports the same way; a driver's own detail is in its own
- * stats (cdc_stats, rtl_stats). One a device slot; read by tests/xectl.py. */
+ * stats (cdc_stats, rtl_stats). One a device slot; read by tools/xectl.py. */
 typedef struct {
     u32 driver;             /* index into xe_drivers + 1, 0 for none */
     u32 step;               /* last bring-up step reached, the driver's numbering */

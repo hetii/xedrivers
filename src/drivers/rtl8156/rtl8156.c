@@ -19,7 +19,7 @@
 #define RTL_VENDOR  0x0BDAu
 #define RTL_PRODUCT 0x8156u
 
-/* Host commands this driver answers (tests/xectl.py advertise / reg / phy). */
+/* Host commands this driver answers (tools/xectl.py advertise / reg / phy). */
 #define CMD_ADVERTISE  7u   /* [1] RTL_ADV_* bits; renegotiates now */
 #define CMD_REG_READ   8u   /* [1] mcu, [2] address -> [5] value, [7] status */
 #define CMD_REG_WRITE  9u   /* [1] mcu, [2] address, [3] word */

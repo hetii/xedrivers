@@ -50,7 +50,7 @@ enum {
     CDC_STEP_NTB_PARAMS,
 };
 
-/* Read by tests/xectl.py; field order is its STRUCTS["cdc_stats"]. */
+/* Read by tools/xectl.py; field order is its STRUCTS["cdc_stats"]. */
 typedef struct {
     u32 transport;          /* 0 ECM, 1 NCM */
     u32 config_value;

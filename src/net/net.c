@@ -47,7 +47,7 @@ void net_add64(volatile u32 *lo, volatile u32 *hi, u32 n)
 
 /* The secured category, and the address in it: found by reading every setting of
  * every category off the bench console and recognising the one that held its known
- * address (tests/xectl.py cmd 18, src/bench/debug). Whatever comes back is only
+ * address (tools/xectl.py cmd 18, src/bench/debug). Whatever comes back is only
  * taken if it is six bytes and could be an address at all -- a unicast one that is
  * not all zeroes -- so a build against another kernel, numbering its settings
  * differently, is left no worse off than before, with xnet's own first frame still
