@@ -298,6 +298,12 @@ tools/xectl.py bench sockets --count 80     # how many connections the console h
 
 FTP is lower than TCP: ftpdll receives and writes the disk in turn on one thread.
 
+How it counts: every stream runs in one common window. Console -> PC is what the
+PC received in it; PC -> console is what the console's server received, read at
+both ends of the window. Checked on 2026-11-02 against the PC kernel's own TCP
+counters and the console's: they agree within 0.1%. Results from before that date
+with 8 or more streams were counted per stream and read high.
+
 ### Keeping results
 
 Every result is set against the one on file under the same conditions: card,

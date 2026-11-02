@@ -653,7 +653,10 @@ def history(sym, last):
 # what this side received in it; up is what the console's server received
 # (tcp_stats.recv, read at both ends of the window), not what went into this
 # side's socket buffers. --pace caps each stream this side sends (Linux
-# SO_MAX_PACING_RATE).
+# SO_MAX_PACING_RATE). Checked on 2026-11-02 over the RTL8156B, 1, 4 and 8
+# streams each way: this, the PC kernel's own TCP counters (ss -ti bytes_acked,
+# bytes_received) and the console server's counter agree within 0.1%. (The PC
+# NIC's counters are no reference: igb updates them every ~2 s.)
 
 TCP_SETTLE = 2.0
 SO_MAX_PACING_RATE = 47
@@ -716,6 +719,9 @@ def tcp_run(streams, seconds, up, pace=0.0, sym=None):
     if failed:
         print("     %d of %d streams never connected" % (failed, streams))
     if first and last:
+        if first[1] > begin + 1 or last[1] > end + 1:
+            print("     the console's counter was read late (%.1f s, %.1f s): not a steady "
+                  "window, do not trust this run" % (first[1] - begin, last[1] - end))
         return (last[0] - first[0]) / (last[1] - first[1])
     return sum(n for n in out if n > 0) / seconds
 
