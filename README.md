@@ -340,6 +340,9 @@ transport or Wi-Fi channel, xnet settings, test, streams and direction. With
 <!-- results:wifi -->
 | Card | Band, channel, width | xnet | Test | Streams | Console -> PC | PC -> console | Date, commit | Note |
 |---|---|---|---|---|---|---|---|---|
+| aic8800 | 5 GHz, ch 116, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 11 Mbit/s (1.4 MB/s) | 84 Mbit/s (10.4 MB/s) | 2026-11-03, 0f32c18e / 2026-11-03, 0f32c18e |  |
+| aic8800 | 5 GHz, ch 116, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 121 Mbit/s (15.1 MB/s) | 114 Mbit/s (14.3 MB/s) | 2026-11-03, 0f32c18e / 2026-11-03, 0f32c18e |  |
+| aic8800 | 5 GHz, ch 116, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 65 Mbit/s (8.1 MB/s) | 108 Mbit/s (13.5 MB/s) | 2026-11-03, 0f32c18e / 2026-11-03, 0f32c18e |  |
 | rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 35 Mbit/s (4.3 MB/s) | 85 Mbit/s (10.6 MB/s) | 2026-11-03, 0f32c18e / 2026-11-03, 0f32c18e | lower accepted: 2.4 GHz air lower at night: A/B cc7b35d3 vs 0f32c18, alternating twice, new >= base |
 | rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 40 Mbit/s (5.0 MB/s) | 121 Mbit/s (15.1 MB/s) | 2026-11-03, 0f32c18e / 2026-11-02, cc7b35d3 | lower accepted: 2.4 GHz air lower at night: A/B cc7b35d3 vs 0f32c18, alternating twice, new >= base |
 | rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 39 Mbit/s (4.9 MB/s) | 132 Mbit/s (16.5 MB/s) | 2026-11-03, 0f32c18e / 2026-11-02, cc7b35d3 | lower accepted: 2.4 GHz air lower at night: A/B cc7b35d3 vs 0f32c18, alternating twice, new >= base |
