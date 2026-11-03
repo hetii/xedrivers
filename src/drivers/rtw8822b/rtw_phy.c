@@ -296,6 +296,14 @@ u32 rtw_phy_set_param(RTW *r)
     /* rtw8822b_phy_rfe_init: chip top mux, from s0 or s1, input or output */
     rtw_write32_mask(r, 0x64, BIT(29) | BIT(28), 0x3);
     rtw_write32_mask(r, 0x4C, BIT(26) | BIT(25), 0x0);
+    /* rtw8822b_coex_cfg_ant_switch, BB software control: the Wi-Fi side drives the
+     * antenna switch (DPDT) from RFE pins 8 and 9, which set_channel_rfe and
+     * set_channel_cca point at 2.4 or 5 GHz. rtw88 does it from its coex init; left
+     * at the power-on 0 the switch is not ours and the access point heard us 7-8 dB
+     * weaker on path A at 2.4 GHz. A/B live (2026-11-03, ch 10, 4 streams): out
+     * 30 -> 85-96 Mbit/s, the AP's rate MCS 9 -> 13-14. */
+    rtw_write32_mask(r, REG_LED_CFG, BIT_DPDT_SEL_EN | BIT_DPDT_WL_SEL, 0x2);
+    rtw_write32_mask(r, REG_RFE_CTRL8, 0xFF, DPDT_CTRL_PIN);
     rtw_write32_mask(r, 0x40, BIT(2), 0x1);
     rtw_write32_mask(r, 0x1990, 0x3F, 0x30);
     rtw_write32_mask(r, 0x1990, BIT(11) | BIT(10), 0x3);
