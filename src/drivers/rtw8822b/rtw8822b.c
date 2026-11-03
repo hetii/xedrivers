@@ -32,6 +32,14 @@
 #define PORT0_BCN_CTRL      0x0550
 #define NET_MGD_LINKED      2           /* RTW_NET_MGD_LINKED */
 #define RCR_LINKED          (RCR_SCAN | BIT_CBSSID_BCN | BIT_CBSSID_DATA)
+/* EDCCA, energy-detect CCA: the thresholds (low bytes, L2H 0x48 / H2L 0x40) above
+ * which the card holds off transmitting. The tables leave both at 0x7F, never;
+ * rtw88 sets these once associated (rtw_phy_adaptivity, seen in usbmon) and puts
+ * 0x7F back without a link. On 2.4 GHz channel 10, 14-16% busy, A/B twice
+ * (2026-11-03): 4 streams out 40.5 / 41.0 -> 45.1 / 43.8 Mbit/s, in alike. */
+#define REG_EDCCA_TH        0x08A4
+#define EDCCA_LINKED        0x7F7F4048u
+#define EDCCA_OFF           0x7F7F7F7Fu
 #define DESC_RATE54M        0x0B
 #define DESC_RATEMCS15      0x1B
 #define DESC_RATEVHT2SS_MCS0 0x36
@@ -313,6 +321,7 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
         r->ampdu = 0;
         rtw_fw_media_status(r, MACID_AP, 0);
         rtw_write32(r, REG_RCR, RCR_SCAN);
+        rtw_write32(r, REG_EDCCA_TH, EDCCA_OFF);
         rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, 0);
         for (i = 0; i < 6; i++)
             rtw_write8(r, PORT0_BSSID + i, 0);
@@ -327,6 +336,7 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
     rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, NET_MGD_LINKED);
     rtw_write32_mask(r, PORT0_AID, 0x7FF, link->aid);
     rtw_write32(r, REG_RCR, RCR_LINKED);
+    rtw_write32(r, REG_EDCCA_TH, EDCCA_LINKED);
     {
         u32 mask, rate_id, top;
 
