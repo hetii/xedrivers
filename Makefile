@@ -36,6 +36,7 @@ TX_COUNT  ?= 64
 NCM_RX_COUNT ?= 16
 NCM_TX_COUNT ?= 16
 NTB_SIZE  ?= 16384
+NTB_IN_SIZE ?= 8192
 TRANSPORT ?= ecm
 transport_ecm := 0
 transport_ncm := 1
@@ -136,7 +137,7 @@ export FIRMWARE
 # console says what it was built from (tools/xectl.py status, bench --record).
 GIT_COMMIT := $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-8),0)
 GIT_DIRTY  := $(if $(shell git status --porcelain --untracked-files=no 2>/dev/null),1,0)
-FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST))
+FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE)/$(NTB_IN_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST))
 
 .PHONY: all firmware clean test lint kit push push-fw deploy
 
@@ -187,7 +188,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 	    --base $(BASE) \
 	    $(INCLUDES) -D XE_DEBUG=$(DEBUG) -D XE_MODE=$(MODE_VALUE)u \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
-	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) \
+	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) -D NTB_IN_SIZE=$(NTB_IN_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
 	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u $(BENCH_FLAGS) \
 	    -D XE_BUILD_COMMIT=0x$(GIT_COMMIT)u -D XE_BUILD_DIRTY=$(GIT_DIRTY)u \

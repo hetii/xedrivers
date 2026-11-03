@@ -71,7 +71,16 @@
 #define NCM_TX_COUNT 16
 #endif
 #ifndef NTB_SIZE
-#define NTB_SIZE   16384
+#define NTB_SIZE   16384        /* transmit blocks */
+#endif
+/* Receive blocks: the size asked of the device with SET_NTB_INPUT_SIZE, and of
+ * each receive buffer. The RTL8156B holds received frames back until a block is
+ * full or its timer runs out, so a larger block delays the console's ACKs; NTB
+ * 16 KB against 8 KB, A/B twice each (2026-11-03): FTP up 100-113 -> 122-157
+ * Mbit/s, one stream in 197-219 -> 225, eight in 222-226 -> 224; 4 KB took eight
+ * in down to 187. Transmit stays 16 KB: 8 KB blocks out gave 186 against 190. */
+#ifndef NTB_IN_SIZE
+#define NTB_IN_SIZE 8192
 #endif
 
 #define FRAME_SIZE 2048         /* a multiple of 512, so a frame never babbles */
@@ -81,7 +90,7 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define RX_SLOTS   MAX(RX_COUNT, NCM_RX_COUNT)
 #define TX_SLOTS   MAX(TX_COUNT, NCM_TX_COUNT)
-#define RX_AREA    MAX(RX_COUNT * FRAME_SIZE, NCM_RX_COUNT * NTB_SIZE)
+#define RX_AREA    MAX(RX_COUNT * FRAME_SIZE, NCM_RX_COUNT * NTB_IN_SIZE)
 #define TX_AREA    MAX(TX_COUNT * FRAME_SIZE, NCM_TX_COUNT * NTB_SIZE)
 #define DMA_BYTES  (RX_AREA + TX_AREA + 2 * 2048)  /* alignment slack */
 
@@ -610,7 +619,7 @@ static u32 alloc_rings(CDC *c)
         return 0;
 
     c->rx_count = c->ncm ? NCM_RX_COUNT : RX_COUNT;
-    c->rx_size = c->ncm ? NTB_SIZE : FRAME_SIZE;
+    c->rx_size = c->ncm ? NTB_IN_SIZE : FRAME_SIZE;
     c->tx_count = c->ncm ? NCM_TX_COUNT : TX_COUNT;
     c->tx_size = c->ncm ? NTB_SIZE : FRAME_SIZE;
 
@@ -659,7 +668,7 @@ static u32 find_config(CDC *c, u32 subclass)
  * unless the device's own size is larger than a buffer, which would babble. */
 static u32 ncm_setup(CDC *c)
 {
-    u32 status, actual, want = NTB_SIZE;
+    u32 status, actual, want = NTB_IN_SIZE;
 
     status = cdc_control(c, 0xA1, 0x80, 0, c->layout.comm_interface, 28, &actual);
     if (!NT_SUCCESS(status) || !cdc_ncm_parse_params(c->ctrl_buf, actual, &c->ncm_params))
@@ -695,7 +704,7 @@ static u32 ncm_setup(CDC *c)
         c->ctrl_buf[3] = (u8)(want >> 24);
         status = cdc_control(c, 0x21, 0x86, 0, c->layout.comm_interface, 4, 0);
         c->st->ntb_input_status = status;
-        if (!NT_SUCCESS(status) && c->ncm_params.in_max > NTB_SIZE)
+        if (!NT_SUCCESS(status) && c->ncm_params.in_max > NTB_IN_SIZE)
             return fail(c, CDC_STEP_NTB_PARAMS, status);
     }
     return 0;
