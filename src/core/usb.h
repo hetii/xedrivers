@@ -132,6 +132,8 @@ typedef struct {
     u32 no_slot;            /* devices refused: USB_MAX_DEVICES already owned */
     u32 control_late;       /* control requests refused: the last one still out */
     u32 cancels;            /* requests taken back (usb_cancel) */
+    u32 nak_reload_set;     /* high-speed bulk endpoints given NAK_RELOAD (usb_open) */
+    u32 nak_reload_skipped; /* bulk endpoints whose handle did not read as an EHCI QH */
 } USB_STATS;
 
 extern volatile USB_STATS usb_stats;

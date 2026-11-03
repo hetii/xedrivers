@@ -302,6 +302,45 @@ u32 usb_control(USB_DEV *dev, const u8 setup[8], void *buffer, u32 length,
 
 /* --- endpoints ---------------------------------------------------------------- */
 
+/* The NAK count reload of a high-speed bulk endpoint (RL, bits 31:28 of its
+ * queue head's second dword). The kernel leaves it 0, so the host controller
+ * retries an IN that answers NAK on every pass of the async schedule, and the
+ * bus time goes to polling the receive endpoint while the transmit one has data.
+ * With 1 it skips that queue head after one NAK until the next microframe.
+ * The endpoint handle UsbdOpenEndpoint returns is the kernel's EHCI QH (xboxkrnl
+ * 21256 UsbdEhciInitializeEndpoint writes dword1 at +4 little-endian, and 17559
+ * the same: 0x02002401 for an RTL8822BU's 0x84); it is changed only when that
+ * word holds this endpoint's number, maximum packet and high speed, so an OHCI
+ * ED (a full-speed device) is never touched. Measured on the RTL8822BU, 5 GHz,
+ * A/B three times each (2026-11-03): one stream out 161-165 -> 173-175 Mbit/s,
+ * eight 168-169 -> 179 (22.4 MB/s); in unchanged (208-210); RL 2 174, 3 172,
+ * 4, 8, 15 no gain. */
+#define NAK_RELOAD          1u
+
+static void nak_reload(void *endpoint, u32 address, u32 max_packet)
+{
+    volatile u32 *w = (volatile u32 *)((u8 *)endpoint + 4);
+    u32 v;
+
+#if defined(__powerpc__)
+    __asm__ volatile("lwbrx %0, 0, %1" : "=r"(v) : "r"(w) : "memory");
+#else
+    v = *w;
+#endif
+    if (((v >> 12) & 3) != 2 || ((v >> 8) & 15) != (address & 15) ||
+        ((v >> 16) & 0x7FF) != (max_packet & 0x7FF) || !(v & 0x7F)) {
+        usb_stats.nak_reload_skipped++;
+        return;
+    }
+    v = (v & 0x0FFFFFFFu) | NAK_RELOAD << 28;
+#if defined(__powerpc__)
+    __asm__ volatile("stwbrx %0, 0, %1; eieio" :: "r"(v), "r"(w) : "memory");
+#else
+    *w = v;
+#endif
+    usb_stats.nak_reload_set++;
+}
+
 void *usb_open(USB_DEV *dev, u32 type, u32 address, u32 max_packet, u32 interval)
 {
     void *endpoint = 0;
@@ -314,6 +353,8 @@ void *usb_open(USB_DEV *dev, u32 type, u32 address, u32 max_packet, u32 interval
     if (!endpoint)
         return 0;
     dev->ep[dev->ep_count++] = endpoint;
+    if (type == USB_TYPE_BULK)
+        nak_reload(endpoint, address, max_packet);
     return endpoint;
 }
 
