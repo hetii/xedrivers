@@ -126,6 +126,25 @@ bench tcp` now counts one window, up at the console). The RTL8156B, counted the 
 wrong way, read 344 Mbit/s where the console received 220. Counted right, the
 RTL8822BU carries 205 Mbit/s (25.6 MB/s) in at 32 streams.
 
+### The kernel's USB stack
+
+Read off xboxkrnl 21256 (retail, with its PDB) and found the same in the
+console's 17559:
+
+- `UsbdEhciQueueAsyncTransfer` chains a queued transfer's qTDs behind the ones
+  already out on the endpoint, so the hardware runs a queue with no gap; a
+  transfer over 20 KB becomes several qTDs, each with interrupt-on-complete.
+- When a bulk or control endpoint's queue drains, the kernel unlinks its queue
+  head (`UsbdEhciRemoveAndFlushEndpoint`, an async-advance doorbell). Keeping it
+  linked instead (a one-word patch, tried live) made receiving 9% slower: without
+  park mode every linked queue head, idle too, costs each pass of the schedule.
+- It leaves the NAK count reload (RL) of every queue head at 0, so a receive
+  endpoint that answers NAK is retried on every pass. `usb_open` sets RL 1 on
+  high-speed bulk endpoints (`src/core/usb.c`): RTL8822BU out 168 -> 179 Mbit/s
+  (21.0 -> 22.4 MB/s), FTP into the console 118 -> 130 Mbit/s.
+- How deep the receive queue is does not matter: 8, 16 or 32 transfers of 20 KB
+  on the RTL8822BU gave the same.
+
 The EHCI controllers (0x7FEA3000 and 0x7FEA5000, read with `xectl.py cmd 16`):
 
 | Register | EHCI 0 | EHCI 1 | Means |
