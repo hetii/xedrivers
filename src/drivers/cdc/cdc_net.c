@@ -82,6 +82,9 @@
 #ifndef NTB_IN_SIZE
 #define NTB_IN_SIZE 8192
 #endif
+/* A receive buffer still holds 16 KB: a device that refuses SET_NTB_INPUT_SIZE
+ * keeps its own blocks, and up to this size it works as it did before. */
+#define NTB_IN_BUF  MAX(NTB_IN_SIZE, 16384)
 
 #define FRAME_SIZE 2048         /* a multiple of 512, so a frame never babbles */
 #define CTRL_SIZE  512
@@ -90,7 +93,7 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define RX_SLOTS   MAX(RX_COUNT, NCM_RX_COUNT)
 #define TX_SLOTS   MAX(TX_COUNT, NCM_TX_COUNT)
-#define RX_AREA    MAX(RX_COUNT * FRAME_SIZE, NCM_RX_COUNT * NTB_IN_SIZE)
+#define RX_AREA    MAX(RX_COUNT * FRAME_SIZE, NCM_RX_COUNT * NTB_IN_BUF)
 #define TX_AREA    MAX(TX_COUNT * FRAME_SIZE, NCM_TX_COUNT * NTB_SIZE)
 #define DMA_BYTES  (RX_AREA + TX_AREA + 2 * 2048)  /* alignment slack */
 
@@ -619,12 +622,12 @@ static u32 alloc_rings(CDC *c)
         return 0;
 
     c->rx_count = c->ncm ? NCM_RX_COUNT : RX_COUNT;
-    c->rx_size = c->ncm ? NTB_IN_SIZE : FRAME_SIZE;
+    c->rx_size = c->ncm ? NTB_IN_BUF : FRAME_SIZE;
     c->tx_count = c->ncm ? NCM_TX_COUNT : TX_COUNT;
     c->tx_size = c->ncm ? NTB_SIZE : FRAME_SIZE;
 
     for (i = 0; i < c->rx_count; i++) {
-        c->rx_buf[i] = (u8 *)net_dma_alloc(c->nd, c->rx_size);
+        c->rx_buf[i] = (u8 *)net_dma_alloc(c->nd, c->rx_size);   /* the buffer: NTB_IN_BUF */
         c->rx_urb[i].Tag = i;
         c->rx_urb[i].Owner = c;
     }
@@ -674,6 +677,8 @@ static u32 ncm_setup(CDC *c)
     if (!NT_SUCCESS(status) || !cdc_ncm_parse_params(c->ctrl_buf, actual, &c->ncm_params))
         return fail(c, CDC_STEP_NTB_PARAMS, status);
     c->st->ntb_in_max = c->ncm_params.in_max;
+    if (want > c->ncm_params.in_max)
+        want = c->ncm_params.in_max;    /* never more than the device's own */
     c->st->ntb_out_max = c->ncm_params.out_max;
     c->st->ntb_out_align = (u32)c->ncm_params.out_divisor << 16 |
                               c->ncm_params.out_remainder;
@@ -697,6 +702,10 @@ static u32 ncm_setup(CDC *c)
         c->st->dgram_status = cdc_control(c, 0x21, 0x88, 0, c->layout.comm_interface, 2, 0);
     }
 
+    /* The transfer asks exactly the block size in force: a block that fills it
+     * ends without a short packet, so a longer request would wait for the next
+     * block and get two in one. Ours if the device took it, else its own. */
+    c->rx_size = c->ncm_params.in_max < NTB_IN_BUF ? c->ncm_params.in_max : NTB_IN_BUF;
     if (c->ncm_params.in_max != want) {
         c->ctrl_buf[0] = (u8)want;
         c->ctrl_buf[1] = (u8)(want >> 8);
@@ -704,8 +713,10 @@ static u32 ncm_setup(CDC *c)
         c->ctrl_buf[3] = (u8)(want >> 24);
         status = cdc_control(c, 0x21, 0x86, 0, c->layout.comm_interface, 4, 0);
         c->st->ntb_input_status = status;
-        if (!NT_SUCCESS(status) && c->ncm_params.in_max > NTB_IN_SIZE)
+        if (!NT_SUCCESS(status) && c->ncm_params.in_max > NTB_IN_BUF)
             return fail(c, CDC_STEP_NTB_PARAMS, status);
+        if (NT_SUCCESS(status))
+            c->rx_size = want;
     }
     return 0;
 }
