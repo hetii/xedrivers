@@ -50,6 +50,13 @@ static void put32(u8 *p, u32 v)
                                      * Mbit/s, 1, 2, 4 and 8 alike; one stream out, in,
                                      * and FTP unchanged (2026-11-03, 5 GHz ch 116) */
 
+#define SMALL_FRAME     256         /* shorter (TCP ACKs) is not held back for more: on
+                                     * 2.4 GHz, where the card takes transfers slowly
+                                     * while it receives, holding ACKs risks the sender
+                                     * stalling. With it, 2.4 GHz is as before (4
+                                     * streams in 131-139, 8 out 40-47 Mbit/s, either
+                                     * way) and 5 GHz keeps 155 -> 170 out */
+
 static u32 align8(u32 n)
 {
     return (n + 7) & ~7u;
@@ -101,6 +108,7 @@ static u32 close_open(RTW *r, u32 ep, u32 *length)
         return slot;
     *length = seal(r, r->tx_buf[slot], r->tx_open_length[ep], r->tx_open_frames[ep]);
     r->tx_open[ep] = RTW_TX_COUNT;
+    r->tx_open_small[ep] = 0;
     r->tx_ep_busy[ep]++;
     return slot;
 }
@@ -119,10 +127,13 @@ static void tx_done(URB *urb, u32 status)
         r->st->tx_done++;
     }
     /* what joined while this endpoint was busy goes now, unless EP_KEEP_OUT are
-     * still out (then it fills on, and goes when full or when fewer are out) */
+     * still out and it holds only full-sized frames (then it fills on, and goes
+     * when full or when fewer are out); a short frame -- the console's ACKs to a
+     * download -- never waits for more */
     irql = KfAcquireSpinLock(&r->tx_lock);
     r->tx_ep_busy[ep]--;
-    next = r->tx_ep_busy[ep] < EP_KEEP_OUT ? close_open(r, ep, &length) : RTW_TX_COUNT;
+    next = r->tx_ep_busy[ep] < EP_KEEP_OUT || r->tx_open_small[ep] ?
+           close_open(r, ep, &length) : RTW_TX_COUNT;
     KfReleaseSpinLock(&r->tx_lock, irql);
     if (next != RTW_TX_COUNT)
         submit(r, next, length);
@@ -266,6 +277,8 @@ u32 rtw_tx(RTW *r, const u8 *head, u32 head_length, const u8 *body, u32 body_len
         PROF_END(copy, c, length);
     }
     r->tx_open_length[ep] = at + RTW_TX_DESC_SIZE + length;
+    if (length < SMALL_FRAME)
+        r->tx_open_small[ep] = 1;
     if (++r->tx_open_frames[ep] == RTW_TX_AGG)
         now = close_open(r, ep, &now_length);
 out:

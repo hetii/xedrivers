@@ -210,6 +210,7 @@ typedef struct RTW {
     u32 tx_open[RTW_OUT_MAX];           /* the slot frames are joining, or RTW_TX_COUNT */
     u32 tx_open_length[RTW_OUT_MAX];
     u32 tx_open_frames[RTW_OUT_MAX];
+    u32 tx_open_small[RTW_OUT_MAX];     /* a short frame (an ACK) is in it: it does not wait */
     u32 port_macid;             /* the station port's own, 0 */
     u32 data_rate;              /* DESC_RATE* data goes at, until the firmware picks */
     u32 data_rate_id;
