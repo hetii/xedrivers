@@ -66,6 +66,10 @@ MCU = {"pla": 0x0100, "usb": 0x0000}
 PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up', 'tx_wait', 'turnaround']
 
 STRUCTS = {
+    "usb_stats": ["match_calls", "add_calls", "remove_calls", "close_passes", "submit_direct",
+                  "submit_dpc", "dpc_runs", "last_open_status", "scan_found", "reset_status",
+                  "unbound_resets", "no_slot", "control_late", "cancels", "nak_reload_set",
+                  "nak_reload_skipped"],
     "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls", "tx_wait_ticks_hi", "tx_wait_ticks_lo", "tx_wait_bytes_hi", "tx_wait_bytes_lo", "tx_wait_calls", "turnaround_ticks_hi", "turnaround_ticks_lo", "turnaround_bytes_hi", "turnaround_bytes_lo", "turnaround_calls"],
     "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found",
                  "build_commit", "build_dirty"],
@@ -534,6 +538,12 @@ def status(sym):
         xs["xq_high"], xs["xmit_dropped"], xs["link_fallback"]))
     print("xnet buf system sockets: receive %d KB -> %d KB, send %d KB -> %d KB" % (
         xs["rcvbuf_before"], xs["rcvbuf_after"], xs["sndbuf_before"], xs["sndbuf_after"]))
+    u = read_struct(sym, "usb_stats")
+    print("usb      match=%d add=%d remove=%d close passes=%d cancels=%d resets of unbound=%d "
+          "no slot=%d control late=%d nak reload=%d/%d skipped" % (
+              u["match_calls"], u["add_calls"], u["remove_calls"], u["close_passes"],
+              u["cancels"], u["unbound_resets"], u["no_slot"], u["control_late"],
+              u["nak_reload_set"], u["nak_reload_skipped"]))
     print("xnet q   stalls=%d depth at the last=%d | cwnd clamp %s" % (
         xs["xq_stalls"], xs["xq_stall_depth"],
         "refused (other xam)" if xs["cwnd_refused"] else
