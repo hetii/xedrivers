@@ -147,6 +147,14 @@ console's 17559:
   2, or 3, 4, 5) changes nothing; pinning one to 1, the title's, hung the console.
 - How deep the receive queue is does not matter: 8, 16 or 32 transfers of 20 KB
   on the RTL8822BU gave the same.
+- The EHCI controllers are PCI devices 4 and 5 on bus 1, function 1 (OHCI function
+  0), vendor 0x1414. HAL (`HalpWriteEhciOperationalMode`) sets vendor registers
+  0x40 (20 40 00 0c), 0x44 (3c on this southbridge revision, 04 on older ones) and
+  0x48 (ad 03 00 40; 6e 00 00 00 older), and on revision 0x80 and up PHY registers
+  through 0x7C. Read and set live with `make bench=debug` (command 24,
+  `HalReadWritePCISpace`): 0x44 = 04 changed nothing, 7f gave in +2% and out -4%;
+  0x48's older value and ff in its first byte changed nothing; ff in its last byte
+  hung the console until a power cycle. Nothing there to gain.
 
 The EHCI controllers (0x7FEA3000 and 0x7FEA5000, read with `xectl.py cmd 16`):
 

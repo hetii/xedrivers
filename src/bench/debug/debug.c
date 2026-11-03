@@ -32,6 +32,23 @@ u32 debug_peek(u32 address, u32 little)
     return v;
 }
 
+/* HalReadWritePCISpace (ordinal 37): bus, device, function, register, buffer,
+ * length, write. One dword of a device's PCI configuration space, read or (with
+ * write) set to debug_pci_value; the dword is returned as the device holds it. */
+extern void HalReadWritePCISpace(u32 bus, u32 device, u32 function, u32 reg, void *buffer,
+                                 u32 length, u32 write);
+volatile u32 debug_pci_value;
+
+u32 debug_pci(u32 bdf, u32 reg, u32 write)
+{
+    u32 v = debug_pci_value;
+
+    HalReadWritePCISpace(bdf >> 16, (bdf >> 8) & 0xFF, bdf & 0xFF, reg, &v, 4, write ? 1 : 0);
+    if (write)
+        HalReadWritePCISpace(bdf >> 16, (bdf >> 8) & 0xFF, bdf & 0xFF, reg, &v, 4, 0);
+    return v;
+}
+
 u32 debug_poke(u32 address, u32 little, u32 value)
 {
 #if defined(__powerpc__)

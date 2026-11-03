@@ -6,6 +6,8 @@
 #include "kernel.h"
 
 u32 debug_peek(u32 address, u32 little);
+u32 debug_pci(u32 bdf, u32 reg, u32 write);
+extern volatile u32 debug_pci_value;
 u32 debug_poke(u32 address, u32 little, u32 value);
 u32 debug_thread_priority(u32 id, u32 priority);
 

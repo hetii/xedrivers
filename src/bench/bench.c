@@ -31,6 +31,8 @@
 #define CMD_OMNI_ON    21u  /* register as a wireless card that records what it is
                              * asked (debug_omni_log) */
 #define CMD_OMNI_OFF   22u
+#define CMD_PCI        24u  /* [1] bus<<16|device<<8|function, [2] register,
+                             * [3] 0 read / 1 write debug_pci_value -> dword */
 #define CMD_WIRED_OFF  23u  /* [1] seconds without xnet, then back */
 #define CMD_WPA        20u  /* WPA2's key derivation and group-key unwrapping,
                              * likewise -> a bitmap, 3 for both */
@@ -68,6 +70,9 @@ u32 bench_command(u32 what, volatile u32 *args)
         return 1;
     case CMD_PEEK:
         args[5] = debug_peek(args[1], args[2]);
+        return 1;
+    case CMD_PCI:
+        args[5] = debug_pci(args[1], args[2], args[3]);
         return 1;
     case CMD_CONFIG:
         args[5] = debug_config(args[1], args[2]);
