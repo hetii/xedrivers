@@ -113,7 +113,7 @@ onboard port.
 
 | Direction | Ceiling | Measured with |
 |---|---|---|
-| out of the console | 23.3 MB/s at the Ethernet MTU | both RTL8156B and RTL8822BU stop at 21 to 24 MB/s |
+| out of the console | about 24 MB/s | RTL8156B NCM 190 Mbit/s (23.8 MB/s), RTL8822BU 179 Mbit/s (22.4 MB/s), with the NAK reload |
 | into the console | not known; at least 28 MB/s | RTL8156B 27 to 28 MB/s (NCM 27.9), RTL8822BU 25 to 26 MB/s at 8 to 32 streams |
 
 Outbound, sweeping the frame size fits 10.9 us a transfer plus 36.9 ns a byte (78
@@ -141,7 +141,10 @@ console's 17559:
 - It leaves the NAK count reload (RL) of every queue head at 0, so a receive
   endpoint that answers NAK is retried on every pass. `usb_open` sets RL 1 on
   high-speed bulk endpoints (`src/core/usb.c`): RTL8822BU out 168 -> 179 Mbit/s
-  (21.0 -> 22.4 MB/s), FTP into the console 118 -> 130 Mbit/s.
+  (21.0 -> 22.4 MB/s), FTP into the console 118 -> 130 Mbit/s; RTL8156B out 175 ->
+  181-186 (ECM) and 179 -> 190 (NCM). Receiving is unchanged on both.
+- Which hardware thread a server's threads run on (the default, the USB stack's
+  2, or 3, 4, 5) changes nothing; pinning one to 1, the title's, hung the console.
 - How deep the receive queue is does not matter: 8, 16 or 32 transfers of 20 KB
   on the RTL8822BU gave the same.
 

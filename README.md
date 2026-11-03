@@ -325,15 +325,15 @@ transport or Wi-Fi channel, xnet settings, test, streams and direction. With
 <!-- results:wired -->
 | Card | Transport, link | xnet | Test | Streams | Console -> PC | PC -> console | Date, commit | Note |
 |---|---|---|---|---|---|---|---|---|
-| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 155 Mbit/s (19.4 MB/s) | 164 Mbit/s (20.5 MB/s) | 2026-11-02, 58b851a / 2026-11-02, 58b851a |  |
-| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 175 Mbit/s (21.8 MB/s) | 212 Mbit/s (26.6 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
-| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 175 Mbit/s (21.9 MB/s) | 214 Mbit/s (26.8 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
-| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 175 Mbit/s (21.8 MB/s) | 214 Mbit/s (26.8 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 166 Mbit/s (20.7 MB/s) | 164 Mbit/s (20.5 MB/s) | 2026-11-03, e500b723 / 2026-11-02, 58b851a |  |
+| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 186 Mbit/s (23.3 MB/s) | 212 Mbit/s (26.6 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
+| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 182 Mbit/s (22.7 MB/s) | 214 Mbit/s (26.8 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
+| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 181 Mbit/s (22.7 MB/s) | 214 Mbit/s (26.8 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
 | rtl8156 | ECM, 1000 Mbit/s | rcv 32 / snd 128 / cwnd 256 KB, pool +767 KB, 64 TCP sockets | tcp ram | 32 | 175 Mbit/s (21.8 MB/s) | 212 Mbit/s (26.5 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
-| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 162 Mbit/s (20.2 MB/s) | 104 Mbit/s (13.0 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
-| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 183 Mbit/s (22.9 MB/s) | 217 Mbit/s (27.1 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
-| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 179 Mbit/s (22.4 MB/s) | 222 Mbit/s (27.8 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
-| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 179 Mbit/s (22.4 MB/s) | 223 Mbit/s (27.9 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
+| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 168 Mbit/s (21.0 MB/s) | 104 Mbit/s (13.0 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
+| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 193 Mbit/s (24.2 MB/s) | 217 Mbit/s (27.1 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
+| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 190 Mbit/s (23.8 MB/s) | 222 Mbit/s (27.8 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
+| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 190 Mbit/s (23.8 MB/s) | 223 Mbit/s (27.9 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
 | rtl8156 | NCM, 1000 Mbit/s | rcv 32 / snd 128 / cwnd 256 KB, pool +767 KB, 64 TCP sockets | tcp ram | 32 | 181 Mbit/s (22.6 MB/s) | 220 Mbit/s (27.5 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
 <!-- /results:wired -->
 
