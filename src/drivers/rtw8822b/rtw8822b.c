@@ -326,13 +326,16 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
         for (i = 0; i < 6; i++)
             rtw_write8(r, PORT0_BSSID + i, 0);
         r->st->linked = 0;
+        rtw_dig_reset(r);
         return;
     }
     rtw_set_channel(r, center_of(link->channel, link->bw, link->primary), link->bw,
                     link->primary);
     rtw_iqk(r);
-    for (i = 0; i < 6; i++)
+    for (i = 0; i < 6; i++) {
         rtw_write8(r, PORT0_BSSID + i, link->bssid[i]);
+        r->bssid[i] = link->bssid[i];
+    }
     rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, NET_MGD_LINKED);
     rtw_write32_mask(r, PORT0_AID, 0x7FF, link->aid);
     rtw_write32(r, REG_RCR, RCR_LINKED);
@@ -356,6 +359,7 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
     r->data_stbc = link->stbc;
     r->ampdu_factor = (4u << link->ampdu_factor) - 1;   /* get_tx_ampdu_factor */
     r->ampdu_density = link->ampdu_density;
+    rtw_dig_reset(r);
     r->st->linked = 1;
 }
 
@@ -386,6 +390,10 @@ void rtw_rx_frame(RTW *r, u8 *frame, u32 length, s32 signal, u32 desc_w0)
     u32 type = (frame[0] >> 2) & 3;
 
     r->st->last_signal = signal;
+    if (r->st->linked && signal > -100 && length >= 16 &&       /* the AP's, for the DIG */
+        frame[10] == r->bssid[0] && frame[11] == r->bssid[1] && frame[12] == r->bssid[2] &&
+        frame[13] == r->bssid[3] && frame[14] == r->bssid[4] && frame[15] == r->bssid[5])
+        r->ap_signal_x8 += signal - r->ap_signal_x8 / 8;
     if (type == 0)
         r->st->rx_mgmt++;
     else if (type == 2)
@@ -457,6 +465,8 @@ static void rx_watchdog(RTW *r)
     UsbdResetDevice(r->dev->device);
 }
 
+#define DIG_TICKS       60              /* ~2 s of 33 ms ticks, rtw88's watchdog */
+
 static void rtw8822b_tick(NET_DEV *nd)
 {
     RTW *r = (RTW *)nd->priv;
@@ -466,6 +476,10 @@ static void rtw8822b_tick(NET_DEV *nd)
     r->st->tx_inflight_now = r->tx_inflight;
     tx_watchdog(r);
     rx_watchdog(r);
+    if (r->st->linked && ++r->dig_ticks >= DIG_TICKS) {
+        r->dig_ticks = 0;
+        rtw_dig(r);
+    }
     r->link.mode->tick(&r->link);
     wl_sta_tick(&r->sta);
 }

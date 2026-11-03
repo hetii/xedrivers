@@ -152,6 +152,9 @@ typedef struct {
     u32 rxs_fifo_info;          /* REG_FIFOPAGE_INFO_1 */
     u32 rx_kicks;               /* receive transfers taken back and queued again */
     u32 rx_kick_ok;             /* after which the receive went on */
+    u32 dig_igi;                /* the receive gain the DIG last set, */
+    u32 dig_fa;                 /* the false alarms it saw in its last 2 s, */
+    u32 dig_rssi;               /* and the access point's RSSI, 100 + dBm */
 } RTW_STATS;
 
 extern volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
@@ -172,6 +175,10 @@ typedef struct RTW {
     u32 rsvd_h2cq_addr;         /* the firmware's command queue's first page */
     u32 channel;                /* tuned to, 0 before the first */
     u32 igi;                    /* the gain the tables left, for the DIG */
+    u32 dig_igi;                /* the DIG's gain, 0 until linked */
+    u32 dig_ticks;
+    u8 bssid[6];
+    s32 ap_signal_x8;           /* the access point's frames, dBm, averaged x8 */
 
     void *ep_out[RTW_OUT_MAX];  /* high, normal, low priority (rtw_usb_parse) */
     u32 out_count;
@@ -282,6 +289,8 @@ u32  rtw_phy_set_param(RTW *r);
  * 20 MHz channel in it, 0 at 20 MHz. */
 void rtw_set_channel(RTW *r, u32 channel, u32 bw, u32 primary);
 void rtw_iqk(RTW *r);
+void rtw_dig(RTW *r);
+void rtw_dig_reset(RTW *r);
 
 /* --- firmware commands (rtw_fw.c) -------------------------------------------------- */
 

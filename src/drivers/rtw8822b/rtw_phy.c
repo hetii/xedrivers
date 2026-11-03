@@ -611,6 +611,84 @@ void rtw_iqk(RTW *r)
     r->st->iqk_runs++;
 }
 
+/* rtw_phy_dig, linked: the receive gain index (IGI) from the false alarms of the
+ * last 2 s, bounded by the access point's RSSI (100 + dBm): no lower than it up
+ * to 0x40 and no higher than 15 above. The tables leave 0x20, the most sensitive,
+ * where the radio takes noise for frames, holds its own sends for a busy channel
+ * and loses the access point's acknowledgements. A/B live (2026-11-03, 2.4 GHz
+ * ch 10, the AP at -11 dBm, 4 streams): 0x20 out 26 / in 8 Mbit/s, 0x30-0x5a
+ * out 146-160 / in 143-152 Mbit/s; rtw88 sat at 0x44 there. Thread, every 2 s. */
+#define DIG_PERF_FA_TH_LOW          250
+#define DIG_PERF_FA_TH_HIGH         500
+#define DIG_PERF_FA_TH_EXTRA_HIGH   750
+#define DIG_PERF_MAX                0x5A
+#define DIG_PERF_MID                0x40
+#define DIG_MIN                     0x1C        /* rtw8822b's dig_min */
+#define DIG_RSSI_GAIN_OFFSET        15
+
+static void dig_write(RTW *r, u32 igi)
+{
+    rtw_write32_mask(r, REG_RXIGI_A, 0x7F, igi);
+    rtw_write32_mask(r, REG_RXIGI_B, 0x7F, igi);
+}
+
+/* rtw8822b_false_alarm_statistics: OFDM and, when on, CCK false alarms since the
+ * last call, then the counters reset. */
+static u32 false_alarms(RTW *r)
+{
+    u32 fa = rtw_read16(r, 0xF48);
+
+    if (rtw_read32(r, 0x808) & BIT(28))
+        fa += rtw_read16(r, 0xA5C);
+    rtw_write32_set(r, 0x9A4, BIT(17));
+    rtw_write32_clr(r, 0x9A4, BIT(17));
+    rtw_write32_clr(r, 0xA2C, BIT(15));
+    rtw_write32_set(r, 0xA2C, BIT(15));
+    rtw_write32_set(r, 0xB58, BIT(0));
+    rtw_write32_clr(r, 0xB58, BIT(0));
+    return fa;
+}
+
+void rtw_dig(RTW *r)
+{
+    s32 dbm = r->ap_signal_x8 / 8;
+    u32 rssi = dbm <= -100 ? 0 : dbm >= 0 ? 100 : (u32)(100 + dbm);
+    u32 fa = false_alarms(r), igi = r->dig_igi ? r->dig_igi : r->igi;
+    u32 min_rssi = rssi > DIG_MIN ? rssi : DIG_MIN;
+    u32 max = min_rssi + DIG_RSSI_GAIN_OFFSET < DIG_PERF_MAX ?
+              min_rssi + DIG_RSSI_GAIN_OFFSET : DIG_PERF_MAX;
+    u32 lower = min_rssi < DIG_PERF_MID ? min_rssi : DIG_PERF_MID;
+    u32 upper = lower + DIG_RSSI_GAIN_OFFSET;
+
+    if (upper > max)
+        upper = max;
+    if (fa > DIG_PERF_FA_TH_EXTRA_HIGH)
+        igi += 4;
+    else if (fa > DIG_PERF_FA_TH_HIGH)
+        igi += 3;
+    else if (fa > DIG_PERF_FA_TH_LOW)
+        igi += 2;
+    igi -= 2;
+    igi = igi < lower ? lower : igi > upper ? upper : igi;
+    if (igi != r->dig_igi)
+        dig_write(r, igi);
+    r->dig_igi = igi;
+    r->st->dig_igi = igi;
+    r->st->dig_fa = fa;
+    r->st->dig_rssi = rssi;
+}
+
+/* Unlinked (scanning): back to the tables' gain, as rtw88's coverage range. */
+void rtw_dig_reset(RTW *r)
+{
+    if (r->dig_igi)
+        dig_write(r, r->igi);
+    r->dig_igi = 0;
+    r->dig_ticks = 0;
+    r->ap_signal_x8 = -60 * 8;
+    r->st->dig_igi = r->igi;
+}
+
 void rtw_set_channel(RTW *r, u32 channel, u32 bw, u32 primary)
 {
     set_channel_bb(r, channel, bw, primary);

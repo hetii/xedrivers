@@ -105,7 +105,7 @@ STRUCTS = {
                   "tx_stalls", "rx_stalls", "stall_inflight", "stall_ep_busy", "stall_open",
                   "tx_transfers", "tx_aggregated", "rxs_busy", "rxs_parked", "rxs_errors",
                   "rxs_last_error", "rxs_rxpkt_num", "rxs_rxdma_status", "rxs_txdma_status",
-                  "rxs_fifo_info", "rx_kicks", "rx_kick_ok"],
+                  "rxs_fifo_info", "rx_kicks", "rx_kick_ok", "dig_igi", "dig_fa", "dig_rssi"],
     "rtw_sta_stats": ["state", "scans", "probes", "auths", "auth_status", "assocs",
                       "assoc_status", "aid", "joins", "timeouts", "deauths",
                       "deauth_reason", "beacon_losses", "rx_data", "rx_eapol",
@@ -358,6 +358,7 @@ def status(sym):
                 r["tx_inflight_now"], r["txpwr_ofdm6"], r["txpwr_vht2_mcs7"],
                 r["iqk_runs"], r["iqk_ms"], r["tx_transfers"], r["tx_aggregated"],
                 r["tx_stalls"], r["rx_stalls"], r["stall_inflight"], r["stall_ep_busy"], r["stall_open"]))
+            print("rtw dig  igi=%#x false alarms=%d rssi=%d" % (r["dig_igi"], r["dig_fa"], r["dig_rssi"]))
             if r["rx_kicks"] or r["rx_stalls"]:
                 print("rtw kick  receive taken back %d times, went on after %d" % (r["rx_kicks"], r["rx_kick_ok"]))
             if r["rx_stalls"]:
