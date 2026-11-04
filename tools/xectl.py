@@ -91,7 +91,8 @@ STRUCTS = {
     "rtl_stats": ["chip_version", "advertise_status"],
     "ax179_stats": ["bcd_device", "product", "eeprom_43", "phy_status", "medium", "usb_speed",
                     "link_resets", "rx_transfers", "rx_bad", "rx_bad_frames", "intr_events",
-                    "intr_errors", "tx_transfers", "tx_too_big"],
+                    "intr_errors", "tx_transfers", "tx_too_big", "family_a", "chip_status",
+                    "firmware", "intr_link"],
     "rndis_stats": ["init_status", "max_packets", "max_transfer", "alignment",
                     "filter_status", "media_status", "link_speed", "control_polls",
                     "keepalives", "indications", "last_indication", "rx_transfers",
@@ -531,11 +532,15 @@ def status(sym):
         for i in range(2):
             a = read_struct(sym, "ax179_stats", i)
             if a["product"]:
-                print("ax179 %d  pid=%04x bcd=%04x eeprom43=%#x physr=%#06x medium=%#06x usb=%#x "
-                      "link checks=%d rx=%d bad=%d/%d frames intr=%d err=%d tx=%d too_big=%d" % (
-                          i, a["product"], a["bcd_device"], a["eeprom_43"], a["phy_status"],
-                          a["medium"], a["usb_speed"], a["link_resets"], a["rx_transfers"],
-                          a["rx_bad"], a["rx_bad_frames"], a["intr_events"], a["intr_errors"],
+                print("ax179 %d  pid=%04x bcd=%04x %s eeprom43=%#x physr=%#06x medium=%#06x usb=%#x "
+                      "link checks=%d intr link=%d rx=%d bad=%d/%d frames intr=%d err=%d tx=%d "
+                      "too_big=%d" % (
+                          i, a["product"], a["bcd_device"],
+                          "AX88179A/B chip=%#04x fw=%06x" % (a["chip_status"], a["firmware"])
+                          if a["family_a"] else "AX88179/178A",
+                          a["eeprom_43"], a["phy_status"], a["medium"], a["usb_speed"],
+                          a["link_resets"], a["intr_link"], a["rx_transfers"], a["rx_bad"],
+                          a["rx_bad_frames"], a["intr_events"], a["intr_errors"],
                           a["tx_transfers"], a["tx_too_big"]))
     if ss:
         print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (

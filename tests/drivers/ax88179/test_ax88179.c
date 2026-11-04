@@ -94,6 +94,56 @@ int main(void)
     ax179_tx_header(h, 1016, 512);              /* 1016 + 8 = 1024 */
     CHECK(h[4] == 0x00 && h[5] == 0x80 && h[6] == 0x00 && h[7] == 0x80);
 
+    /* AX88179A/B: frames, then 8-byte descriptors, then the trailer. */
+    {
+        u32 flens[2] = { 60, 1514 }, at = 0, meta, k;
+
+        for (k = 0; k < 2; k++) {
+            memset(t + at, 0, (flens[k] + 7) & ~7u);
+            t[at] = (u8)(0xB0 + k);
+            at += (flens[k] + 7) & ~7u;
+        }
+        meta = at;
+        for (k = 0; k < 2; k++) {
+            put32(t + at, flens[k] << 16 | 0x800u);      /* RX_OK */
+            put32(t + at + 4, 0);
+            at += 8;
+        }
+        put32(t + at, 2u | meta << 13);
+        put32(t + at + 4, 0);
+        n = at + 8;
+        got = 0;
+        r = ax179a_rx_split(t, n, on_frame, 0, &bad);
+        CHECK(r == 2 && bad == 0 && got == 2);
+        CHECK(got_len[0] == 60 && got_len[1] == 1514);
+        CHECK(got_first[0] == 0xB0 && got_first[1] == 0xB1);
+
+        /* Without RX_OK the frame is counted, not delivered. */
+        put32(t + meta + 8, 1514u << 16);
+        got = 0;
+        r = ax179a_rx_split(t, n, on_frame, 0, &bad);
+        CHECK(r == 1 && bad == 1 && got == 1);
+
+        /* A trailer whose offset is not just before it does not parse. */
+        put32(t + n - 8, 2u | (meta + 8) << 13);
+        CHECK(ax179a_rx_split(t, n, on_frame, 0, &bad) < 0);
+    }
+
+    /* AX88179A/B transmit: descriptor, frame, padding to 8; a terminator when the
+     * record ends on a 512-byte boundary. */
+    {
+        u8 f[1600], o[1700];
+
+        memset(f, 0x5A, sizeof(f));
+        n = ax179a_tx_build(o, sizeof(o), f, 1514, 512);
+        CHECK(n == 1528);                               /* 8 + 1514 -> 1528 */
+        CHECK(o[0] == 0xEA && o[1] == 0x05 && o[3] == 0x00);
+        CHECK(o[8] == 0x5A && o[8 + 1513] == 0x5A && o[8 + 1514] == 0);
+        n = ax179a_tx_build(o, sizeof(o), f, 1016, 512);  /* 8 + 1016 = 1024 */
+        CHECK(n == 1032 && o[3] == 0x10);
+        CHECK(ax179a_tx_build(o, 100, f, 1514, 512) == 0);
+    }
+
     if (failures)
         return 1;
     printf("all ax88179 tests passed\n");
