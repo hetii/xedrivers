@@ -319,7 +319,13 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
 
     if (!link) {
         r->ampdu = 0;
-        rtw_fw_media_status(r, MACID_AP, 0);
+        /* No "disconnected" to the firmware for the AP's MAC ID: rtw88 reports it
+         * when mac80211 removes the station and "connected" again when it adds the
+         * next, before the four-way. Here the next "connected" comes only with the
+         * link, after it, and the firmware held every frame for a disconnected MAC
+         * ID -- the handshake's answers among them: after a deauthentication every
+         * join failed at the four-way (2026-11-04, hostapd resent message 1 four
+         * times, nothing came back). The next link rewrites it and its rates. */
         rtw_write32(r, REG_RCR, RCR_SCAN);
         rtw_write32(r, REG_EDCCA_TH, EDCCA_OFF);
         rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, 0);
