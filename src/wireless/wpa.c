@@ -51,6 +51,7 @@ static WPA_HOST host;
  * where the frames arrive. */
 static u8 pending_gtk[WPA_GTK_MAX];
 static u32 pending_gtk_len, pending_gtk_index;
+static u32 pending_ptk;         /* the pairwise key too: the four-way, not a rekey */
 
 #define KCK (ptk)
 #define KEK (ptk + 16)
@@ -350,6 +351,53 @@ static void fail(void)
         host.ready(host.context, 0);
 }
 
+/* The group key handshake (802.11i 8.5.4), the access point's new group key
+ * after the four-way: its first message carries it wrapped, as the third did, and
+ * the answer is the same counter with our check value and nothing else. Left
+ * unanswered the access point gives the station up -- hostapd's default rekey is
+ * an hour, and every long session ended there (2026-11-04). */
+static void group_message(const u8 *body, u32 length, u32 key_info)
+{
+    u8 data[FRAME_MAX];
+    const u8 *gtk;
+    u32 data_len = be16(body + E_DATA_LEN), index = 0, gtk_len, i, newer = 0;
+
+    if (wpa_stats.state != WPA_DONE || !(key_info & KI_MIC) ||
+        !(key_info & KI_ENCRYPTED) || E_DATA + data_len > length || !data_len)
+        return;
+    for (i = 0; i < 8 && !newer; i++)
+        newer = body[E_REPLAY + i] > replay[i] ? 1 : body[E_REPLAY + i] < replay[i]
+                                                     ? 2 : 0;
+    if (newer != 1) {
+        wpa_stats.replays++;
+        return;
+    }
+    if (!mic_holds(body, length)) {
+        wpa_stats.mic_failures++;
+        return;
+    }
+    copy(replay, body + E_REPLAY, 8);
+    gtk_len = wpa_unwrap(KEK, body + E_DATA, data_len, data);
+    if (!gtk_len) {
+        wpa_stats.unwrap_failures++;
+        return;
+    }
+    if (!gtk_from_kde(data, gtk_len, &index, &gtk, &gtk_len)) {
+        wpa_stats.no_gtk++;
+        return;
+    }
+    copy(pending_gtk, gtk, gtk_len);
+    pending_gtk_len = gtk_len;
+    pending_gtk_index = index;
+    pending_ptk = 0;
+    wpa_stats.gtk_len = gtk_len;
+    if (!answer(2 | KI_MIC | KI_SECURE, 0, 0, 0))
+        return;
+    wpa_stats.group_rekeys++;
+    mem_sync();
+    wpa_stats.pending = 1;
+}
+
 void wpa_eapol_in(const u8 *body, u32 length)
 {
     u8 data[FRAME_MAX];
@@ -359,14 +407,20 @@ void wpa_eapol_in(const u8 *body, u32 length)
     if (length < E_MIN || body[E_TYPE] != EAPOL_KEY ||
         body[E_DESCRIPTOR] != DESC_RSN)
         return;
-    if (wpa_stats.state != WPA_WAIT_1 && wpa_stats.state != WPA_WAIT_3)
+    if (wpa_stats.state != WPA_WAIT_1 && wpa_stats.state != WPA_WAIT_3 &&
+        wpa_stats.state != WPA_DONE)
         return;
     key_info = be16(body + E_KEY_INFO);
     wpa_stats.messages_in++;
     wpa_stats.last_key_info = key_info;
-    if ((key_info & KI_VERSION) != 2 || !(key_info & KI_PAIRWISE) ||
-        (key_info & KI_ERROR))
+    if ((key_info & KI_VERSION) != 2 || (key_info & KI_ERROR))
         return;
+    if (!(key_info & KI_PAIRWISE)) {
+        group_message(body, length, key_info);
+        return;
+    }
+    if (wpa_stats.state == WPA_DONE)
+        return;                         /* a pairwise rekey: not asked for here */
     data_len = be16(body + E_DATA_LEN);
     if (E_DATA + data_len > length)
         return;
@@ -433,6 +487,7 @@ void wpa_eapol_in(const u8 *body, u32 length)
         copy(pending_gtk, gtk, gtk_len);
     pending_gtk_len = gtk_len;
     pending_gtk_index = index;
+    pending_ptk = 1;
     wpa_stats.gtk_len = gtk_len;
     if (!answer(2 | KI_PAIRWISE | KI_MIC | KI_SECURE, 0, 0, 0)) {
         fail();
@@ -452,6 +507,13 @@ u32 wpa_apply(void)
     wpa_stats.pending = 0;
     wpa_stats.applied++;
     mem_sync();
+    if (!pending_ptk) {                 /* a group rekey: the new group key only */
+        if (host.key && pending_gtk_len &&
+            !host.key(host.context, 0, pending_gtk_index, pending_gtk, pending_gtk_len))
+            wpa_stats.failures++;
+        mem_sync();
+        return 1;
+    }
     ok = host.key && host.key(host.context, 1, 0, TK, WPA_KEY_LEN);
     if (ok && pending_gtk_len)
         ok = host.key(host.context, 0, pending_gtk_index, pending_gtk,

@@ -68,6 +68,7 @@ typedef struct {
     u32 pending;            /* keys settled, waiting for the worker to install */
     u32 applied;
     u32 psk_ready;
+    u32 group_rekeys;       /* group key handshakes answered after the four-way */
 } WPA_STATS;
 
 extern volatile WPA_STATS wpa_stats;

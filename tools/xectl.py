@@ -150,7 +150,7 @@ STRUCTS = {
                   "chip_temp", "chip_temp_max", "tx_cap_kbps", "tx_capped", "tx_cap_lowest", "temp_failures"],
     "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
                   "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
-                  "no_gtk", "pending", "applied", "psk_ready"],
+                  "no_gtk", "pending", "applied", "psk_ready", "group_rekeys"],
     "aic_bt_stats": ["up", "commands", "command_errors", "timeouts", "events",
                      "event_errors", "last_event", "last_event_error",
                      "last_opcode", "reset_status", "version_status",
@@ -474,11 +474,11 @@ def status(sym):
         w = read_struct(sym, "wpa_stats")
         names = {0: "idle", 1: "wait-1", 2: "wait-3", 3: "done", 4: "failed"}
         print("wpa      state=%s psk=%d in=%d out=%d mic_bad=%d replays=%d "
-              "unwrap_bad=%d no_gtk=%d fails=%d gtk=%dB key_info=%#x" % (
+              "unwrap_bad=%d no_gtk=%d fails=%d gtk=%dB key_info=%#x group_rekeys=%d" % (
                   names.get(w["state"], w["state"]), w["psk_ready"],
                   w["messages_in"], w["messages_out"], w["mic_failures"],
                   w["replays"], w["unwrap_failures"], w["no_gtk"], w["failures"],
-                  w["gtk_len"], w["last_key_info"]))
+                  w["gtk_len"], w["last_key_info"], w["group_rekeys"]))
     if "wl_bridge_stats" in sym:
         b = read_struct(sym, "wl_bridge_stats")
         print("bridge   auto scans=%d joins=%d missed=%d secured=%d" % (

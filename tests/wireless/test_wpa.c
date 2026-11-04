@@ -90,6 +90,34 @@ static void fake_mic(const u8 *kck, u8 *frame, u32 length)
     memcpy(frame + 81, out, 16);
 }
 
+/* RFC 3394 key wrap with the stand-in cipher above, as an access point wraps the
+ * group key in its key data. `n` is the plaintext in 8-byte blocks. */
+static u32 fake_wrap(const u8 *kek, const u8 *in, u32 n, u8 *out)
+{
+    XE_AES_STATE aes;
+    u8 a[8], b[16];
+    u32 i, j, k, t;
+
+    memset(a, 0xA6, 8);
+    memcpy(out + 8, in, 8 * n);
+    XeCryptAesKey(&aes, kek);
+    for (j = 0; j < 6; j++) {
+        for (i = 1; i <= n; i++) {
+            memcpy(b, a, 8);
+            memcpy(b + 8, out + 8 * i, 8);
+            XeCryptAesEcb(&aes, b, b, 1);
+            t = n * j + i;
+            for (k = 0; k < 8; k++)
+                a[k] = b[k];
+            a[7] ^= (u8)t;
+            a[6] ^= (u8)(t >> 8);
+            memcpy(out + 8 * i, b + 8, 8);
+        }
+    }
+    memcpy(out, a, 8);
+    return 8 * (n + 1);
+}
+
 /* --- the station's side of the conversation ------------------------------------- */
 
 static u8 sent[8][512];
@@ -231,6 +259,42 @@ int main(void)
 
         CHECK((u32)(m4[5] << 8 | m4[6]) == (2u | 0x08u | 0x100u | 0x200u));
         CHECK((u32)(m4[97] << 8 | m4[98]) == 0);        /* nothing in it */
+    }
+
+    /* The group key handshake after it: a new group key, wrapped, under a newer
+     * counter. Answered with that counter and a check value, the key installed on
+     * the worker, the pairwise key and the port left alone. */
+    {
+        u8 kde[24], wrapped[40], gtk2[16];
+        u32 before = sent_count, wl;
+
+        for (i = 0; i < 16; i++)
+            gtk2[i] = (u8)(0x50 + i);
+        kde[0] = 0xDD; kde[1] = 22;
+        kde[2] = 0x00; kde[3] = 0x0F; kde[4] = 0xAC; kde[5] = 0x01;
+        kde[6] = 2; kde[7] = 0;                         /* index 2 */
+        memcpy(kde + 8, gtk2, 16);
+        wl = fake_wrap(wpa_ptk_for_test() + 16, kde, 3, wrapped);
+        counter[7] = 4;
+        n = build(frame, 2 | 0x80 | 0x100 | 0x200 | 0x1000, counter, 0, wrapped, wl);
+        fake_mic(wpa_ptk_for_test(), frame, n);
+        wpa_eapol_in(frame, n);
+        CHECK(wpa_stats.group_rekeys == 1 && sent_count == before + 1);
+        CHECK(wpa_stats.state == WPA_DONE);
+        if (sent_count == before + 1) {
+            const u8 *g2 = sent[before];
+
+            CHECK((u32)(g2[5] << 8 | g2[6]) == (2u | 0x100u | 0x200u));
+            CHECK(!memcmp(g2 + 9, counter, 8));
+            CHECK((u32)(g2[97] << 8 | g2[98]) == 0);
+        }
+        CHECK(wpa_apply() == 1);
+        CHECK(keys_pairwise == 1 && keys_group == 1 && ready_calls == 1);
+
+        /* The same message again: an old counter, no second answer. */
+        before = sent_count;
+        wpa_eapol_in(frame, n);
+        CHECK(sent_count == before && wpa_stats.group_rekeys == 1);
     }
 
     if (failures)
