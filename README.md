@@ -29,14 +29,14 @@ limits): [docs/xedrivers.md](docs/xedrivers.md).
 
 | # | VID:PID | Card name | Card type | Issues |
 |---|---|---|---|---|
-| 1 | by class | any CDC ECM or NCM device | USB Ethernet | [cdc.md](docs/drivers/cdc.md#issues) |
+| 1 | by class | any CDC ECM or NCM device | Ethernet | [cdc.md](docs/drivers/cdc.md#issues) |
 | 2 | `2717:ff80` | Xiaomi phone, Android USB tethering | RNDIS | [rndis.md](docs/drivers/rndis.md#issues) |
-| 3 | `0bda:8156` | Realtek RTL8156, RTL8156B | USB 2.5G Ethernet | [rtl8156.md](docs/drivers/rtl8156.md#issues) |
-| 4 | `0bda:8153`, `045e:07ab`, `045e:07c6`, `045e:0927`, `045e:0c5e`, `04e8:a101`, `17ef:304f`, `17ef:3054`, `17ef:3062`, `17ef:3069`, `17ef:3082`, `17ef:3098`, `17ef:7205`, `17ef:720c`, `17ef:7214`, `17ef:721e`, `17ef:a387`, `13b1:0041`, `0955:09ff`, `2357:0601`, `2001:b301`, `0b05:1976` | Realtek RTL8153, RTL8153B, RTL8153C | USB 1G Ethernet | [rtl8153.md](docs/drivers/rtl8153.md#issues) |
-| 5 | `0b95:1790`, `0b95:178a`, `04b4:3610`, `2001:4a00`, `0df6:0072`, `04e8:a100`, `17ef:304b`, `050d:0128`, `0930:0a13`, `0711:0179`, `07c9:000e`, `07c9:000f`, `07c9:0010` | ASIX AX88179, AX88178A, AX88179A, AX88179B | USB 1G Ethernet | [ax88179.md](docs/drivers/ax88179.md#issues) |
-| 6 | `0b95:1780`, `08dd:0114`, `0411:006e`, `0df6:0056`, `0df6:061c`, `0789:0160`, `1737:0039`, `04bb:0930`, `050d:5055`, `14ea:ab11` | ASIX AX88178 | USB 1G Ethernet | [ax88178.md](docs/drivers/ax88178.md#issues) |
-| 7 | `a69c:8d80`, `a69c:8d81` | AICSemi AIC8800D80 | USB Wi-Fi 6 and Bluetooth | [aic8800.md](docs/drivers/aic8800.md#issues) |
-| 8 | `0bda:b812` | Realtek RTL8822BU | USB Wi-Fi 5 | [rtw8822b.md](docs/drivers/rtw8822b.md#issues) |
+| 3 | `0bda:8156` | Realtek RTL8156, RTL8156B | 2.5G Ethernet | [rtl8156.md](docs/drivers/rtl8156.md#issues) |
+| 4 | `0bda:8153`, `045e:07ab`, `045e:07c6`, `045e:0927`, `045e:0c5e`, `04e8:a101`, `17ef:304f`, `17ef:3054`, `17ef:3062`, `17ef:3069`, `17ef:3082`, `17ef:3098`, `17ef:7205`, `17ef:720c`, `17ef:7214`, `17ef:721e`, `17ef:a387`, `13b1:0041`, `0955:09ff`, `2357:0601`, `2001:b301`, `0b05:1976` | Realtek RTL8153, RTL8153B, RTL8153C | 1G Ethernet | [rtl8153.md](docs/drivers/rtl8153.md#issues) |
+| 5 | `0b95:1790`, `0b95:178a`, `04b4:3610`, `2001:4a00`, `0df6:0072`, `04e8:a100`, `17ef:304b`, `050d:0128`, `0930:0a13`, `0711:0179`, `07c9:000e`, `07c9:000f`, `07c9:0010` | ASIX AX88179, AX88178A, AX88179A, AX88179B | 1G Ethernet | [ax88179.md](docs/drivers/ax88179.md#issues) |
+| 6 | `0b95:1780`, `08dd:0114`, `0411:006e`, `0df6:0056`, `0df6:061c`, `0789:0160`, `1737:0039`, `04bb:0930`, `050d:5055`, `14ea:ab11` | ASIX AX88178 | 1G Ethernet | [ax88178.md](docs/drivers/ax88178.md#issues) |
+| 7 | `a69c:8d80`, `a69c:8d81` | AICSemi AIC8800D80 | Wi-Fi 6 and Bluetooth | [aic8800.md](docs/drivers/aic8800.md#issues) |
+| 8 | `0bda:b812` | Realtek RTL8822BU | Wi-Fi 5 | [rtw8822b.md](docs/drivers/rtw8822b.md#issues) |
 
 The RNDIS driver matches by class. Row 2 is the phone that was tested; other
 Android phones that tether over RNDIS should work too.
