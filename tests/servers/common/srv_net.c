@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,6 +139,16 @@ s32 srv_sendto(SRV_SOCK s, const void *buffer, u32 length, u32 address, u32 port
     a.sin_addr.s_addr = htonl(address);
     return sendto(s, buffer, length, 0, (struct sockaddr *)&a, sizeof(a)) < 0 ? -1
                                                                              : (s32)length;
+}
+
+s32 srv_wait(SRV_SOCK s, u32 ms)
+{
+    struct pollfd p;
+
+    p.fd = s;
+    p.events = POLLIN;
+    p.revents = 0;
+    return poll(&p, 1, (int)ms);
 }
 
 void srv_close(SRV_SOCK s)

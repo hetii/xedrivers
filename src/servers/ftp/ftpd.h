@@ -12,6 +12,9 @@
 #define SESSIONS_MAX    8
 #define LINE_MAX        1024u
 #define DATA_BUF        65536u          /* one srv_read / srv_write a time */
+#define IDLE_MS         600000u         /* a control connection silent this long goes */
+#define ACCEPT_MS       30000u          /* for the client to open a passive connection */
+#define STALL_MS        60000u          /* a transfer with nothing coming */
 
 extern FTP_CONFIG ftp_cfg;
 

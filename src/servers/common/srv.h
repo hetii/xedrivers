@@ -52,6 +52,10 @@ s32  srv_send(SRV_SOCK s, const void *buffer, u32 length);
 s32  srv_recvfrom(SRV_SOCK s, void *buffer, u32 length, u32 *address, u32 *port);
 s32  srv_sendto(SRV_SOCK s, const void *buffer, u32 length, u32 address, u32 port);
 void srv_close(SRV_SOCK s);
+/* 1 when `s` has something to read (a listener: a connection to accept), 0 after
+ * `ms` without, < 0 on error: before a call that would wait for a client that
+ * may never come. */
+s32  srv_wait(SRV_SOCK s, u32 ms);
 /* The local address (host order) a connection arrived on: FTP's PASV answer. */
 u32  srv_local_address(SRV_SOCK s);
 /* The port a listener bound to (0 asked for any). */

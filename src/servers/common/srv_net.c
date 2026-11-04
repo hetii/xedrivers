@@ -23,6 +23,8 @@ extern int NetDll_recvfrom(u32 caller, u32 socket, void *buffer, int length, int
 extern int NetDll_sendto(u32 caller, u32 socket, const void *buffer, int length, int flags,
                          const void *to, int to_length);
 extern int NetDll_XNetGetTitleXnAddr(u32 caller, void *xnaddr);
+extern int NetDll_select(u32 caller, int nfds, void *readfds, void *writefds, void *exceptfds,
+                         const void *timeout);
 
 #define CALLER_SYSAPP   2
 #define AF_INET         2
@@ -189,6 +191,24 @@ s32 srv_sendto(SRV_SOCK s, const void *buffer, u32 length, u32 address, u32 port
         a.zero[i] = 0;
     return NetDll_sendto(CALLER_SYSAPP, (u32)s, buffer, (int)length, 0, &a, sizeof(a)) < 0
                ? -1 : (s32)length;
+}
+
+/* Winsock's fd_set and timeval, as xnet takes them. */
+s32 srv_wait(SRV_SOCK s, u32 ms)
+{
+    struct {
+        u32 count;
+        u32 sockets[1];
+    } set;
+    struct {
+        s32 sec, usec;
+    } t;
+
+    set.count = 1;
+    set.sockets[0] = (u32)s;
+    t.sec = (s32)(ms / 1000);
+    t.usec = (s32)(ms % 1000 * 1000);
+    return NetDll_select(CALLER_SYSAPP, 0, &set, 0, 0, &t);
 }
 
 void srv_close(SRV_SOCK s)

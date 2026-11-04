@@ -54,6 +54,8 @@ static u32 allowed(u32 peer)
            (peer & nfs_cfg.allow_mask) == (nfs_cfg.allow & nfs_cfg.allow_mask);
 }
 
+#define IDLE_MS     900000u     /* a connection silent this long is closed */
+
 static s32 recv_all(SRV_SOCK s, u8 *p, u32 n)
 {
     u32 got = 0;
@@ -74,6 +76,8 @@ static s32 recv_record(CONN *c)
     u8 mark[4];
     u32 len = 0, frag, last;
 
+    if (srv_wait(c->sock, IDLE_MS) <= 0)    /* between calls: an idle client goes */
+        return -1;
     do {
         if (recv_all(c->sock, mark, 4) < 0)
             return -1;

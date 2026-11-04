@@ -78,7 +78,7 @@ static SRV_SOCK open_data(SESSION *s, const char *what)
     u32 peer;
 
     reply3(s, 150, "Opening data connection for ", what, "");
-    if (s->data_mode == DATA_PASSIVE)
+    if (s->data_mode == DATA_PASSIVE && srv_wait(s->pasv, ACCEPT_MS) > 0)
         d = srv_accept(s->pasv, &peer);
     else if (s->data_mode == DATA_ACTIVE)
         d = srv_connect(s->port_address, s->port_port);
@@ -224,6 +224,10 @@ static void stor(SESSION *s, const char *path, u32 append)
         return;
     }
     for (;;) {
+        if (srv_wait(d, STALL_MS) <= 0) {
+            n = -1;
+            break;
+        }
         n = srv_recv(d, s->buf, DATA_BUF);
         if (n <= 0)
             break;

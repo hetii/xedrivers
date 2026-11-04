@@ -195,6 +195,10 @@ static s32 read_line(SESSION *s, char *line)
             }
         if (s->in_len == LINE_MAX)          /* too long: thrown away */
             s->in_len = 0;
+        if (srv_wait(s->ctrl, IDLE_MS) <= 0) {
+            reply(s, 421, "Idle too long");
+            return -1;
+        }
         k = srv_recv(s->ctrl, s->in + s->in_len, LINE_MAX - s->in_len);
         if (k <= 0)
             return -1;
