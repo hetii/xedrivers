@@ -1,5 +1,5 @@
 /* The server's internals, shared by its files; users of the server have nfs.h.
- *   server.c    start, sockets (TCP records, datagrams), RPC, XDR
+ *   nfs.c       start, sockets (TCP records, datagrams), RPC, XDR
  *   portmap.c   the portmapper and rpcbind, MOUNT
  *   handle.c    file handles and attributes
  *   nfs3.c      NFS v3 on files and the file system; nfs3_dir.c on directories */

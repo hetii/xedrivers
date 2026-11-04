@@ -235,8 +235,16 @@ static void sweeper(void *arg)
     }
 }
 
+/* Another server (or this one) about to remove, rename or truncate a name. */
+static void keeper(const char *root, const char *path)
+{
+    if (str_eq(root, nfs_cfg.root))
+        nfs3_forget(path);
+}
+
 s32 nfs3_files_start(void)
 {
+    srv_keeper(keeper);
     return srv_thread(sweeper, 0);
 }
 

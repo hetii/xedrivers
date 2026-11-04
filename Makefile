@@ -78,8 +78,8 @@ BENCH_FLAGS := -D XE_BENCH=$(if $(BENCH_LIST),1,0) \
 
 # servers= names the file servers to build in, comma-separated, each a directory of
 # src/servers/ on the platform of src/servers/common/: nfs (NFSv3 with MOUNT and a
-# portmapper); `all` for every one. Empty, the default: no server, no xam sockets.
-SERVERS_ALL  := nfs
+# portmapper), ftp; `all` for every one. Empty, the default: no server, no xam sockets.
+SERVERS_ALL  := nfs ftp
 SERVERS_LIST := $(sort $(if $(filter all,$(subst $(comma), ,$(servers))),$(SERVERS_ALL),\
                 $(subst $(comma), ,$(servers))))
 $(if $(filter-out $(SERVERS_ALL),$(SERVERS_LIST)),\
@@ -224,6 +224,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
 test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis \
       $(BUILD)/test_asix $(BUILD)/test_ax88179 $(BUILD)/test_ax88178 $(BUILD)/test_nfs \
+      $(BUILD)/test_ftp \
       $(BUILD)/test_aic $(BUILD)/test_wpa $(BUILD)/test_reorder \
       $(BUILD)/test_bridge $(BUILD)/test_omni
 	@$(BUILD)/test_cdc
@@ -234,6 +235,7 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
 	@$(BUILD)/test_ax88179
 	@$(BUILD)/test_ax88178
 	@$(BUILD)/test_nfs
+	@$(BUILD)/test_ftp
 	@AIC_FW=$(FW_DIR)/aic8800D80 $(BUILD)/test_aic
 	@$(BUILD)/test_wpa
 	@$(BUILD)/test_reorder
@@ -275,12 +277,19 @@ $(BUILD)/test_ax88178: tests/drivers/ax88178/test_ax88178.c src/drivers/ax88178/
 
 # The file servers on the host: src/servers/<name>/ on tests/servers/common's POSIX
 # platform, mounted with the PC's own clients (skipped where sudo cannot mount).
-SERVERS_HOST := $(wildcard tests/servers/common/*.c)
+SERVERS_HOST := $(wildcard tests/servers/common/*.c) src/servers/common/srv_keep.c
 $(BUILD)/test_nfs: tests/servers/nfs/test_nfs.c $(wildcard src/servers/nfs/*.c) \
                    $(SERVERS_HOST) $(HEADERS)
 	@mkdir -p $(BUILD)
 	gcc -std=gnu99 -Wall -Wextra -O2 -I src/core -I src/servers/common -I src/servers/nfs \
 	    -o $@ tests/servers/nfs/test_nfs.c $(wildcard src/servers/nfs/*.c) \
+	    $(SERVERS_HOST) -lpthread
+
+$(BUILD)/test_ftp: tests/servers/ftp/test_ftp.c $(wildcard src/servers/ftp/*.c) \
+                   $(SERVERS_HOST) $(HEADERS)
+	@mkdir -p $(BUILD)
+	gcc -std=gnu99 -Wall -Wextra -O2 -I src/core -I src/servers/common -I src/servers/ftp \
+	    -o $@ tests/servers/ftp/test_ftp.c $(wildcard src/servers/ftp/*.c) \
 	    $(SERVERS_HOST) -lpthread
 
 $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c $(HEADERS)

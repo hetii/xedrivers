@@ -157,6 +157,8 @@ s32 srv_open(const char *root, const char *path, u32 mode, SRV_FILE *out)
     u32 n = full_path(full, root, path), status, access = 0, disposition = FILE_OPEN;
     void *h;
 
+    if (mode & SRV_TRUNC)
+        srv_forget(root, path);
     if (!n)
         return SRV_ENAMETOOLONG;
     if (mode & SRV_READ)
@@ -263,6 +265,7 @@ s32 srv_truncate(const char *root, const char *path, u32 size_lo, u32 size_hi)
 {
     s64 size = (s64)((u64)size_hi << 32 | size_lo);
 
+    srv_forget(root, path);
     return set_info(root, path, GENERIC_WRITE, FILE_NON_DIRECTORY_FILE, &size, 8, 20);
 }
 
@@ -291,6 +294,7 @@ static s32 nt_delete(const char *root, const char *path, u32 want_dir)
     u32 n = full_path(full, root, path), status;
     s32 e;
 
+    srv_forget(root, path);
     if (!n)
         return SRV_ENAMETOOLONG;
     e = srv_stat(root, path, &st);
@@ -326,6 +330,8 @@ s32 srv_rename(const char *root, const char *from, const char *to)
     char full_to[FULL_MAX];
     u32 n = full_path(full_to, root, to);
 
+    srv_forget(root, from);
+    srv_forget(root, to);
     if (!n)
         return SRV_ENAMETOOLONG;
     info.replace = 1;

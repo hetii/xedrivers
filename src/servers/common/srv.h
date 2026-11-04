@@ -114,6 +114,14 @@ void srv_closedir(SRV_DIR d);
 s32  srv_volume(const char *root, u32 *total_lo, u32 *total_hi, u32 *free_lo,
                 u32 *free_hi);
 
+/* A server that keeps files open between calls names what closes them: called
+ * with a root and a path (the name, or a directory above names), by srv_unlink,
+ * srv_rmdir, srv_rename, srv_truncate and a truncating srv_open before they act,
+ * whichever server calls them (FATX does not reliably remove an open file). */
+void srv_keeper(void (*forget)(const char *root, const char *path));
+/* What the platform calls (srv_keep.c). */
+void srv_forget(const char *root, const char *path);
+
 /* --- memory ------------------------------------------------------------------ */
 
 /* Zeroed memory; 0 if there is none. */

@@ -62,6 +62,8 @@ s32 srv_open(const char *root, const char *path, u32 mode, SRV_FILE *out)
     char p[4096];
     int flags = (mode & SRV_WRITE) ? ((mode & SRV_READ) ? O_RDWR : O_WRONLY) : O_RDONLY, fd;
 
+    if (mode & SRV_TRUNC)
+        srv_forget(root, path);
     if (mode & SRV_CREATE)
         flags |= O_CREAT;
     if (mode & SRV_EXCL)
@@ -116,6 +118,7 @@ s32 srv_truncate(const char *root, const char *path, u32 size_lo, u32 size_hi)
 {
     char p[4096];
 
+    srv_forget(root, path);
     join(p, root, path);
     return truncate(p, (off_t)((unsigned long long)size_hi << 32 | size_lo)) < 0 ? err()
                                                                                  : SRV_OK;
@@ -133,6 +136,7 @@ s32 srv_rmdir(const char *root, const char *path)
 {
     char p[4096];
 
+    srv_forget(root, path);
     join(p, root, path);
     return rmdir(p) < 0 ? err() : SRV_OK;
 }
@@ -141,6 +145,7 @@ s32 srv_unlink(const char *root, const char *path)
 {
     char p[4096];
 
+    srv_forget(root, path);
     join(p, root, path);
     return unlink(p) < 0 ? err() : SRV_OK;
 }
@@ -149,6 +154,8 @@ s32 srv_rename(const char *root, const char *from, const char *to)
 {
     char a[4096], b[4096];
 
+    srv_forget(root, from);
+    srv_forget(root, to);
     join(a, root, from);
     join(b, root, to);
     return rename(a, b) < 0 ? err() : SRV_OK;

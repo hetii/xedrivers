@@ -7,6 +7,11 @@
  *   nfs_root   = <object path>  (\Device\Harddisk0\Partition1) the exported directory
  *   nfs_allow  = a.b.c.d/n      (anyone) the clients let in
  *   nfs_handles = <count>       (16384) names clients may hold handles to, 80 B each
+ *   ftp        = 0 | 1          (1) serve FTP
+ *   ftp_root   = <object path>  (\Device\Harddisk0\Partition1) the directory served as /
+ *   ftp_port   = <port>         (21) taken from another server only once it lets go
+ *   ftp_user, ftp_pass          (none) the login; without a user any login is taken
+ *   ftp_allow  = a.b.c.d/n      (anyone) the clients let in
  *   srv_delay  = <seconds>      (30) after boot before the first start
  */
 
@@ -14,6 +19,9 @@
 #include "srv.h"
 #if XE_SERVER_NFS
 #include "nfs.h"
+#endif
+#if XE_SERVER_FTP
+#include "ftp.h"
 #endif
 
 #define TICKS_PER_SECOND 50u
@@ -57,36 +65,79 @@ static u32 parse_net(const char *s, u32 *address, u32 *mask)
     return 1;
 }
 
-static void starter(void *arg)
+/* A setting, or `fallback` when the ini has none. */
+static void setting(const char *key, char *out, u32 size, const char *fallback)
 {
-    u32 tries = 0;
+    u32 i;
+
+    if (srv_setting(key, out, size))
+        return;
+    for (i = 0; fallback[i] && i + 1 < size; i++)
+        out[i] = fallback[i];
+    out[i] = 0;
+}
+
+#define HDD "\\Device\\Harddisk0\\Partition1"
+
+#if XE_SERVER_NFS
+static void start_nfs(void *arg)
+{
+    static char root[SRV_PATH_MAX];
+    char allow[32];
+    NFS_CONFIG c;
+    u32 tries;
 
     (void)arg;
-#if XE_SERVER_NFS
-    if (srv_setting_u32("nfs", 1)) {
-        static char root[SRV_PATH_MAX];
-        char allow[32];
-        NFS_CONFIG c;
-
-        c.port = c.portmap_port = c.allow = c.allow_mask = 0;
-        c.handles = srv_setting_u32("nfs_handles", 0);
-
-        if (!srv_setting("nfs_root", root, sizeof(root))) {
-            const char *d = "\\Device\\Harddisk0\\Partition1";
-            u32 i;
-
-            for (i = 0; d[i]; i++)
-                root[i] = d[i];
-            root[i] = 0;
-        }
-        c.root = root;
-        if (srv_setting("nfs_allow", allow, sizeof(allow)))
-            parse_net(allow, &c.allow, &c.allow_mask);
-        for (tries = 0; tries < RETRIES && nfs_start(&c) != 0; tries++)
-            srv_sleep(RETRY_MS);
-    }
+    if (!srv_setting_u32("nfs", 1))
+        return;
+    c.port = c.portmap_port = c.allow = c.allow_mask = 0;
+    c.handles = srv_setting_u32("nfs_handles", 0);
+    setting("nfs_root", root, sizeof(root), HDD);
+    c.root = root;
+    if (srv_setting("nfs_allow", allow, sizeof(allow)))
+        parse_net(allow, &c.allow, &c.allow_mask);
+    for (tries = 0; tries < RETRIES && nfs_start(&c) != 0; tries++)
+        srv_sleep(RETRY_MS);
+}
 #endif
-    (void)tries;
+
+#if XE_SERVER_FTP
+static void start_ftp(void *arg)
+{
+    static char root[SRV_PATH_MAX], user[64], password[64];
+    char allow[32];
+    FTP_CONFIG c;
+    u32 tries;
+
+    (void)arg;
+    if (!srv_setting_u32("ftp", 1))
+        return;
+    c.port = srv_setting_u32("ftp_port", FTP_PORT_DEFAULT);
+    c.allow = c.allow_mask = 0;
+    setting("ftp_root", root, sizeof(root), HDD);
+    setting("ftp_user", user, sizeof(user), "");
+    setting("ftp_pass", password, sizeof(password), "");
+    c.root = root;
+    c.user = user;
+    c.password = password;
+    if (srv_setting("ftp_allow", allow, sizeof(allow)))
+        parse_net(allow, &c.allow, &c.allow_mask);
+    for (tries = 0; tries < RETRIES && ftp_start(&c) != 0; tries++)
+        srv_sleep(RETRY_MS);
+}
+#endif
+
+/* Each server started on a thread of its own: one waiting for its port (another
+ * FTP server on 21, say) keeps no other waiting. */
+static void starter(void *arg)
+{
+    (void)arg;
+#if XE_SERVER_NFS
+    srv_thread(start_nfs, 0);
+#endif
+#if XE_SERVER_FTP
+    srv_thread(start_ftp, 0);
+#endif
 }
 
 void servers_tick(u32 tick)
