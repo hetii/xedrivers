@@ -76,6 +76,17 @@ BENCH_FLAGS := -D XE_BENCH=$(if $(BENCH_LIST),1,0) \
                -D XE_BENCH_DEBUG=$(call bench_on,debug) \
                -D XE_PROF=$(call bench_on,prof) -D XE_TCP=$(call bench_on,tcp)
 
+# servers= names the file servers to build in, comma-separated, each a directory of
+# src/servers/ on the platform of src/servers/common/: nfs (NFSv3 with MOUNT and a
+# portmapper); `all` for every one. Empty, the default: no server, no xam sockets.
+SERVERS_ALL  := nfs
+SERVERS_LIST := $(sort $(if $(filter all,$(subst $(comma), ,$(servers))),$(SERVERS_ALL),\
+                $(subst $(comma), ,$(servers))))
+$(if $(filter-out $(SERVERS_ALL),$(SERVERS_LIST)),\
+    $(error servers= knows $(SERVERS_ALL) and all, not $(filter-out $(SERVERS_ALL),$(SERVERS_LIST))))
+SERVERS_FLAGS := -D XE_SERVERS=$(if $(SERVERS_LIST),1,0) \
+                 $(foreach v,$(SERVERS_ALL),-D XE_SERVER_$(shell echo $(v) | tr a-z A-Z)=$(if $(filter $(v),$(SERVERS_LIST)),1,0))
+
 BUILD    ?= build
 
 # The core, every driver directory in DRIVERS (all of src/drivers/ by default),
@@ -94,7 +105,8 @@ DRIVERS  ?= $(filter-out common,$(notdir $(patsubst %/,%,$(wildcard src/drivers/
 DRIVER_DIRS := $(sort $(DRIVERS) $(foreach d,$(DRIVERS),$(NEEDS_$(d))))
 SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
             $(addprefix src/drivers/,$(DRIVER_DIRS)) \
-            $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST)))
+            $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST))) \
+            $(if $(SERVERS_LIST),src/servers src/servers/common $(addprefix src/servers/,$(SERVERS_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h src/*/*/*/*.h)
 INCLUDES := $(addprefix -I ,$(SRC_DIRS))
@@ -147,7 +159,7 @@ export FIRMWARE
 # console says what it was built from (tools/xectl.py status, bench --record).
 GIT_COMMIT := $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-8),0)
 GIT_DIRTY  := $(if $(shell git status --porcelain --untracked-files=no 2>/dev/null),1,0)
-FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE)/$(NTB_IN_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST))
+FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE)/$(NTB_IN_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST)) servers=$(subst $(space),$(comma),$(SERVERS_LIST))
 
 .PHONY: all firmware clean test lint kit push push-fw deploy
 
@@ -177,7 +189,8 @@ FORCE:
 
 # One ordinal table per module the plugin may import from, each naming its module
 # and identity in its header; the packer looks every import up in all of them and
-# gives a module a record only when something is imported from it (xam: bench=tcp).
+# gives a module a record only when something is imported from it (xam: bench=tcp,
+# servers=).
 TABLES := $(KIT)/ordinals-xboxkrnl-$(ORDINALS).txt $(KIT)/ordinals-xam-$(ORDINALS).txt
 
 $(BUILD)/drivers.generated.c: $(BUILD)/flags
@@ -200,7 +213,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) -D NTB_IN_SIZE=$(NTB_IN_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
-	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u $(BENCH_FLAGS) \
+	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u $(BENCH_FLAGS) $(SERVERS_FLAGS) \
 	    -D XE_BUILD_COMMIT=0x$(GIT_COMMIT)u -D XE_BUILD_DIRTY=$(GIT_DIRTY)u \
 	    --name $(NAME).dll --into $(BUILD)
 	@mv $(BUILD)/plugin.xex $@

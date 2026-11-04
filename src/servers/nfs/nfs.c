@@ -974,11 +974,13 @@ static void listener(void *arg)
 static void datagrams(void *arg)
 {
     SRV_SOCK s = (SRV_SOCK)(long)arg;
-    CONN udp_conn = { 0 };              /* one a thread: 2049 and 111 each have one */
+    CONN udp_conn;                      /* one a thread: 2049 and 111 each have one */
     u8 *in = (u8 *)srv_alloc(UDP_SIZE), *out = (u8 *)srv_alloc(UDP_SIZE);
     u32 address, port, n;
     s32 got;
 
+    udp_conn.file = 0;
+    udp_conn.file_path[0] = 0;
     if (!in || !out)
         return;
     for (;;) {
@@ -1009,13 +1011,18 @@ s32 nfs_start(const NFS_CONFIG *config)
         cfg.portmap_port = PORTMAP_PORT_DEFAULT;
     str_copy(root, cfg.root, SRV_PATH_MAX);
     cfg.root = root;
-    handles = (HANDLE *)srv_alloc(HANDLES * sizeof(HANDLE));
+    if (!handles)
+        handles = (HANDLE *)srv_alloc(HANDLES * sizeof(HANDLE));
     if (!handles)
         return -1;
 
     s = srv_listen(cfg.port, CONN_MAX);
-    if (s < 0 || srv_thread(listener, (void *)(long)s))
+    if (s < 0)
+        return -1;                      /* the network not up yet: asked again later */
+    if (srv_thread(listener, (void *)(long)s)) {
+        srv_close(s);
         return -1;
+    }
     s = srv_udp(cfg.port);
     if (s >= 0)
         srv_thread(datagrams, (void *)(long)s);

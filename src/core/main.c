@@ -26,6 +26,7 @@
 #include "file.h"
 #include "net.h"
 #include "bench.h"
+#include "servers.h"
 
 #define XE_VERSION 0x00020000u
 
@@ -181,6 +182,7 @@ static void worker(void *parameter)
             }
         }
         net_tick();
+        servers_tick(tick);
 
         what = xe_cmd[0];
         if (what) {
