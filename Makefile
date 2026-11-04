@@ -275,12 +275,13 @@ $(BUILD)/test_ax88178: tests/drivers/ax88178/test_ax88178.c src/drivers/ax88178/
 
 # The file servers on the host: src/servers/<name>/ on tests/servers/common's POSIX
 # platform, mounted with the PC's own clients (skipped where sudo cannot mount).
-$(BUILD)/test_nfs: tests/servers/nfs/test_nfs.c src/servers/nfs/nfs.c \
-                   tests/servers/common/srv.c $(HEADERS)
+SERVERS_HOST := $(wildcard tests/servers/common/*.c)
+$(BUILD)/test_nfs: tests/servers/nfs/test_nfs.c $(wildcard src/servers/nfs/*.c) \
+                   $(SERVERS_HOST) $(HEADERS)
 	@mkdir -p $(BUILD)
 	gcc -std=gnu99 -Wall -Wextra -O2 -I src/core -I src/servers/common -I src/servers/nfs \
-	    -o $@ tests/servers/nfs/test_nfs.c src/servers/nfs/nfs.c \
-	    tests/servers/common/srv.c -lpthread
+	    -o $@ tests/servers/nfs/test_nfs.c $(wildcard src/servers/nfs/*.c) \
+	    $(SERVERS_HOST) -lpthread
 
 $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c $(HEADERS)
 	@mkdir -p $(BUILD)

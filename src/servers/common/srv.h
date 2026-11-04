@@ -3,9 +3,10 @@
  * drivers, the network layer or xnet's internals, so a server can be lifted into
  * another project with this header and an implementation of it.
  *
- * The console's implementation is srv.c (xam's sockets, the kernel's threads
- * and files). The host tests (tests/servers/) build the same servers on a POSIX
- * implementation of this header that lives with them; nothing here is for the PC.
+ * The console's implementation is srv_net.c (xam's sockets), srv_file.c (the
+ * kernel's files) and srv_sys.c (threads, memory, time, settings). The host tests
+ * build the same servers on a POSIX implementation of this header under the same
+ * names in tests/servers/common/; nothing here is for the PC.
  *
  * Paths are the server's own: '/'-separated, relative to the root it was given,
  * never with "..". Errors are SRV_E* (negative), success 0 or a count.
@@ -55,6 +56,9 @@ void srv_close(SRV_SOCK s);
 u32  srv_local_address(SRV_SOCK s);
 /* The port a listener bound to (0 asked for any). */
 u32  srv_local_port(SRV_SOCK s);
+/* The console's own address (host order) as `peer` reaches it: a datagram socket
+ * bound to every address has none of its own to tell (rpcbind's GETADDR). */
+u32  srv_host_address(u32 peer);
 
 /* --- threads ----------------------------------------------------------------- */
 

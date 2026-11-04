@@ -2,7 +2,8 @@
  * a high port over a temporary directory, mounted with the PC's own NFS client
  * (sudo mount -t nfs, vers=3 over TCP), and driven with ordinary file calls on the
  * mount -- written, read, listed, renamed, truncated, removed -- each checked in the
- * exported directory itself. Skipped when sudo cannot mount. Built and run by
+ * exported directory itself. Skipped without mount.nfs (nfs-common) or where sudo
+ * cannot mount. Built and run by
  * `make test`. */
 
 #define _GNU_SOURCE
@@ -49,8 +50,9 @@ int main(void)
     struct dirent *e;
     int i, found = 0;
 
-    if (run("sudo -n mount -V >/dev/null 2>&1") != 0 || run("sudo -n modprobe nfs 2>/dev/null") != 0) {
-        printf("nfs test skipped: sudo cannot mount here\n");
+    if (run("test -x /sbin/mount.nfs || test -x /usr/sbin/mount.nfs") != 0 ||
+        run("sudo -n mount -V >/dev/null 2>&1") != 0 || run("sudo -n modprobe nfs 2>/dev/null") != 0) {
+        printf("nfs test skipped: no NFS client here, or sudo cannot mount\n");
         return 0;
     }
     if (!mkdtemp(export_dir) || !mkdtemp(mnt)) {
