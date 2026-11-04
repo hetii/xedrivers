@@ -61,7 +61,7 @@ IP_VALUE   := $(shell python3 -c "import ipaddress,sys; print(hex(int(ipaddress.
 comma      := ,
 empty      :=
 space      := $(empty) $(empty)
-BENCH_ALL  := history stack debug prof tcp
+BENCH_ALL  := history stack debug prof tcp trace
 BENCH_ASKED := $(subst $(comma), ,$(bench))
 BENCH_LIST := $(sort $(if $(filter all,$(BENCH_ASKED)),$(BENCH_ALL),$(BENCH_ASKED)))
 $(if $(filter-out $(BENCH_ALL),$(BENCH_LIST)),\
@@ -71,6 +71,7 @@ $(if $(filter standalone,$(MODE)),$(if $(filter stack,$(BENCH_LIST)),,\
 bench_on    = $(if $(filter $(1),$(BENCH_LIST)),1,0)
 BENCH_FLAGS := -D XE_BENCH=$(if $(BENCH_LIST),1,0) \
                -D XE_BENCH_HISTORY=$(call bench_on,history) \
+-D XE_BENCH_TRACE=$(call bench_on,trace) \
                -D XE_BENCH_STACK=$(call bench_on,stack) \
                -D XE_BENCH_DEBUG=$(call bench_on,debug) \
                -D XE_PROF=$(call bench_on,prof) -D XE_TCP=$(call bench_on,tcp)

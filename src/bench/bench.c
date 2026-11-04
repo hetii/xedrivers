@@ -6,6 +6,9 @@
 #include "bench.h"
 #include "config.h"
 #include "prof.h"
+#if XE_BENCH_TRACE
+#include "trace.h"
+#endif
 #if XE_BENCH_HISTORY
 #include "history.h"
 #endif
@@ -48,6 +51,9 @@ void bench_tick(u32 tick)
     PROF_STAMP();
 #if XE_BENCH_HISTORY
     history_tick(tick);
+#endif
+#if XE_BENCH_TRACE
+    trace_tick(tick);
 #endif
 #if XE_BENCH_DEBUG
     debug_tick(tick);
@@ -154,6 +160,15 @@ void bench_frame_in(const u8 *frame, u32 length)
  * `xerunner flash read-uart`. */
 #define UART_DATA   ((volatile u32 *)0x7FEA1014u)
 #define UART_STATUS ((volatile u32 *)0x7FEA1018u)
+
+void bench_event(u32 code, u32 a, u32 b, u32 c)
+{
+#if XE_BENCH_TRACE
+    trace_event(code, a, b, c);
+#else
+    (void)code; (void)a; (void)b; (void)c;
+#endif
+}
 
 void bench_trace(const char *mark)
 {

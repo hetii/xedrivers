@@ -188,6 +188,7 @@ static u32 card_scan(void *context)
 
 static void link_down(WL_STA *s)
 {
+    bench_event(4, s->state, s->st->beacon_losses, (u32)__builtin_return_address(0));
     wl_sta_ba_reset(s);
     s->port_open = 0;
     s->pairwise_set = 0;

@@ -145,6 +145,8 @@ static void choose(void)
     }
     if (best == current)
         return;
+    bench_event(2, current ? (u32)(current - net_devs) + 1 : 0,
+                best ? (u32)(best - net_devs) + 1 : 0, (u32)__builtin_return_address(0));
     if (current && best) {
         net_active = 0;
         switch_ticks = 0;
@@ -209,6 +211,7 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
 
 void net_link_report(NET_DEV *nd, u32 up)
 {
+    bench_event(1, (u32)(nd - net_devs), up, (u32)__builtin_return_address(0));
     if (!up)
         nd->link_down_seen = 1;
     set_link(nd, up);
@@ -471,8 +474,10 @@ void net_tick(void)
         if (nd->drv && nd->drv->tick && nd->st->ready)
             nd->drv->tick(nd);
     }
-    if (xnet_tick_stalled() && uplink())
+    if (xnet_tick_stalled() && uplink()) {
+        bench_event(3, (u32)(uplink() - net_devs), xnet_stats.xq_stall_depth, 0);
         net_link_report(uplink(), 0);
+    }
 }
 
 /* A driver's own command goes to the uplink's driver if it answers it, else to the
