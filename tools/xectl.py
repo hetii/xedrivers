@@ -96,6 +96,13 @@ STRUCTS = {
                     "link_resets", "rx_transfers", "rx_bad", "rx_bad_frames", "intr_events",
                     "intr_errors", "tx_transfers", "tx_too_big", "family_a", "chip_status",
                     "firmware", "intr_link"],
+    "nfs_stats": ["started", "connections", "active", "calls", "bad_calls", "refused",
+                  "reads", "read_bytes_lo", "read_bytes_hi", "writes", "write_bytes_lo",
+                  "write_bytes_hi", "stale", "handles", "handles_full", "portmap_calls",
+                  "mounts", "commits", "opens", "listings"],
+    "ftp_stats": ["started", "sessions", "active", "refused", "bad_logins", "commands",
+                  "retrs", "stors", "lists", "sent_lo", "sent_hi", "received_lo",
+                  "received_hi", "data_failed"],
     "rndis_stats": ["init_status", "max_packets", "max_transfer", "alignment",
                     "filter_status", "media_status", "link_speed", "control_polls",
                     "keepalives", "indications", "last_indication", "rx_transfers",
@@ -556,6 +563,25 @@ def status(sym):
                           a["bmsr"], a["lpa"], a["stat1000"], a["medium"], a["link_checks"],
                           a["rx_transfers"], a["rx_resyncs"], a["intr_events"], a["intr_errors"],
                           a["tx_transfers"], a["tx_too_big"], a["mii_errors"]))
+    if "nfs_stats" in sym:
+        n = read_struct(sym, "nfs_stats")
+        print("nfs      started=%d conns=%d active=%d calls=%d bad=%d refused=%d mounts=%d "
+              "read=%d/%dMB write=%d/%dMB commits=%d opens=%d listings=%d handles=%d full=%d "
+              "stale=%d portmap=%d" % (
+                  n["started"], n["connections"], n["active"], n["calls"], n["bad_calls"],
+                  n["refused"], n["mounts"], n["reads"],
+                  (n["read_bytes_hi"] << 32 | n["read_bytes_lo"]) >> 20, n["writes"],
+                  (n["write_bytes_hi"] << 32 | n["write_bytes_lo"]) >> 20, n["commits"],
+                  n["opens"], n["listings"], n["handles"], n["handles_full"], n["stale"],
+                  n["portmap_calls"]))
+    if "ftp_stats" in sym:
+        f = read_struct(sym, "ftp_stats")
+        print("ftp      started=%d sessions=%d active=%d refused=%d bad_logins=%d commands=%d "
+              "retr=%d/%dMB stor=%d/%dMB lists=%d data_failed=%d" % (
+                  f["started"], f["sessions"], f["active"], f["refused"], f["bad_logins"],
+                  f["commands"], f["retrs"], (f["sent_hi"] << 32 | f["sent_lo"]) >> 20,
+                  f["stors"], (f["received_hi"] << 32 | f["received_lo"]) >> 20, f["lists"],
+                  f["data_failed"]))
     if ss:
         print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
             ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],

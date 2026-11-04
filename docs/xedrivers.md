@@ -13,6 +13,8 @@ console itself.
 | `src/drivers/<d>/` | one directory per driver, one `XE_DRIVER` each |
 | `src/drivers/common/<name>/` | code shared by one maker's drivers, not drivers (everything under `common/`); what each driver needs is `NEEDS_<driver>` in the Makefile |
 | `src/bench/<t>/` | measuring and tuning tools, only with `bench=` |
+| `src/servers/<s>/` | file servers ([nfs](servers/nfs.md), [ftp](servers/ftp.md)), only with `servers=`; they use nothing but `src/servers/common/srv.h` |
+| `src/servers/common/` | the servers' platform: `srv.h`, its console side (`srv_net.c`, `srv_file.c`, `srv_sys.c`), `srv_keep.c`, `str.h`; the host side is in `tests/servers/common/` |
 | `tests/` | host unit tests, beside the code: `tests/core/`, `tests/drivers/<d>/` |
 
 ## Drivers

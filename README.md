@@ -100,6 +100,7 @@ make TRANSPORT=ncm           # CDC transport: ecm (default) or ncm
 make ADVERTISE=1000          # fastest Ethernet link offered: 2500 (default), 1000, 100, default
 make bench=tcp               # with the bench tools named, see below
 make bench=all               # with every bench tool
+make servers=nfs,ftp         # with the file servers named, see "File servers"
 make MODE=standalone IP=10.36.0.2 bench=stack
 ```
 
@@ -120,8 +121,9 @@ make push-fw PI=root@host    # copy the package's firmware there
 make deploy HOST=...         # push, then boot it with xerunner console test-plugin
 ```
 
-A release build is made by GitHub Actions (`.github/workflows/build.yml`): every
-run keeps the package as an artifact, and a tag `v*` publishes it as a release.
+A build runs on GitHub Actions (`.github/workflows/build.yml`) only when started
+by hand from `main` (Actions -> build -> Run workflow). The run keeps the package
+as an artifact.
 
 Every build records the commit it was made from. `tools/xectl.py status` shows it
 as "built from", with a mark when the tree had uncommitted changes.
@@ -277,6 +279,27 @@ tools/xectl.py transport ecm|ncm       # resets the card to apply
 tools/xectl.py advertise 2500|1000|100|default
 tools/xectl.py set|get SYMBOL [VALUE]  # any 32-bit global of the plugin
 ```
+
+## File servers
+
+`make servers=nfs,ftp` builds in an NFSv3 server and an FTP server; a plain `make`
+has neither. They start 30 s after boot. `/` holds every volume the console has:
+`Hdd1`, `Usb0`..., a FATX disk on USB of any size included.
+
+```sh
+sudo mount -t nfs -o vers=3,nolock 192.168.1.210:/ /mnt/xbox
+curl ftp://192.168.1.210/Hdd1/
+```
+
+| Server | PC -> console | console -> PC |
+|---|---|---|
+| NFS | 207 Mbit/s (25.9 MB/s) | 182 Mbit/s (22.8 MB/s) |
+| FTP | 213 Mbit/s (26.6 MB/s) | 185 Mbit/s (23.1 MB/s) |
+| ftpdll, for comparison | 165 Mbit/s (20.7 MB/s) | 166 Mbit/s (20.8 MB/s) |
+
+Measured 2026-11-04 on the RTL8156B (ECM) with 512 MiB files. Settings and
+details: [docs/servers/nfs.md](docs/servers/nfs.md),
+[docs/servers/ftp.md](docs/servers/ftp.md).
 
 ## Speedtests
 
