@@ -55,6 +55,29 @@ u32 asix_parse_config(const u8 *d, u32 length, ASIX_LAYOUT *out)
     return 1;
 }
 
+u32 asix_mii_resolve(u32 bmsr, u32 advertise, u32 lpa, u32 ctrl1000, u32 stat1000,
+                     u32 *full)
+{
+    u32 common = advertise & lpa;
+
+    *full = 0;
+    if (!(bmsr & BMSR_LSTATUS))
+        return 0;
+    if ((ctrl1000 & ADVERTISE_1000FULL) && (stat1000 & LPA_1000FULL)) {
+        *full = 1;
+        return 1000;
+    }
+    if (common & ADVERTISE_100FULL) {
+        *full = 1;
+        return 100;
+    }
+    if (common & ADVERTISE_100HALF)
+        return 100;
+    if (common & ADVERTISE_10FULL)
+        *full = 1;
+    return 10;
+}
+
 /* Per device slot: DMA memory from the core's scratch block. */
 static u8 *scratch_of[USB_MAX_DEVICES];
 

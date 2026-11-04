@@ -89,6 +89,9 @@ STRUCTS = {
                   "ntb_formats", "ntb_input_status", "ntb_format_status", "crc_status",
                   "dgram_status", "intr_parked"],
     "rtl_stats": ["chip_version", "advertise_status"],
+    "ax178_stats": ["product", "eeprom_17", "phy_address", "phy_id", "bmsr", "lpa", "stat1000",
+                    "medium", "link_checks", "rx_transfers", "rx_resyncs", "intr_events",
+                    "intr_errors", "tx_transfers", "tx_too_big", "mii_errors"],
     "ax179_stats": ["bcd_device", "product", "eeprom_43", "phy_status", "medium", "usb_speed",
                     "link_resets", "rx_transfers", "rx_bad", "rx_bad_frames", "intr_events",
                     "intr_errors", "tx_transfers", "tx_too_big", "family_a", "chip_status",
@@ -542,6 +545,17 @@ def status(sym):
                           a["link_resets"], a["intr_link"], a["rx_transfers"], a["rx_bad"],
                           a["rx_bad_frames"], a["intr_events"], a["intr_errors"],
                           a["tx_transfers"], a["tx_too_big"]))
+    if "ax178_stats" in sym:
+        for i in range(2):
+            a = read_struct(sym, "ax178_stats", i)
+            if a["product"]:
+                print("ax178 %d  pid=%04x eeprom17=%#06x phy addr=%d id=%08x bmsr=%#06x lpa=%#06x "
+                      "stat1000=%#06x medium=%#06x link checks=%d rx=%d resyncs=%d intr=%d err=%d "
+                      "tx=%d too_big=%d mii_err=%d" % (
+                          i, a["product"], a["eeprom_17"], a["phy_address"], a["phy_id"],
+                          a["bmsr"], a["lpa"], a["stat1000"], a["medium"], a["link_checks"],
+                          a["rx_transfers"], a["rx_resyncs"], a["intr_events"], a["intr_errors"],
+                          a["tx_transfers"], a["tx_too_big"], a["mii_errors"]))
     if ss:
         print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
             ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],

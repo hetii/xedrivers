@@ -50,6 +50,18 @@ int main(void)
     /* Not a configuration descriptor. */
     CHECK(!asix_parse_config(ax179_config + 9, sizeof(ax179_config) - 9, &l));
 
+    /* The MII resolution. */
+    {
+        u32 full = 9;
+
+        CHECK(asix_mii_resolve(0x0000, 0x01E1, 0x01E1, 0x0200, 0x0800, &full) == 0 && !full);
+        CHECK(asix_mii_resolve(0x0004, 0x01E1, 0x45E1, 0x0200, 0x3800, &full) == 1000 && full);
+        CHECK(asix_mii_resolve(0x0004, 0x01E1, 0x41E1, 0x0200, 0x0000, &full) == 100 && full);
+        CHECK(asix_mii_resolve(0x0004, 0x01E1, 0x4081, 0x0000, 0x0000, &full) == 100 && !full);
+        CHECK(asix_mii_resolve(0x0004, 0x01E1, 0x4041, 0x0000, 0x0000, &full) == 10 && full);
+        CHECK(asix_mii_resolve(0x0004, 0x01E1, 0x4021, 0x0000, 0x0000, &full) == 10 && !full);
+    }
+
     if (failures)
         return 1;
     printf("all asix tests passed\n");

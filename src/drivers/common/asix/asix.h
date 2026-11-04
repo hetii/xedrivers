@@ -35,6 +35,14 @@
 #define ADVERTISE_1000FULL  0x0200u
 #define ADVERTISE_1000HALF  0x0100u
 
+#define LPA_1000FULL        0x0800u     /* MII_STAT1000: the partner does 1000 full */
+
+/* Pure: the link an MII PHY negotiated, from BMSR, ADVERTISE, LPA, CTRL1000 and
+ * STAT1000 as mii_check_media / mii_ethtool_gset resolve it: 0 if there is no
+ * link, else the speed in Mbit/s, with *full set for full duplex. */
+u32 asix_mii_resolve(u32 bmsr, u32 advertise, u32 lpa, u32 ctrl1000, u32 stat1000,
+                     u32 *full);
+
 /* The pipes of the device's first configuration, from its descriptor. */
 typedef struct {
     u8  config_value;
