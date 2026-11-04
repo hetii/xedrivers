@@ -1,4 +1,4 @@
-/* The NFS server on the host: built on tests/servers/common/srv_posix.c, started on
+/* The NFS server on the host: built on tests/servers/common/srv.c, started on
  * a high port over a temporary directory, mounted with the PC's own NFS client
  * (sudo mount -t nfs, vers=3 over TCP), and driven with ordinary file calls on the
  * mount -- written, read, listed, renamed, truncated, removed -- each checked in the

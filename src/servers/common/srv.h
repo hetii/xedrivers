@@ -3,7 +3,7 @@
  * drivers, the network layer or xnet's internals, so a server can be lifted into
  * another project with this header and an implementation of it.
  *
- * The console's implementation is srv_xbox.c (xam's sockets, the kernel's threads
+ * The console's implementation is srv.c (xam's sockets, the kernel's threads
  * and files). The host tests (tests/servers/) build the same servers on a POSIX
  * implementation of this header that lives with them; nothing here is for the PC.
  *
