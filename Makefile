@@ -210,7 +210,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # reached by the test translation units, so they build with the host compiler.
 # Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
 test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis \
-      $(BUILD)/test_asix $(BUILD)/test_ax88179 $(BUILD)/test_ax88178 \
+      $(BUILD)/test_asix $(BUILD)/test_ax88179 $(BUILD)/test_ax88178 $(BUILD)/test_nfs \
       $(BUILD)/test_aic $(BUILD)/test_wpa $(BUILD)/test_reorder \
       $(BUILD)/test_bridge $(BUILD)/test_omni
 	@$(BUILD)/test_cdc
@@ -220,6 +220,7 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
 	@$(BUILD)/test_asix
 	@$(BUILD)/test_ax88179
 	@$(BUILD)/test_ax88178
+	@$(BUILD)/test_nfs
 	@AIC_FW=$(FW_DIR)/aic8800D80 $(BUILD)/test_aic
 	@$(BUILD)/test_wpa
 	@$(BUILD)/test_reorder
@@ -258,6 +259,15 @@ $(BUILD)/test_ax88178: tests/drivers/ax88178/test_ax88178.c src/drivers/ax88178/
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/drivers/ax88178 -o $@ tests/drivers/ax88178/test_ax88178.c \
 	    src/drivers/ax88178/ax88178_frames.c
+
+# The file servers on the host: src/servers/<name>/ on tests/servers/common's POSIX
+# platform, mounted with the PC's own clients (skipped where sudo cannot mount).
+$(BUILD)/test_nfs: tests/servers/nfs/test_nfs.c src/servers/nfs/nfs.c \
+                   tests/servers/common/srv_posix.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	gcc -std=gnu99 -Wall -Wextra -O2 -I src/core -I src/servers/common -I src/servers/nfs \
+	    -o $@ tests/servers/nfs/test_nfs.c src/servers/nfs/nfs.c \
+	    tests/servers/common/srv_posix.c -lpthread
 
 $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c $(HEADERS)
 	@mkdir -p $(BUILD)
