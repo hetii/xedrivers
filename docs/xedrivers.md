@@ -98,7 +98,7 @@ chip's.
 | File | What |
 |---|---|
 | `wireless.c` | the networks a scan found, which to pick, the `WL_CARD` a driver fills in (scan, join, leave, state), `xedrivers.ini` |
-| `wpa.c` | the WPA2 four-way handshake, with the kernel's own crypto |
+| `wpa.c` | the WPA2 four-way and group key handshakes, with the kernel's own crypto |
 | `reorder.c` | block-ack reordering (as mac80211's agg-rx); the driver says which frames need it |
 | `bridge.c` | `wifi_mode` default: the card as a cable to the network `wifi_ssid` names |
 | `omni.c` | `wifi_mode = dashboard`: the card as the console's own wireless adapter |
