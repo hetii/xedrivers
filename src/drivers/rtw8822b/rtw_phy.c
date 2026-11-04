@@ -303,6 +303,13 @@ u32 rtw_phy_set_param(RTW *r)
      * weaker on path A at 2.4 GHz. A/B live (2026-11-03, ch 10, 4 streams): out
      * 30 -> 85-96 Mbit/s, the AP's rate MCS 9 -> 13-14. */
     rtw_write32_mask(r, REG_LED_CFG, BIT_DPDT_SEL_EN | BIT_DPDT_WL_SEL, 0x2);
+    /* rtw8822b_led_set, which rtw88 runs from its LED init: LED2 under software
+     * control (CM 0, on) and GPIO 13/14 no longer the Wi-Fi's. The power-on value
+     * here is 0x62 in this byte (bit 22 set, LED2 in a hardware mode); on 2.4 GHz
+     * it kept the access point a metre away (-3 dBm) out of every scan, weaker
+     * networks still heard, until the byte read rtw88's 0x20 (2026-11-04, three
+     * boots in a row without a join, then a join at once). */
+    rtw_write32_clr(r, REG_LED_CFG, BIT_GPIO13_14_WL_CTRL_EN | BIT_LED2_CM | BIT_LED2_SV);
     rtw_write32_mask(r, REG_RFE_CTRL8, 0xFF, DPDT_CTRL_PIN);
     rtw_write32_mask(r, 0x40, BIT(2), 0x1);
     rtw_write32_mask(r, 0x1990, 0x3F, 0x30);
