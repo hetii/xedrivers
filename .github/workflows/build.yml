@@ -1,18 +1,16 @@
 # Build the package (build/xedrivers/: the plugin and its firmware), run the unit
-# tests, keep the package as an artifact of every run, and on a tag v* publish it
-# as a release.
+# tests and keep the package as an artifact of the run.
 
 name: build
 
+# Run by hand only (Actions -> build -> Run workflow), and only from main: no
+# push, tag or pull request starts it.
 on:
-  push:
-    branches: ["**"]
-    tags: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
