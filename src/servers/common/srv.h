@@ -9,7 +9,8 @@
  * names in tests/servers/common/; nothing here is for the PC.
  *
  * Paths are the server's own: '/'-separated, relative to the root it was given,
- * never with "..". Errors are SRV_E* (negative), success 0 or a count.
+ * never with "..". Errors are SRV_E* (negative), success 0 or a count. On the
+ * console a root of "*" is every volume: "Hdd1/x", "Usb0/x"..., "" their list.
  */
 
 #ifndef XE_SRV_H

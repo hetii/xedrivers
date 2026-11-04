@@ -4,11 +4,11 @@
  *
  * Settings:
  *   nfs        = 0 | 1          (1) serve NFS
- *   nfs_root   = <object path>  (\Device\Harddisk0\Partition1) the exported directory
+ *   nfs_root   = * | <object path>  (*) every volume (Hdd1, Usb0...), or one directory
  *   nfs_allow  = a.b.c.d/n      (anyone) the clients let in
  *   nfs_handles = <count>       (16384) names clients may hold handles to, 80 B each
  *   ftp        = 0 | 1          (1) serve FTP
- *   ftp_root   = <object path>  (\Device\Harddisk0\Partition1) the directory served as /
+ *   ftp_root   = * | <object path>  (*) every volume, or one directory, served as /
  *   ftp_port   = <port>         (21) taken from another server only once it lets go
  *   ftp_user, ftp_pass          (none) the login; without a user any login is taken
  *   ftp_allow  = a.b.c.d/n      (anyone) the clients let in
@@ -77,7 +77,8 @@ static void setting(const char *key, char *out, u32 size, const char *fallback)
     out[i] = 0;
 }
 
-#define HDD "\\Device\\Harddisk0\\Partition1"
+/* Every volume the console has, Hdd1, Usb0... (src/servers/common/srv_file.c). */
+#define EVERY_VOLUME "*"
 
 #if XE_SERVER_NFS
 static void start_nfs(void *arg)
@@ -92,7 +93,7 @@ static void start_nfs(void *arg)
         return;
     c.port = c.portmap_port = c.allow = c.allow_mask = 0;
     c.handles = srv_setting_u32("nfs_handles", 0);
-    setting("nfs_root", root, sizeof(root), HDD);
+    setting("nfs_root", root, sizeof(root), EVERY_VOLUME);
     c.root = root;
     if (srv_setting("nfs_allow", allow, sizeof(allow)))
         parse_net(allow, &c.allow, &c.allow_mask);
@@ -114,7 +115,7 @@ static void start_ftp(void *arg)
         return;
     c.port = srv_setting_u32("ftp_port", FTP_PORT_DEFAULT);
     c.allow = c.allow_mask = 0;
-    setting("ftp_root", root, sizeof(root), HDD);
+    setting("ftp_root", root, sizeof(root), EVERY_VOLUME);
     setting("ftp_user", user, sizeof(user), "");
     setting("ftp_pass", password, sizeof(password), "");
     c.root = root;

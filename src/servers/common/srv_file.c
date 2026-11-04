@@ -11,6 +11,7 @@
  */
 
 #include "srv.h"
+#include "str.h"
 
 extern u32 NtWriteFile(void *handle, void *event, void *apc, void *apc_context,
                        IO_STATUS_BLOCK *io, const void *buffer, u32 length, s64 *offset);
@@ -67,26 +68,78 @@ typedef struct {
 
 #define FULL_MAX 512
 
-/* root + "\" + path with '/' turned into '\'; 0 if too long. */
-static u32 full_path(char *out, const char *root, const char *path)
-{
-    u32 n = 0;
+/* A root of "*" serves every volume the console has, as ftpdll does: a path's
+ * first name picks one ("Hdd1/x" is \Device\Harddisk0\Partition1\x), and "" is
+ * their list. Drives of any size: FATX on a 16 TB USB disk is \Device\Mass0. */
+static const struct {
+    const char *name, *device;
+} volumes[] = {
+    { "Hdd1", "\\Device\\Harddisk0\\Partition1" },
+    { "Usb0", "\\Device\\Mass0" },
+    { "Usb1", "\\Device\\Mass1" },
+    { "Usb2", "\\Device\\Mass2" },
+    { "IntUsb", "\\Device\\BuiltInMuUsb\\Storage" },
+    { "Mu0", "\\Device\\Mu0" },
+    { "Mu1", "\\Device\\Mu1" },
+};
 
-    while (*root && n + 1 < FULL_MAX)
-        out[n++] = *root++;
+#define VOLUMES (sizeof(volumes) / sizeof(volumes[0]))
+
+static u32 every_volume(const char *root)
+{
+    return root[0] == '*' && !root[1];
+}
+
+/* The top of "*": no object, the list of volumes. */
+static u32 is_top(const char *root, const char *path)
+{
     while (*path == '/')
         path++;
+    return every_volume(root) && !*path;
+}
+
+/* root + "\" + path with '/' turned into '\': its length, or an SRV_E* (too long;
+ * under "*" a volume there is not, or its top, which has no object). */
+static s32 full_path(char *out, const char *root, const char *path)
+{
+    u32 n = 0, i, k;
+
+    while (*path == '/')
+        path++;
+    if (every_volume(root)) {
+        for (k = 0; path[k] && path[k] != '/'; k++)
+            ;
+        if (!k)
+            return SRV_EACCES;
+        for (i = 0; i < VOLUMES; i++) {
+            const char *v = volumes[i].name;
+            u32 j;
+
+            for (j = 0; j < k && v[j] && (v[j] | 32) == (path[j] | 32); j++)
+                ;
+            if (j == k && !v[j])
+                break;
+        }
+        if (i == VOLUMES)
+            return SRV_ENOENT;
+        root = volumes[i].device;
+        path += k;
+        while (*path == '/')
+            path++;
+    }
+    while (*root && n + 1 < FULL_MAX)
+        out[n++] = *root++;
     /* always a '\\' after the root: without one, a root such as
      * \Device\Harddisk0\Partition1 names the volume, not its top directory */
     if ((!n || out[n - 1] != '\\') && n + 1 < FULL_MAX)
         out[n++] = '\\';
     for (; *path; path++) {
         if (n + 1 >= FULL_MAX)
-            return 0;
+            return SRV_ENAMETOOLONG;
         out[n++] = *path == '/' ? '\\' : *path;
     }
     out[n] = 0;
-    return n;
+    return (s32)n;
 }
 
 static void attributes_of(OBJECT_ATTRIBUTES *a, ANSI_STRING *name, const char *path, u32 n)
@@ -154,13 +207,14 @@ static u32 nt_open(const char *full, u32 n, u32 access, u32 disposition, u32 opt
 s32 srv_open(const char *root, const char *path, u32 mode, SRV_FILE *out)
 {
     char full[FULL_MAX];
-    u32 n = full_path(full, root, path), status, access = 0, disposition = FILE_OPEN;
+    s32 n = full_path(full, root, path);
+    u32 status, access = 0, disposition = FILE_OPEN;
     void *h;
 
     if (mode & SRV_TRUNC)
         srv_forget(root, path);
-    if (!n)
-        return SRV_ENAMETOOLONG;
+    if (n < 0)
+        return n;
     if (mode & SRV_READ)
         access |= GENERIC_READ;
     if (mode & SRV_WRITE)
@@ -230,11 +284,18 @@ s32 srv_stat(const char *root, const char *path, SRV_STAT *out)
     ANSI_STRING name;
     OBJECT_ATTRIBUTES a;
     NET_OPEN_INFO info;
-    u32 n = full_path(full, root, path), status;
+    s32 n = full_path(full, root, path);
+    u32 status;
 
-    if (!n)
-        return SRV_ENAMETOOLONG;
-    attributes_of(&a, &name, full, n);
+    if (is_top(root, path)) {
+        mem_zero(out, sizeof(*out));
+        out->is_dir = 1;
+        out->id = 1;
+        return SRV_OK;
+    }
+    if (n < 0)
+        return n;
+    attributes_of(&a, &name, full, (u32)n);
     status = NtQueryFullAttributesFile(&a, &info);
     if (!NT_SUCCESS(status))
         return err(status);
@@ -247,11 +308,12 @@ static s32 set_info(const char *root, const char *path, u32 access, u32 options,
 {
     char full[FULL_MAX];
     IO_STATUS_BLOCK io;
-    u32 n = full_path(full, root, path), status;
+    s32 n = full_path(full, root, path);
+    u32 status;
     void *h;
 
-    if (!n)
-        return SRV_ENAMETOOLONG;
+    if (n < 0)
+        return n;
     status = nt_open(full, n, access, FILE_OPEN, options, &h);
     if (!NT_SUCCESS(status))
         return err(status);
@@ -272,11 +334,12 @@ s32 srv_truncate(const char *root, const char *path, u32 size_lo, u32 size_hi)
 s32 srv_mkdir(const char *root, const char *path)
 {
     char full[FULL_MAX];
-    u32 n = full_path(full, root, path), status;
+    s32 n = full_path(full, root, path);
+    u32 status;
     void *h;
 
-    if (!n)
-        return SRV_ENAMETOOLONG;
+    if (n < 0)
+        return n;
     status = nt_open(full, n, FILE_LIST_DIRECTORY, FILE_CREATE, FILE_DIRECTORY_FILE, &h);
     if (!NT_SUCCESS(status))
         return err(status);
@@ -291,12 +354,13 @@ static s32 nt_delete(const char *root, const char *path, u32 want_dir)
     ANSI_STRING name;
     OBJECT_ATTRIBUTES a;
     SRV_STAT st;
-    u32 n = full_path(full, root, path), status;
+    s32 n = full_path(full, root, path);
+    u32 status;
     s32 e;
 
     srv_forget(root, path);
-    if (!n)
-        return SRV_ENAMETOOLONG;
+    if (n < 0)
+        return n;
     e = srv_stat(root, path, &st);
     if (e != SRV_OK)
         return e;
@@ -328,12 +392,12 @@ s32 srv_rename(const char *root, const char *from, const char *to)
         ANSI_STRING name;
     } info;
     char full_to[FULL_MAX];
-    u32 n = full_path(full_to, root, to);
+    s32 n = full_path(full_to, root, to);
 
     srv_forget(root, from);
     srv_forget(root, to);
-    if (!n)
-        return SRV_ENAMETOOLONG;
+    if (n < 0)
+        return n;
     info.replace = 1;
     info.pad[0] = info.pad[1] = info.pad[2] = 0;
     info.root_dir = 0;
@@ -348,6 +412,7 @@ s32 srv_rename(const char *root, const char *from, const char *to)
 typedef struct {
     void *handle;
     u32 started;
+    u32 top;                                /* the list of volumes: the next one */
     u32 full_length;
     char full[FULL_MAX];
     u64 buf[1024 / 8];
@@ -356,16 +421,22 @@ typedef struct {
 s32 srv_opendir(const char *root, const char *path, SRV_DIR *out)
 {
     LISTING *l;
-    u32 n, status;
+    u32 status;
+    s32 n;
 
     *out = 0;
     l = (LISTING *)srv_alloc(sizeof(LISTING));
     if (!l)
         return SRV_EIO;
+    if (is_top(root, path)) {
+        l->top = 1;
+        *out = l;
+        return SRV_OK;
+    }
     n = full_path(l->full, root, path);
-    if (!n) {
+    if (n < 0) {
         srv_free(l);
-        return SRV_ENAMETOOLONG;
+        return n;
     }
     status = nt_open(l->full, n, FILE_LIST_DIRECTORY, FILE_OPEN, FILE_DIRECTORY_FILE,
                      &l->handle);
@@ -376,7 +447,7 @@ s32 srv_opendir(const char *root, const char *path, SRV_DIR *out)
     if (l->full[n - 1] != '\\' && n + 1 < FULL_MAX)
         l->full[n++] = '\\';
     l->full[n] = 0;
-    l->full_length = n;
+    l->full_length = (u32)n;
     *out = l;
     return SRV_OK;
 }
@@ -387,6 +458,21 @@ s32 srv_readdir(SRV_DIR dir, char *name, u32 name_size, SRV_STAT *st)
     DIR_INFO *d = (DIR_INFO *)l->buf;
     IO_STATUS_BLOCK io;
     u32 args[10], status, i, len;
+
+    if (l->top) {                           /* the volumes there are, by name */
+        SRV_STAT vs;
+
+        for (; l->top <= VOLUMES; l->top++) {
+            if (srv_stat("*", volumes[l->top - 1].name, &vs) != SRV_OK)
+                continue;
+            str_copy(name, volumes[l->top - 1].name, name_size);
+            if (st)
+                *st = vs;
+            l->top++;
+            return 1;
+        }
+        return 0;
+    }
 
     io.Status = 0;
     args[0] = (u32)l->handle;
@@ -424,7 +510,8 @@ void srv_closedir(SRV_DIR dir)
     LISTING *l = (LISTING *)dir;
 
     if (l) {
-        NtClose(l->handle);
+        if (l->handle)
+            NtClose(l->handle);
         srv_free(l);
     }
 }
@@ -439,7 +526,8 @@ s32 srv_flush(SRV_FILE f)
     return NT_SUCCESS(status) ? SRV_OK : err(status);
 }
 
-s32 srv_volume(const char *root, u32 *total_lo, u32 *total_hi, u32 *free_lo, u32 *free_hi)
+/* One volume's bytes in all and free. */
+static s32 volume_of(const char *root, const char *path, u64 *total, u64 *free)
 {
     char full[FULL_MAX];
     IO_STATUS_BLOCK io;
@@ -449,11 +537,14 @@ s32 srv_volume(const char *root, u32 *total_lo, u32 *total_hi, u32 *free_lo, u32
         u32 sectors_per_unit;
         u32 bytes_per_sector;
     } info;
-    u32 n = full_path(full, root, ""), status;
-    u64 unit, t, f;
+    s32 n = full_path(full, root, path);
+    u32 status;
+    u64 unit;
     void *h;
 
-    status = nt_open(full, n, FILE_LIST_DIRECTORY, FILE_OPEN, FILE_DIRECTORY_FILE, &h);
+    if (n < 0)
+        return n;
+    status = nt_open(full, (u32)n, FILE_LIST_DIRECTORY, FILE_OPEN, FILE_DIRECTORY_FILE, &h);
     if (!NT_SUCCESS(status))
         return err(status);
     io.Status = 0;
@@ -462,11 +553,30 @@ s32 srv_volume(const char *root, u32 *total_lo, u32 *total_hi, u32 *free_lo, u32
     if (!NT_SUCCESS(status))
         return err(status);
     unit = (u64)info.sectors_per_unit * info.bytes_per_sector;
-    t = (u64)info.total_units * unit;
-    f = (u64)info.free_units * unit;
+    *total = (u64)info.total_units * unit;
+    *free = (u64)info.free_units * unit;
+    return SRV_OK;
+}
+
+/* Under "*" the sum of every volume there is. */
+s32 srv_volume(const char *root, u32 *total_lo, u32 *total_hi, u32 *free_lo, u32 *free_hi)
+{
+    u64 t = 0, f = 0, vt, vf;
+    u32 i;
+    s32 e = SRV_OK;
+
+    if (every_volume(root)) {
+        for (i = 0; i < VOLUMES; i++)
+            if (volume_of(root, volumes[i].name, &vt, &vf) == SRV_OK) {
+                t += vt;
+                f += vf;
+            }
+    } else {
+        e = volume_of(root, "", &t, &f);
+    }
     *total_lo = (u32)t;
     *total_hi = (u32)(t >> 32);
     *free_lo = (u32)f;
     *free_hi = (u32)(f >> 32);
-    return SRV_OK;
+    return e;
 }
