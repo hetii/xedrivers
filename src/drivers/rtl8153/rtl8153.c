@@ -10,7 +10,7 @@
  *     configuration, where nothing says CDC;
  *   - the chip version (PLA_TCR0 >> 16 & 0x7CF0: 0x5C00-0x5C30 RTL8153, 0x6000 /
  *     0x6010 RTL8153B, 0x6400 RTL8153C);
- *   - the advertisement through Realtek's PHY window (drivers/realtek), gigabit at
+ *   - the advertisement through Realtek's PHY window (drivers/common/realtek), gigabit at
  *     most: the 2.5G register of the RTL8156 does not exist here;
  *   - the host commands for registers and the PHY, numbered as rtl8156's.
  *

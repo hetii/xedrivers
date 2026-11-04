@@ -1,5 +1,5 @@
 /* ASIX USB Ethernet: code shared by the drivers of ASIX's chips (ax88179, ax88178),
- * not a driver itself (the Makefile's LIBS).
+ * not a driver itself (src/drivers/common/).
  *
  * What the families have in common is little: vendor control requests to the
  * device (bmRequestType 0xC0 in, 0x40 out; each family its own request codes and

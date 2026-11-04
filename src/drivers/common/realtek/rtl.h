@@ -1,6 +1,6 @@
 /* Realtek RTL815x registers over vendor control requests, and the PHY behind them:
  * code shared by the drivers of Realtek's USB Ethernet chips (rtl8156, rtl8153),
- * not a driver itself (the Makefile's LIBS).
+ * not a driver itself (src/drivers/common/).
  *
  * Linux r8152's get_registers/set_registers: bmRequestType 0xC0 (read) / 0x40
  * (write), bRequest 0x05, wValue = register address (dword aligned), wIndex = MCU

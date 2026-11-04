@@ -11,7 +11,7 @@ console itself.
 | `src/net/` | the network device that xnet and the standalone stack see, the xnet hooks, the uplink choice |
 | `src/wireless/` | what every Wi-Fi card shares |
 | `src/drivers/<d>/` | one directory per driver, one `XE_DRIVER` each |
-| `src/drivers/realtek/`, `src/drivers/asix/` | code shared by one maker's drivers, not drivers (the Makefile's `LIBS`); what each driver needs is `NEEDS_<driver>` in the Makefile |
+| `src/drivers/common/<name>/` | code shared by one maker's drivers, not drivers (everything under `common/`); what each driver needs is `NEEDS_<driver>` in the Makefile |
 | `src/bench/<t>/` | measuring and tuning tools, only with `bench=` |
 | `tests/` | host unit tests, beside the code: `tests/core/`, `tests/drivers/<d>/` |
 
