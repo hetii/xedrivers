@@ -33,8 +33,9 @@ limits): [docs/xedrivers.md](docs/xedrivers.md).
 | 2 | `2717:ff80` | Xiaomi phone, Android USB tethering | RNDIS | [rndis.md](docs/drivers/rndis.md#issues) |
 | 3 | `0bda:8156` | Realtek RTL8156 / RTL8156B | USB 2.5G Ethernet | [rtl8156.md](docs/drivers/rtl8156.md#issues) |
 | 4 | `0bda:8153` and OEM ids | Realtek RTL8153 / RTL8153B / RTL8153C (not yet run on hardware) | USB gigabit Ethernet | [rtl8153.md](docs/drivers/rtl8153.md#issues) |
-| 5 | `a69c:8d80`, `a69c:8d81` | AICSemi AIC8800D80 | USB Wi-Fi 6 and Bluetooth | [aic8800.md](docs/drivers/aic8800.md#issues) |
-| 6 | `0bda:b812` | Realtek RTL8822BU | USB Wi-Fi 5 | [rtw8822b.md](docs/drivers/rtw8822b.md#issues) |
+| 5 | `0b95:1790`, `0b95:178a` and OEM ids | ASIX AX88179 / AX88178A (not yet run on hardware) | USB gigabit Ethernet | [ax88179.md](docs/drivers/ax88179.md#issues) |
+| 6 | `a69c:8d80`, `a69c:8d81` | AICSemi AIC8800D80 | USB Wi-Fi 6 and Bluetooth | [aic8800.md](docs/drivers/aic8800.md#issues) |
+| 7 | `0bda:b812` | Realtek RTL8822BU | USB Wi-Fi 5 | [rtw8822b.md](docs/drivers/rtw8822b.md#issues) |
 
 The RNDIS driver matches by class. Row 2 is the phone that was tested; other
 Android phones that tether over RNDIS should work too.

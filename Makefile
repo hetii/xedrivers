@@ -211,12 +211,15 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # reached by the test translation units, so they build with the host compiler.
 # Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
 test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis \
+      $(BUILD)/test_asix $(BUILD)/test_ax88179 \
       $(BUILD)/test_aic $(BUILD)/test_wpa $(BUILD)/test_reorder \
       $(BUILD)/test_bridge $(BUILD)/test_omni
 	@$(BUILD)/test_cdc
 	@$(BUILD)/test_stack
 	@$(BUILD)/test_rtl
 	@$(BUILD)/test_rndis
+	@$(BUILD)/test_asix
+	@$(BUILD)/test_ax88179
 	@AIC_FW=$(FW_DIR)/aic8800D80 $(BUILD)/test_aic
 	@$(BUILD)/test_wpa
 	@$(BUILD)/test_reorder
@@ -239,6 +242,16 @@ $(BUILD)/test_rtl: tests/drivers/realtek/test_rtl.c src/drivers/realtek/rtl.c $(
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/drivers/realtek -o $@ tests/drivers/realtek/test_rtl.c \
 	    src/drivers/realtek/rtl.c
+
+$(BUILD)/test_asix: tests/drivers/asix/test_asix.c src/drivers/asix/asix.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -I src/drivers/asix -o $@ tests/drivers/asix/test_asix.c src/drivers/asix/asix.c
+
+$(BUILD)/test_ax88179: tests/drivers/ax88179/test_ax88179.c src/drivers/ax88179/ax88179_frames.c \
+                       $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -I src/drivers/ax88179 -o $@ tests/drivers/ax88179/test_ax88179.c \
+	    src/drivers/ax88179/ax88179_frames.c
 
 $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c $(HEADERS)
 	@mkdir -p $(BUILD)

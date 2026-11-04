@@ -89,6 +89,9 @@ STRUCTS = {
                   "ntb_formats", "ntb_input_status", "ntb_format_status", "crc_status",
                   "dgram_status", "intr_parked"],
     "rtl_stats": ["chip_version", "advertise_status"],
+    "ax179_stats": ["bcd_device", "product", "eeprom_43", "phy_status", "medium", "usb_speed",
+                    "link_resets", "rx_transfers", "rx_bad", "rx_bad_frames", "intr_events",
+                    "intr_errors", "tx_transfers", "tx_too_big"],
     "rndis_stats": ["init_status", "max_packets", "max_transfer", "alignment",
                     "filter_status", "media_status", "link_speed", "control_polls",
                     "keepalives", "indications", "last_indication", "rx_transfers",
@@ -524,6 +527,16 @@ def status(sym):
             if rs["chip_version"]:
                 print("rtl slot %d chip=%04x adv_status=%#x" % (
                     i, rs["chip_version"], rs["advertise_status"]))
+    if "ax179_stats" in sym:
+        for i in range(2):
+            a = read_struct(sym, "ax179_stats", i)
+            if a["product"]:
+                print("ax179 %d  pid=%04x bcd=%04x eeprom43=%#x physr=%#06x medium=%#06x usb=%#x "
+                      "link checks=%d rx=%d bad=%d/%d frames intr=%d err=%d tx=%d too_big=%d" % (
+                          i, a["product"], a["bcd_device"], a["eeprom_43"], a["phy_status"],
+                          a["medium"], a["usb_speed"], a["link_resets"], a["rx_transfers"],
+                          a["rx_bad"], a["rx_bad_frames"], a["intr_events"], a["intr_errors"],
+                          a["tx_transfers"], a["tx_too_big"]))
     if ss:
         print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
             ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],
