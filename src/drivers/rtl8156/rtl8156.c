@@ -26,8 +26,6 @@
 #define CMD_PHY_READ  10u   /* [1] OCP address -> [5] value, [7] status */
 #define CMD_PHY_WRITE 11u   /* [1] OCP address, [2] value */
 
-volatile RTL_STATS rtl_stats[USB_MAX_DEVICES];
-
 static u32 rtl8156_match(const u8 *device, const u8 *interface)
 {
     (void)interface;
@@ -44,7 +42,7 @@ static u32 advertise(NET_DEV *nd, u32 bits)
     xe_config.advertise = bits;
     if (!nd->st->ready)
         return STATUS_UNSUCCESSFUL;
-    rs->advertise_status = bits ? rtl_set_advertise(nd->usb, bits) : STATUS_SUCCESS;
+    rs->advertise_status = bits ? rtl_set_advertise(nd->usb, bits, 1) : STATUS_SUCCESS;
     return rs->advertise_status;
 }
 
@@ -61,7 +59,7 @@ static u32 rtl8156_start(NET_DEV *nd)
     if (NT_SUCCESS(rtl_read_dword(nd->usb, RTL_PLA, RTL_PLA_TCR0, &tcr0)))
         rs->chip_version = tcr0 >> 16;
     if (xe_config.advertise)
-        rs->advertise_status = rtl_set_advertise(nd->usb, xe_config.advertise);
+        rs->advertise_status = rtl_set_advertise(nd->usb, xe_config.advertise, 1);
     return 0;
 }
 

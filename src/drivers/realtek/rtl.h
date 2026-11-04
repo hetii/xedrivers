@@ -1,4 +1,6 @@
-/* Realtek RTL815x registers over vendor control requests, and the PHY behind them.
+/* Realtek RTL815x registers over vendor control requests, and the PHY behind them:
+ * code shared by the drivers of Realtek's USB Ethernet chips (rtl8156, rtl8153),
+ * not a driver itself (the Makefile's LIBS).
  *
  * Linux r8152's get_registers/set_registers: bmRequestType 0xC0 (read) / 0x40
  * (write), bRequest 0x05, wValue = register address (dword aligned), wIndex = MCU
@@ -52,8 +54,10 @@ u32 rtl_phy_read(USB_DEV *dev, u32 addr, u32 *value);
 u32 rtl_phy_write(USB_DEV *dev, u32 addr, u32 value);
 
 /* Program the PHY's advertisement from RTL_ADV_* bits and restart negotiation.
+ * `has_2500`: the PHY has the 2.5G register (RTL8156); without it (RTL8153, a
+ * gigabit PHY) RTL_ADV_2500_FULL is ignored and that register left alone.
  * Returns STATUS_SUCCESS or the first failing transfer's status. */
-u32 rtl_set_advertise(USB_DEV *dev, u32 advertise);
+u32 rtl_set_advertise(USB_DEV *dev, u32 advertise, u32 has_2500);
 
 /* Pure: the three advertisement register values for `advertise`, given what they
  * hold now (only the speed bits are changed). For tests/. */
@@ -61,7 +65,7 @@ void rtl_advert_regs(u32 advertise, u32 *adv, u32 *ctrl1000, u32 *ctrl10g);
 
 void rtl_forget_page(USB_DEV *dev);     /* after a reset the window is the card's default */
 
-/* Read by tools/xectl.py. */
+/* Read by tools/xectl.py; one per device slot, whichever Realtek driver has it. */
 typedef struct {
     u32 chip_version;       /* PLA_TCR0 >> 16, e.g. 0x7710 for an RTL8156B */
     u32 advertise_status;   /* of the last advertisement write */

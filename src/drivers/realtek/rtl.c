@@ -22,6 +22,8 @@
 
 #define REG_SIZE 64
 
+volatile RTL_STATS rtl_stats[USB_MAX_DEVICES];
+
 /* Per device slot: DMA memory from the core's scratch block, and the OCP page last
  * selected (or unknown). */
 static u8 *scratch_of[USB_MAX_DEVICES];
@@ -143,14 +145,14 @@ void rtl_advert_regs(u32 advertise, u32 *adv, u32 *ctrl1000, u32 *ctrl10g)
 
 /* rtl8152_set_speed's autonegotiation branch: rewrite the three advertisement
  * registers, then BMCR = ANENABLE | ANRESTART. */
-u32 rtl_set_advertise(USB_DEV *dev, u32 advertise)
+u32 rtl_set_advertise(USB_DEV *dev, u32 advertise, u32 has_2500)
 {
-    u32 adv, c1000, c10g, status;
+    u32 adv, c1000, c10g = 0, status;
 
     status = rtl_phy_read(dev, RTL_OCP_MII_ADVERTISE, &adv);
     if (NT_SUCCESS(status))
         status = rtl_phy_read(dev, RTL_OCP_MII_CTRL1000, &c1000);
-    if (NT_SUCCESS(status))
+    if (NT_SUCCESS(status) && has_2500)
         status = rtl_phy_read(dev, RTL_OCP_10GBT_CTRL, &c10g);
     if (!NT_SUCCESS(status))
         return status;
@@ -160,7 +162,7 @@ u32 rtl_set_advertise(USB_DEV *dev, u32 advertise)
     status = rtl_phy_write(dev, RTL_OCP_MII_ADVERTISE, adv);
     if (NT_SUCCESS(status))
         status = rtl_phy_write(dev, RTL_OCP_MII_CTRL1000, c1000);
-    if (NT_SUCCESS(status))
+    if (NT_SUCCESS(status) && has_2500)
         status = rtl_phy_write(dev, RTL_OCP_10GBT_CTRL, c10g);
     if (NT_SUCCESS(status))
         status = rtl_phy_write(dev, RTL_OCP_MII_BMCR, BMCR_ANENABLE | BMCR_ANRESTART);

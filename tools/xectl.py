@@ -798,8 +798,8 @@ def context(sym):
     ns = read_struct(sym, "net_stats", slot or 0)
     card = drivers.get(ns["driver"], "onboard") if slot is not None else "onboard"
     ctx = {"card": card, "kind": "wired", "link_mbps": ns["speed_mbps"]}
-    if card in ("cdc", "rtl8156") and "cdc_stats" in sym:
-        # rtl8156 runs on cdc's transport and has its cdc_stats slot too.
+    if card in ("cdc", "rtl8156", "rtl8153") and "cdc_stats" in sym:
+        # rtl8156 and rtl8153 run on cdc's transport and have its cdc_stats slot too.
         ctx["transport"] = "ncm" if read_struct(sym, "cdc_stats", slot)["transport"] else "ecm"
     elif card == "rtw8822b" and "rtw_sta_stats" in sym:
         t = read_struct(sym, "rtw_sta_stats", slot)

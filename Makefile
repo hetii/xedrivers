@@ -82,9 +82,19 @@ BUILD    ?= build
 # and the bench's dispatcher and each tool named in bench=. Each driver directory defines one XE_DRIVER named
 # xe_driver_<directory>; the table of them is generated, so nothing else names a
 # driver (src/core/driver.h).
-DRIVERS  ?= $(notdir $(patsubst %/,%,$(wildcard src/drivers/*/)))
+#
+# LIBS are directories of code shared by drivers, not drivers: built only when a
+# driver in DRIVERS needs them. NEEDS_<driver> names what a driver uses besides its
+# own directory (a library, or another driver's code, as rtl8156 runs on cdc's).
+LIBS     := realtek asix
+NEEDS_rtl8156 := cdc realtek
+NEEDS_rtl8153 := cdc realtek
+NEEDS_ax88179 := asix
+NEEDS_ax88178 := asix
+DRIVERS  ?= $(filter-out $(LIBS),$(notdir $(patsubst %/,%,$(wildcard src/drivers/*/))))
+DRIVER_DIRS := $(sort $(DRIVERS) $(foreach d,$(DRIVERS),$(NEEDS_$(d))))
 SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
-            $(addprefix src/drivers/,$(DRIVERS)) \
+            $(addprefix src/drivers/,$(DRIVER_DIRS)) \
             $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h src/*/*/*/*.h)
@@ -225,10 +235,10 @@ $(BUILD)/test_stack: tests/bench/stack/test_stack.c src/bench/stack/stack.c $(HE
 	$(HOST_CC) -I src/bench/stack -o $@ tests/bench/stack/test_stack.c \
 	    src/bench/stack/stack.c
 
-$(BUILD)/test_rtl: tests/drivers/rtl8156/test_rtl.c src/drivers/rtl8156/rtl.c $(HEADERS)
+$(BUILD)/test_rtl: tests/drivers/realtek/test_rtl.c src/drivers/realtek/rtl.c $(HEADERS)
 	@mkdir -p $(BUILD)
-	$(HOST_CC) -I src/drivers/rtl8156 -o $@ tests/drivers/rtl8156/test_rtl.c \
-	    src/drivers/rtl8156/rtl.c
+	$(HOST_CC) -I src/drivers/realtek -o $@ tests/drivers/realtek/test_rtl.c \
+	    src/drivers/realtek/rtl.c
 
 $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c $(HEADERS)
 	@mkdir -p $(BUILD)
