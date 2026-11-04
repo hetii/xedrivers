@@ -158,17 +158,22 @@ static void xq_drain(void)
 }
 
 /* Frames waiting and none leaving for XQ_STALL_TICKS of the worker: the uplink
- * takes nothing (a card that refuses frames without having any transfer out), and
- * everything xnet sends -- to the onboard port too -- would wait behind them. Says
- * so once; net.c then takes the uplink's link down and xnet falls back. Thread. */
+ * takes nothing, and everything xnet sends -- to the onboard port too -- would wait
+ * behind them. A frame the uplink refuses every time (one longer than it can
+ * carry) does that on its own, the link otherwise fine: the first stall drops the
+ * frame at the head and goes on. A second in a row means the uplink itself takes
+ * nothing (a card that refuses frames without any transfer out): says so once;
+ * net.c then takes the uplink's link down and xnet falls back. Thread. */
 #define XQ_STALL_TICKS  60              /* ~2 s */
 
 u32 xnet_tick_stalled(void)
 {
-    static u32 seen_head, quiet;
-    u32 head = xq.head, tail = xq.tail;
+    static u32 seen_head, quiet, dropped_one;
+    u32 head = xq.head, tail = xq.tail, length, type;
 
     if (!xnet_stats.enabled || head == tail || head != seen_head) {
+        if (head != seen_head)
+            dropped_one = 0;
         seen_head = head;
         quiet = 0;
         return 0;
@@ -177,6 +182,16 @@ u32 xnet_tick_stalled(void)
         return 0;
     xnet_stats.xq_stalls++;
     xnet_stats.xq_stall_depth = (tail + NET_TXQ_SIZE - head) % NET_TXQ_SIZE;
+    if (!dropped_one && net_txq_drop_head(&xq, &length, &type)) {
+        dropped_one = 1;
+        xnet_stats.xq_head_drops++;
+        xnet_stats.xq_head_length = length;
+        xnet_stats.xq_head_type = type;
+        seen_head = xq.head;
+        quiet = 0;
+        return 0;
+    }
+    dropped_one = 0;
     return 1;
 }
 

@@ -73,6 +73,9 @@ typedef struct {
     u32 tcp_sockets_refused; /* 1: not the block expected, 2: no memory */
     u32 title_pool_pages;   /* the default pool of a title's xnet, 4 KB pages */
     u32 title_pool_refused; /* 1: the default configuration was not the expected */
+    u32 xq_head_drops;      /* stalls ended by dropping the frame at the head */
+    u32 xq_head_length;     /* that frame's length, the last time, */
+    u32 xq_head_type;       /* and its EtherType */
 } XNET_STATS;
 
 extern volatile u32 xnet_rx_iface;

@@ -74,6 +74,32 @@ void net_txq_put(NET_TXQ *t, void *user, void *frame, u32 length, void *cookie)
     net_txq_drain(t);
 }
 
+u32 net_txq_drop_head(NET_TXQ *t, u32 *length, u32 *type)
+{
+    NET_TXQ_ENTRY e;
+    u32 irql;
+
+    if (__sync_lock_test_and_set(&t->draining, 1))
+        return 0;
+    irql = KfAcquireSpinLock(&t->lock);
+    if (t->head == t->tail) {
+        KfReleaseSpinLock(&t->lock, irql);
+        __sync_lock_release(&t->draining);
+        return 0;
+    }
+    e = t->q[t->head];
+    t->head = (t->head + 1) % NET_TXQ_SIZE;
+    KfReleaseSpinLock(&t->lock, irql);
+    *length = e.length;
+    *type = e.length >= 14 ? (u32)((const u8 *)e.frame)[12] << 8 | ((const u8 *)e.frame)[13]
+                           : 0;
+    dropped(t);
+    t->done(t->owner, e.user, e.cookie);
+    __sync_lock_release(&t->draining);
+    net_txq_drain(t);
+    return 1;
+}
+
 void net_txq_flush(NET_TXQ *t)
 {
     NET_TXQ_ENTRY e;

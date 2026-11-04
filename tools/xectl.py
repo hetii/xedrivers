@@ -180,7 +180,7 @@ STRUCTS = {
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
-                   "xq_high", "link_fallback", "rcvbuf_before", "rcvbuf_after", "sndbuf_before", "sndbuf_after", "cwnd_kb", "cwnd_refused", "xq_stalls", "xq_stall_depth", "pool_added_kb", "pool_refused", "tcp_sockets_before", "tcp_sockets_after", "tcp_sockets_refused", "title_pool_pages", "title_pool_refused"],
+                   "xq_high", "link_fallback", "rcvbuf_before", "rcvbuf_after", "sndbuf_before", "sndbuf_after", "cwnd_kb", "cwnd_refused", "xq_stalls", "xq_stall_depth", "pool_added_kb", "pool_refused", "tcp_sockets_before", "tcp_sockets_after", "tcp_sockets_refused", "title_pool_pages", "title_pool_refused", "xq_head_drops", "xq_head_length", "xq_head_type"],
 }
 
 
@@ -544,8 +544,9 @@ def status(sym):
               u["match_calls"], u["add_calls"], u["remove_calls"], u["close_passes"],
               u["cancels"], u["unbound_resets"], u["no_slot"], u["control_late"],
               u["nak_reload_set"], u["nak_reload_skipped"]))
-    print("xnet q   stalls=%d depth at the last=%d | cwnd clamp %s" % (
-        xs["xq_stalls"], xs["xq_stall_depth"],
+    print("xnet q   stalls=%d depth at the last=%d head drops=%d (last %d B, type %#06x) | cwnd clamp %s" % (
+        xs["xq_stalls"], xs["xq_stall_depth"], xs["xq_head_drops"], xs["xq_head_length"],
+        xs["xq_head_type"],
         "refused (other xam)" if xs["cwnd_refused"] else
         ("%d KB" % xs["cwnd_kb"]) if xs["cwnd_kb"] else "stock 64 KB"))
     print("xnet mem system pool +%d KB%s | TCP sockets %d -> %s%s" % (xs["pool_added_kb"],

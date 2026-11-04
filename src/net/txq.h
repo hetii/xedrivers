@@ -57,6 +57,11 @@ void net_txq_put(NET_TXQ *t, void *user, void *frame, u32 length, void *cookie);
 /* Move what fits into the ring: call when a slot frees up. */
 void net_txq_drain(NET_TXQ *t);
 
+/* Complete the frame at the head unsent, its length and first 16 bytes' EtherType
+ * (bytes 12-13) given back: one the uplink refuses every time, which would hold
+ * everything behind it. 0 if the queue was empty or a drain was running. Thread. */
+u32 net_txq_drop_head(NET_TXQ *t, u32 *length, u32 *type);
+
 /* Complete everything still waiting, unsent: the link went away. */
 void net_txq_flush(NET_TXQ *t);
 
