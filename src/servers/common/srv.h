@@ -26,6 +26,7 @@
 #define SRV_ENOTDIR    (-20)
 #define SRV_EISDIR     (-21)
 #define SRV_EINVAL     (-22)
+#define SRV_EFBIG      (-27)       /* FATX: no file reaches 4 GiB */
 #define SRV_ENOSPC     (-28)
 #define SRV_ENAMETOOLONG (-36)
 #define SRV_ENOTEMPTY  (-39)

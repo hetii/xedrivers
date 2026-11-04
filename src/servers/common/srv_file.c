@@ -170,6 +170,8 @@ static s32 err(u32 status)
         return SRV_EISDIR;
     case 0xC000007Fu:                       /* DISK_FULL */
         return SRV_ENOSPC;
+    case 0xC0000904u:                       /* FILE_TOO_LARGE */
+        return SRV_EFBIG;
     case 0xC0000101u:                       /* DIRECTORY_NOT_EMPTY */
         return SRV_ENOTEMPTY;
     case 0xC0000033u:                       /* OBJECT_NAME_INVALID */
@@ -243,6 +245,26 @@ s32 srv_read(SRV_FILE f, u32 offset_lo, u32 offset_hi, void *buffer, u32 length)
     return NT_SUCCESS(status) ? (s32)io.Information : err(status);
 }
 
+/* FATX answers DISK_FULL also when a file would pass what a file holds (4 GiB
+ * less a cluster: 4294901760 bytes was the most on the HDD, and the cluster size
+ * differs from disk to disk): with room on the volume, that is what it means. */
+static u32 room_left(SRV_FILE f, u32 length)
+{
+    IO_STATUS_BLOCK io;
+    struct {
+        s64 total_units;
+        s64 free_units;
+        u32 sectors_per_unit;
+        u32 bytes_per_sector;
+    } info;
+
+    io.Status = 0;
+    if (!NT_SUCCESS(NtQueryVolumeInformationFile(f, &io, &info, sizeof(info), 3)))
+        return 0;
+    return (u64)info.free_units * info.sectors_per_unit * info.bytes_per_sector >
+           (u64)length + 0x1000000u;
+}
+
 s32 srv_write(SRV_FILE f, u32 offset_lo, u32 offset_hi, const void *buffer, u32 length)
 {
     IO_STATUS_BLOCK io;
@@ -252,6 +274,8 @@ s32 srv_write(SRV_FILE f, u32 offset_lo, u32 offset_hi, const void *buffer, u32 
     io.Status = 0;
     io.Information = 0;
     status = NtWriteFile(f, 0, 0, 0, &io, buffer, length, &at);
+    if (status == 0xC000007Fu && room_left(f, length))
+        return SRV_EFBIG;
     return NT_SUCCESS(status) ? (s32)io.Information : err(status);
 }
 

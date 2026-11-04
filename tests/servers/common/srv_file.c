@@ -30,6 +30,7 @@ static s32 err(void)
     case ENOTDIR: return SRV_ENOTDIR;
     case EISDIR: return SRV_EISDIR;
     case EINVAL: return SRV_EINVAL;
+    case EFBIG: return SRV_EFBIG;
     case ENOSPC: return SRV_ENOSPC;
     case ENAMETOOLONG: return SRV_ENAMETOOLONG;
     case ENOTEMPTY: return SRV_ENOTEMPTY;

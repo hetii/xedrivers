@@ -88,6 +88,7 @@ void reply_error(SESSION *s, s32 e)
     case SRV_ENOTEMPTY: reply(s, 550, "Directory not empty"); break;
     case SRV_EACCES: reply(s, 550, "Permission denied"); break;
     case SRV_ENOSPC: reply(s, 452, "No space left"); break;
+    case SRV_EFBIG: reply(s, 552, "File too large for the disk (4 GiB on FATX)"); break;
     case SRV_ENAMETOOLONG: reply(s, 553, "Name too long"); break;
     default: reply(s, 451, "Error on the disk"); break;
     }

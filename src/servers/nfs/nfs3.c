@@ -75,6 +75,7 @@ u32 nfs3_status(s32 e)
     case SRV_ENOTDIR: return NFS3ERR_NOTDIR;
     case SRV_EISDIR: return NFS3ERR_ISDIR;
     case SRV_EINVAL: return NFS3ERR_INVAL;
+    case SRV_EFBIG: return NFS3ERR_FBIG;
     case SRV_ENOSPC: return NFS3ERR_NOSPC;
     case SRV_ENAMETOOLONG: return NFS3ERR_NAMETOOLONG;
     case SRV_ENOTEMPTY: return NFS3ERR_NOTEMPTY;

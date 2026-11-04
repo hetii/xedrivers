@@ -171,6 +171,7 @@ void attr_get_set(XIN *x, u32 *set_size, u32 *size_hi, u32 *size_lo);
 #define NFS3ERR_NOTDIR      20u
 #define NFS3ERR_ISDIR       21u
 #define NFS3ERR_INVAL       22u
+#define NFS3ERR_FBIG        27u
 #define NFS3ERR_NOSPC       28u
 #define NFS3ERR_NAMETOOLONG 63u
 #define NFS3ERR_NOTEMPTY    66u
