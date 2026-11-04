@@ -9,6 +9,7 @@ volatile NFS_STATS nfs_stats;
 NFS_CONFIG nfs_cfg;
 
 static char root[SRV_PATH_MAX];
+static u32 files_started;
 
 s32 nfs_start(const NFS_CONFIG *config)
 {
@@ -21,8 +22,14 @@ s32 nfs_start(const NFS_CONFIG *config)
         nfs_cfg.portmap_port = PORTMAP_PORT_DEFAULT;
     str_copy(root, config->root, SRV_PATH_MAX);
     nfs_cfg.root = root;
-    if (handle_init())
+    nfs3_init();
+    if (handle_init(nfs_cfg.handles))
         return -1;
+    if (!files_started) {
+        if (nfs3_files_start())
+            return -1;
+        files_started = 1;
+    }
     if (transport_start(nfs_cfg.port, CONN_MAX))
         return -1;                      /* the network not up yet: asked again later */
     if (nfs_cfg.portmap_port != 0xFFFFFFFFu)
@@ -97,7 +104,7 @@ static void serve(void *arg)
         if (srv_send(c->sock, c->out, n + 4) < 0)
             break;
     }
-    nfs3_close(&c->open);
+    nfs3_release(c);
     srv_close(c->sock);
     srv_lock();
     nfs_stats.active--;
@@ -155,8 +162,8 @@ static void listener(void *arg)
         c->sock = s;
         c->udp = 0;
         c->peer = peer;
-        c->open.file = 0;
-        c->open.path[0] = 0;
+        c->list.dir = 0;
+        c->list.path[0] = 0;
         srv_lock();
         nfs_stats.connections++;
         nfs_stats.active++;
@@ -177,8 +184,8 @@ static void datagrams(void *arg)
 
     c.sock = (SRV_SOCK)(long)arg;
     c.udp = 1;
-    c.open.file = 0;
-    c.open.path[0] = 0;
+    c.list.dir = 0;
+    c.list.path[0] = 0;
     c.in = (u8 *)srv_alloc(UDP_SIZE);
     c.out = (u8 *)srv_alloc(UDP_SIZE);
     if (!c.in || !c.out)
@@ -192,7 +199,7 @@ static void datagrams(void *arg)
             continue;
         }
         n = rpc_call(&c, c.in, (u32)got, c.out, UDP_SIZE);
-        nfs3_close(&c.open);
+        nfs3_release(&c);
         if (n)
             srv_sendto(c.sock, c.out, n, c.peer, port);
     }

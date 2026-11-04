@@ -14,9 +14,12 @@ static void put_created(NFS3_CALL *q, const char *path)
 
     xdr_put32(q->r, q->status);
     if (!q->status) {
-        handle_of(path, fh);
-        xdr_put32(q->r, 1);
-        xdr_put_opaque(q->r, fh, FH_SIZE);
+        if (handle_of(path, fh) == NFS3_OK) {
+            xdr_put32(q->r, 1);
+            xdr_put_opaque(q->r, fh, FH_SIZE);
+        } else {
+            xdr_put32(q->r, 0);                     /* the client LOOKUPs it */
+        }
         attr_put_post(q->r, path);
     }
     attr_put_wcc(q->r, q->path);
@@ -39,6 +42,8 @@ void nfs3_create(NFS3_CALL *q)
     else
         attr_get_set(q->a, &set, &hi, &lo);
     if (!q->status) {
+        if (set && !hi && !lo)
+            nfs3_forget(path);                      /* truncated by the create */
         e = srv_open(nfs_cfg.root, path, SRV_READ | SRV_WRITE | SRV_CREATE |
                      (how ? SRV_EXCL : 0) | (set && !hi && !lo ? SRV_TRUNC : 0), &f);
         if (e == SRV_EEXIST && how == CREATE_EXCLUSIVE)
@@ -75,10 +80,11 @@ static void remove_name(NFS3_CALL *q, u32 dir)
     if (!q->status)
         q->status = handle_child(q->path, name, n, path);
     if (!q->status) {
-        if (q->conn->open.file && str_eq(q->conn->open.path, path))
-            nfs3_close(&q->conn->open);
+        nfs3_forget(path);
         q->status = nfs3_status(dir ? srv_rmdir(nfs_cfg.root, path)
                                     : srv_unlink(nfs_cfg.root, path));
+        if (!q->status)
+            handle_removed(path);
     }
     xdr_put32(q->r, q->status);
     attr_put_wcc(q->r, q->path);
@@ -114,7 +120,8 @@ void nfs3_rename(NFS3_CALL *q)
     if (!q->status)
         q->status = handle_child(to_dir, name, n, to);
     if (!q->status) {
-        nfs3_close(&q->conn->open);
+        nfs3_forget(from);
+        nfs3_forget(to);
         q->status = nfs3_status(srv_rename(nfs_cfg.root, from, to));
         if (!q->status)
             handle_renamed(from, to);
@@ -124,13 +131,52 @@ void nfs3_rename(NFS3_CALL *q)
     attr_put_wcc(q->r, to_dir);
 }
 
-/* Entries from the cookie on, as many as fit in what the client allows; the
- * cookie is srv_readdir's own, so a listing resumes where the last one stopped. */
+/* The listing's next entry: the one held back, or the directory's next. */
+static s32 next_entry(NFS_LIST *l, char *name, SRV_STAT *st)
+{
+    if (l->held) {
+        l->held = 0;
+        str_copy(name, l->held_name, SRV_NAME_MAX + 1);
+        *st = l->held_st;
+        return 1;
+    }
+    return srv_readdir(l->dir, name, SRV_NAME_MAX + 1, st);
+}
+
+/* The listing at `cookie`: the open one when it is there already (a listing read
+ * on, as clients read one), else the directory opened again and read up to it. */
+static u32 seek_listing(CONN *c, const char *path, u32 cookie)
+{
+    NFS_LIST *l = &c->list;
+    char name[SRV_NAME_MAX + 1];
+    SRV_STAT st;
+
+    if (l->dir && str_eq(l->path, path) && l->pos == cookie)
+        return NFS3_OK;
+    if (l->dir)
+        srv_closedir(l->dir);
+    l->dir = 0;
+    l->held = 0;
+    l->pos = 0;
+    str_copy(l->path, path, SRV_PATH_MAX);
+    if (srv_opendir(nfs_cfg.root, path, &l->dir) != SRV_OK) {
+        l->dir = 0;
+        return NFS3ERR_NOTDIR;
+    }
+    nfs_stats.listings++;
+    while (l->pos < cookie && next_entry(l, name, &st) > 0)
+        l->pos++;
+    return NFS3_OK;
+}
+
+/* Entries from the cookie on, as many as fit in what the client allows; a cookie
+ * is an entry's place in the listing. */
 static void list(NFS3_CALL *q, u32 plus)
 {
     char path[SRV_PATH_MAX], entry[SRV_NAME_MAX + 1];
+    NFS_LIST *l = &q->conn->list;
     XOUT *r = q->r;
-    u32 cookie_hi, cookie_lo, max, cookie, limit, eof = 0, before, was;
+    u32 cookie_hi, cookie_lo, max, limit, eof = 0, before, hi, lo;
     u8 fh[FH_SIZE];
     SRV_STAT st;
     s32 e;
@@ -144,40 +190,49 @@ static void list(NFS3_CALL *q, u32 plus)
         max = IO_MAX;
     if (!q->status && (srv_stat(nfs_cfg.root, q->path, &st) != SRV_OK || !st.is_dir))
         q->status = NFS3ERR_NOTDIR;
+    if (!q->status)
+        q->status = seek_listing(q->conn, q->path, cookie_lo);
     xdr_put32(r, q->status);
     attr_put_post(r, q->path);
     if (q->status)
         return;
     xdr_put64(r, 0, 0);                             /* cookieverf */
-    cookie = cookie_lo;
     limit = r->at + max - 64;
     for (;;) {
         before = r->at;
-        was = cookie;
-        e = srv_readdir(nfs_cfg.root, q->path, &cookie, entry, sizeof(entry), &st);
+        e = next_entry(l, entry, &st);
         if (e <= 0) {
             eof = 1;
             break;
         }
-        if (handle_child(q->path, (const u8 *)entry, str_len(entry), path))
+        if (handle_child(q->path, (const u8 *)entry, str_len(entry), path)) {
+            l->pos++;                               /* a name not served: passed */
             continue;
+        }
+        attr_fileid(path, &hi, &lo);
         xdr_put32(r, 1);
-        xdr_put64(r, 0, attr_fileid(&st, path));
+        xdr_put64(r, hi, lo);
         xdr_put_string(r, entry);
-        xdr_put64(r, 0, cookie);
+        xdr_put64(r, 0, l->pos + 1);
         if (plus) {
             xdr_put32(r, 1);
             attr_put(r, &st, path);
-            handle_of(path, fh);
-            xdr_put32(r, 1);
-            xdr_put_opaque(r, fh, FH_SIZE);
+            if (handle_of(path, fh) == NFS3_OK) {
+                xdr_put32(r, 1);
+                xdr_put_opaque(r, fh, FH_SIZE);
+            } else {
+                xdr_put32(r, 0);                    /* the client LOOKUPs it */
+            }
         }
-        if (r->bad || r->at > limit) {              /* did not fit: next time */
+        if (r->bad || r->at > limit) {              /* did not fit: held for next */
             r->at = before;
             r->bad = 0;
-            cookie = was;
+            l->held = 1;
+            str_copy(l->held_name, entry, sizeof(l->held_name));
+            l->held_st = st;
             break;
         }
+        l->pos++;
     }
     xdr_put32(r, 0);                                /* no more entries here */
     xdr_put32(r, eof);

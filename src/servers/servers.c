@@ -6,6 +6,7 @@
  *   nfs        = 0 | 1          (1) serve NFS
  *   nfs_root   = <object path>  (\Device\Harddisk0\Partition1) the exported directory
  *   nfs_allow  = a.b.c.d/n      (anyone) the clients let in
+ *   nfs_handles = <count>       (16384) names clients may hold handles to, 80 B each
  *   srv_delay  = <seconds>      (30) after boot before the first start
  */
 
@@ -68,6 +69,7 @@ static void starter(void *arg)
         NFS_CONFIG c;
 
         c.port = c.portmap_port = c.allow = c.allow_mask = 0;
+        c.handles = srv_setting_u32("nfs_handles", 0);
 
         if (!srv_setting("nfs_root", root, sizeof(root))) {
             const char *d = "\\Device\\Harddisk0\\Partition1";

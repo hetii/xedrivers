@@ -33,6 +33,18 @@ static int run(const char *cmd)
     return system(cmd);
 }
 
+static void remount(const char *mnt)
+{
+    char cmd[512];
+
+    snprintf(cmd, sizeof(cmd), "sudo -n umount %s", mnt);
+    CHECK(run(cmd) == 0);
+    snprintf(cmd, sizeof(cmd),
+             "sudo -n mount -t nfs -o vers=3,proto=tcp,port=%d,mountport=%d,mountproto=tcp,"
+             "nolock,actimeo=0,nconnect=4 127.0.0.1:/ %s", PORT, PORT, mnt);
+    CHECK(run(cmd) == 0);
+}
+
 static long file_size(const char *p)
 {
     struct stat s;
@@ -63,12 +75,13 @@ int main(void)
     cfg.root = export_dir;
     cfg.port = PORT;
     cfg.portmap_port = 0xFFFFFFFFu;
+    cfg.handles = 256;                  /* small: the listing below must give up leaves */
     CHECK(nfs_start(&cfg) == 0);
     usleep(200000);
 
     snprintf(cmd, sizeof(cmd),
              "sudo -n mount -t nfs -o vers=3,proto=tcp,port=%d,mountport=%d,mountproto=tcp,"
-             "nolock,actimeo=0,soft,timeo=50,retrans=2 127.0.0.1:/ %s", PORT, PORT, mnt);
+             "nolock,actimeo=0,nconnect=4,soft,timeo=100,retrans=2 127.0.0.1:/ %s", PORT, PORT, mnt);
     if (run(cmd) != 0) {
         printf("FAIL: mount\n");
         return 1;
@@ -91,7 +104,7 @@ int main(void)
     CHECK(run(cmd) == 0);
     snprintf(cmd, sizeof(cmd),
              "sudo -n mount -t nfs -o vers=3,proto=tcp,port=%d,mountport=%d,mountproto=tcp,"
-             "nolock,actimeo=0,soft,timeo=50,retrans=2 127.0.0.1:/ %s", PORT, PORT, mnt);
+             "nolock,actimeo=0,nconnect=4,soft,timeo=100,retrans=2 127.0.0.1:/ %s", PORT, PORT, mnt);
     CHECK(run(cmd) == 0);
     {
         static char back[sizeof(buf)];
@@ -146,6 +159,72 @@ int main(void)
     snprintf(p, sizeof(p), "%s/hello.bin", mnt);
     CHECK(unlink(p) == 0);
 
+    /* a directory of 3000 names, ten times the handle table: every name listed
+     * once, each file's content read back by name */
+    {
+        int n = 0, bad = 0, k;
+        static char seen[3000];
+
+        snprintf(p, sizeof(p), "%s/big", mnt);
+        CHECK(mkdir(p, 0755) == 0);
+        for (k = 0; k < 3000; k++) {
+            snprintf(p, sizeof(p), "%s/big/file_%04d.txt", mnt, k);
+            f = fopen(p, "w");
+            if (!f || fprintf(f, "%d", k) < 0)
+                bad++;
+            if (f)
+                fclose(f);
+        }
+        CHECK(bad == 0);
+        remount(mnt);
+        snprintf(p, sizeof(p), "%s/big", mnt);
+        d = opendir(p);
+        CHECK(d != 0);
+        while (d && (e = readdir(d))) {
+            if (sscanf(e->d_name, "file_%d.txt", &k) == 1 && k >= 0 && k < 3000) {
+                if (seen[k])
+                    bad++;
+                seen[k] = 1;
+                n++;
+            }
+        }
+        if (d)
+            closedir(d);
+        CHECK(n == 3000 && bad == 0);
+        for (k = 0; k < 3000; k += 7) {
+            int v = -1;
+
+            snprintf(p, sizeof(p), "%s/big/file_%04d.txt", mnt, k);
+            f = fopen(p, "r");
+            if (!f || fscanf(f, "%d", &v) != 1 || v != k)
+                bad++;
+            if (f)
+                fclose(f);
+        }
+        CHECK(bad == 0);
+        printf("  3000 names listed, %u handles in a table of 256, %u listings opened\n",
+               nfs_stats.handles, nfs_stats.listings);
+    }
+
+    /* a file renamed while open keeps working through its handle, fsync commits */
+    {
+        int fd;
+
+        snprintf(p, sizeof(p), "%s/open.bin", mnt);
+        snprintf(q, sizeof(q), "%s/moved.bin", mnt);
+        fd = open(p, O_CREAT | O_RDWR, 0644);
+        CHECK(fd >= 0 && write(fd, "abcd", 4) == 4);
+        CHECK(rename(p, q) == 0);
+        CHECK(write(fd, "efgh", 4) == 4);
+        CHECK(fsync(fd) == 0);
+        close(fd);
+        snprintf(p, sizeof(p), "%s/moved.bin", export_dir);
+        CHECK(file_size(p) == 8);
+        CHECK(nfs_stats.commits > 0);
+    }
+
+    snprintf(cmd, sizeof(cmd), "rm -rf %s/big %s/moved.bin", mnt, mnt);
+    CHECK(run(cmd) == 0);
     snprintf(cmd, sizeof(cmd), "sudo -n umount %s", mnt);
     CHECK(run(cmd) == 0);
     rmdir(mnt);

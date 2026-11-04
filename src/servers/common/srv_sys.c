@@ -12,6 +12,7 @@ extern void *ExAllocatePoolTypeWithTag(u32 bytes, u32 tag, u32 pool_type);
 extern u32 KeSetPriorityThread(void *thread, u32 priority);
 extern u32 KeSetAffinityThread(void *thread, u32 affinity, u32 *previous);
 extern void KeQuerySystemTime(s64 *time);
+extern void ExFreePool(void *p);
 
 /* --- threads ----------------------------------------------------------------- */
 
@@ -109,6 +110,12 @@ void *srv_alloc(u32 bytes)
         for (i = 0; i < bytes; i++)
             p[i] = 0;
     return p;
+}
+
+void srv_free(void *p)
+{
+    if (p)
+        ExFreePool(p);
 }
 
 static KSPIN_LOCK lock;

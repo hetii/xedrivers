@@ -154,34 +154,62 @@ s32 srv_rename(const char *root, const char *from, const char *to)
     return rename(a, b) < 0 ? err() : SRV_OK;
 }
 
-s32 srv_readdir(const char *root, const char *path, u32 *cookie, char *name,
-                u32 name_size, SRV_STAT *st)
-{
-    char p[4096], full[8192];
+typedef struct {
     DIR *d;
+    char path[4096];
+} LISTING;
+
+s32 srv_opendir(const char *root, const char *path, SRV_DIR *out)
+{
+    LISTING *l = calloc(1, sizeof(*l));
+
+    *out = 0;
+    if (!l)
+        return SRV_EIO;
+    join(l->path, root, path);
+    l->d = opendir(l->path);
+    if (!l->d) {
+        s32 e = err();
+
+        free(l);
+        return e;
+    }
+    *out = l;
+    return SRV_OK;
+}
+
+s32 srv_readdir(SRV_DIR dir, char *name, u32 name_size, SRV_STAT *st)
+{
+    LISTING *l = dir;
     struct dirent *e;
     struct stat s;
-    u32 index = 0;
+    char full[8192];
 
-    join(p, root, path);
-    d = opendir(p);
-    if (!d)
-        return err();
-    while ((e = readdir(d))) {
+    while ((e = readdir(l->d))) {
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
             continue;
-        if (index++ < *cookie)
-            continue;
         snprintf(name, name_size, "%s", e->d_name);
-        snprintf(full, sizeof(full), "%s/%s", p, e->d_name);
+        snprintf(full, sizeof(full), "%s/%s", l->path, e->d_name);
         if (st && stat(full, &s) == 0)
             fill(&s, st);
-        *cookie = index;
-        closedir(d);
         return 1;
     }
-    closedir(d);
     return 0;
+}
+
+void srv_closedir(SRV_DIR dir)
+{
+    LISTING *l = dir;
+
+    if (l) {
+        closedir(l->d);
+        free(l);
+    }
+}
+
+s32 srv_flush(SRV_FILE f)
+{
+    return fsync(fd_of(f)) < 0 ? err() : SRV_OK;
 }
 
 s32 srv_volume(const char *root, u32 *total_lo, u32 *total_hi, u32 *free_lo, u32 *free_hi)

@@ -15,6 +15,7 @@
 extern u32 NtWriteFile(void *handle, void *event, void *apc, void *apc_context,
                        IO_STATUS_BLOCK *io, const void *buffer, u32 length, s64 *offset);
 extern u32 NtDeleteFile(OBJECT_ATTRIBUTES *attributes);
+extern u32 NtFlushBuffersFile(void *handle, IO_STATUS_BLOCK *io);
 extern u32 NtQueryFullAttributesFile(OBJECT_ATTRIBUTES *attributes, void *info);
 extern u32 NtSetInformationFile(void *handle, IO_STATUS_BLOCK *io, void *info, u32 length,
                                 u32 info_class);
@@ -336,68 +337,100 @@ s32 srv_rename(const char *root, const char *from, const char *to)
     return set_info(root, from, DELETE_ACCESS, 0, &info, sizeof(info), 10);
 }
 
-/* NtQueryDirectoryFile one entry at a time, restarted at the start and walked to
- * the cookie: simple, and directories here are small. */
-s32 srv_readdir(const char *root, const char *path, u32 *cookie, char *name,
-                u32 name_size, SRV_STAT *st)
-{
+/* A listing: the directory's handle, read on with NtQueryDirectoryFile one entry
+ * a call (restart only on the first), and its object path for the entries' ids. */
+typedef struct {
+    void *handle;
+    u32 started;
+    u32 full_length;
     char full[FULL_MAX];
-    u64 buf_store[1024 / 8];
-    u8 *buf = (u8 *)buf_store;
-    IO_STATUS_BLOCK io;
-    u32 n = full_path(full, root, path), status, index = 0, i, len;
-    void *h;
-    s32 result = 0;
+    u64 buf[1024 / 8];
+} LISTING;
 
-    if (!n)
+s32 srv_opendir(const char *root, const char *path, SRV_DIR *out)
+{
+    LISTING *l;
+    u32 n, status;
+
+    *out = 0;
+    l = (LISTING *)srv_alloc(sizeof(LISTING));
+    if (!l)
+        return SRV_EIO;
+    n = full_path(l->full, root, path);
+    if (!n) {
+        srv_free(l);
         return SRV_ENAMETOOLONG;
-    status = nt_open(full, n, FILE_LIST_DIRECTORY, FILE_OPEN, FILE_DIRECTORY_FILE, &h);
+    }
+    status = nt_open(l->full, n, FILE_LIST_DIRECTORY, FILE_OPEN, FILE_DIRECTORY_FILE,
+                     &l->handle);
+    if (!NT_SUCCESS(status)) {
+        srv_free(l);
+        return err(status);
+    }
+    if (l->full[n - 1] != '\\' && n + 1 < FULL_MAX)
+        l->full[n++] = '\\';
+    l->full[n] = 0;
+    l->full_length = n;
+    *out = l;
+    return SRV_OK;
+}
+
+s32 srv_readdir(SRV_DIR dir, char *name, u32 name_size, SRV_STAT *st)
+{
+    LISTING *l = (LISTING *)dir;
+    DIR_INFO *d = (DIR_INFO *)l->buf;
+    IO_STATUS_BLOCK io;
+    u32 args[10], status, i, len;
+
+    io.Status = 0;
+    args[0] = (u32)l->handle;
+    args[1] = 0;
+    args[2] = 0;
+    args[3] = 0;
+    args[4] = (u32)&io;
+    args[5] = (u32)l->buf;
+    args[6] = sizeof(l->buf);
+    args[7] = 0;
+    args[8] = !l->started;
+    args[9] = (u32)&NtQueryDirectoryFile;
+    status = kcall9(args);
+    l->started = 1;
+    if (status == STATUS_NO_MORE_FILES || status == 0xC000000Fu /* NO_SUCH_FILE */)
+        return 0;
     if (!NT_SUCCESS(status))
         return err(status);
-    for (;;) {
-        DIR_INFO *d = (DIR_INFO *)buf;
-        u32 args[10];
-
-        io.Status = 0;
-        args[0] = (u32)h;
-        args[1] = 0;
-        args[2] = 0;
-        args[3] = 0;
-        args[4] = (u32)&io;
-        args[5] = (u32)buf;
-        args[6] = 1024;
-        args[7] = 0;
-        args[8] = index == 0;
-        args[9] = (u32)&NtQueryDirectoryFile;
-        status = kcall9(args);
-        if (!NT_SUCCESS(status) || status == STATUS_NO_MORE_FILES)
-            break;
-        if (index++ < *cookie)
-            continue;
-        len = d->name_length < name_size - 1 ? d->name_length : name_size - 1;
-        for (i = 0; i < len; i++)
-            name[i] = d->name[i];
-        name[len] = 0;
-        if (st) {
-            char child_full[FULL_MAX];
-            u32 k = 0;
-
-            for (i = 0; full[i] && k + 1 < FULL_MAX; i++)
-                child_full[k++] = full[i];
-            if (k && child_full[k - 1] != '\\' && k + 1 < FULL_MAX)
-                child_full[k++] = '\\';
-            for (i = 0; i < len && k + 1 < FULL_MAX; i++)
-                child_full[k++] = name[i];
-            child_full[k] = 0;
-            fill(st, d->attributes, d->end_of_file, d->access, d->write, d->change,
-                 child_full);
-        }
-        *cookie = index;
-        result = 1;
-        break;
+    len = d->name_length < name_size - 1 ? d->name_length : name_size - 1;
+    for (i = 0; i < len; i++)
+        name[i] = d->name[i];
+    name[len] = 0;
+    if (st) {
+        for (i = 0; i < len && l->full_length + i + 1 < FULL_MAX; i++)
+            l->full[l->full_length + i] = name[i];
+        l->full[l->full_length + i] = 0;
+        fill(st, d->attributes, d->end_of_file, d->access, d->write, d->change, l->full);
+        l->full[l->full_length] = 0;
     }
-    NtClose(h);
-    return result;
+    return 1;
+}
+
+void srv_closedir(SRV_DIR dir)
+{
+    LISTING *l = (LISTING *)dir;
+
+    if (l) {
+        NtClose(l->handle);
+        srv_free(l);
+    }
+}
+
+s32 srv_flush(SRV_FILE f)
+{
+    IO_STATUS_BLOCK io;
+    u32 status;
+
+    io.Status = 0;
+    status = NtFlushBuffersFile(f, &io);
+    return NT_SUCCESS(status) ? SRV_OK : err(status);
 }
 
 s32 srv_volume(const char *root, u32 *total_lo, u32 *total_hi, u32 *free_lo, u32 *free_hi)

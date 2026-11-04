@@ -19,12 +19,29 @@
 
 extern NFS_CONFIG nfs_cfg;          /* as nfs_start was given it, defaults filled in */
 
-/* The file a connection last read or wrote, kept open between calls (nfs3.c). */
+/* An open file, shared by every connection (nfs3.c), with its attributes as found
+ * and written since (READ and WRITE answer with them, not a stat of their own). */
 typedef struct {
-    SRV_FILE file;
+    SRV_FILE file;                  /* 0: a free entry */
     char path[SRV_PATH_MAX];
     u32 writable;
-} NFS_OPEN;
+    u32 users;                      /* calls using it now */
+    u32 doomed;                     /* closed by the last of them */
+    u32 used;                       /* srv_now() of its last use */
+    SRV_STAT st;
+} NFS_FILE;
+
+/* The directory a connection is listing, kept open while the listing goes on:
+ * `pos` entries answered, which is the cookie the next READDIR asks for if it goes
+ * on; an entry read that did not fit in the last answer is held for the next. */
+typedef struct {
+    SRV_DIR dir;
+    char path[SRV_PATH_MAX];
+    u32 pos;
+    u32 held;
+    char held_name[SRV_NAME_MAX + 1];
+    SRV_STAT held_st;
+} NFS_LIST;
 
 /* One client's transport: a TCP connection, or the socket a datagram came in on. */
 typedef struct {
@@ -33,7 +50,7 @@ typedef struct {
     u32 peer;                       /* its address (host order) */
     u8 *in;
     u8 *out;
-    NFS_OPEN open;
+    NFS_LIST list;
     volatile u32 busy;
 } CONN;
 
@@ -102,21 +119,24 @@ u32  portmap_call(CONN *c, u32 vers, u32 proc, XIN *a, XOUT *r);
 
 /* === File handles ============================================================ */
 
-/* File handles: 8 bytes, an index into a table of paths and a generation, so a
- * handle from before a restart (or for a slot reused since) reads as stale
- * rather than as another file. Index 0 is the root's. */
+/* File handles: 8 bytes, a node's index and a generation. The nodes are a tree
+ * of names, so a handle from before a restart, or of a name removed since, reads
+ * as stale rather than as another file. Index 0 is the root's. */
 
-#define FH_SIZE     8u
-#define HANDLES     2048u           /* paths a client may hold handles to */
+#define FH_SIZE         8u
+#define HANDLES_DEFAULT 16384u      /* names a client may hold handles to (80 B each) */
 
-/* The table; 0 on success. Called again it keeps what it has. */
-s32  handle_init(void);
-/* The handle of `path` ("" the root), made if new. */
-void handle_of(const char *path, u8 *fh);
+/* The table of `count` nodes (0: the default); 0 on success. Called again it keeps
+ * what it has. */
+s32  handle_init(u32 count);
+/* The handle of `path` ("" the root), made if new; an NFS3 status. */
+u32  handle_of(const char *path, u8 *fh);
 /* The path of a handle into `out`; an NFS3 status. */
 u32  handle_path(const u8 *fh, u32 len, char *out);
 /* After a rename: every held path under `from` now lives under `to`. */
 void handle_renamed(const char *from, const char *to);
+/* After a remove: handles of `path` go stale. */
+void handle_removed(const char *path);
 /* `dir` + "/" + `name` into `out`, "." and ".." resolved; an NFS3 status. */
 u32  handle_child(const char *dir, const u8 *name, u32 n, char *out);
 
@@ -124,8 +144,8 @@ u32  handle_child(const char *dir, const u8 *name, u32 n, char *out);
 
 /* NFS3 attributes: fattr3 from srv.h's SRV_STAT, post_op_attr, wcc_data, sattr3. */
 
-/* The number a file is known by (fileid): the platform's, else the path's. */
-u32  attr_fileid(const SRV_STAT *s, const char *path);
+/* The number a file is known by (fileid, 64 bits): its handle node's. */
+void attr_fileid(const char *path, u32 *hi, u32 *lo);
 void attr_put(XOUT *x, const SRV_STAT *s, const char *path);
 /* post_op_attr: the attributes when they can be read, else none. */
 void attr_put_post(XOUT *x, const char *path);
@@ -176,12 +196,21 @@ void nfs3_call(CONN *c, u32 proc, XIN *a, XOUT *r);
 /* srv.h's error as an NFS3 status. */
 u32  nfs3_status(s32 e);
 
-/* The connection's open file: kept for `path`, opened for writing if asked. */
-s32  nfs3_open(CONN *c, const char *path, u32 write);
-void nfs3_close(NFS_OPEN *o);
+/* The open file of `path` (opened for writing if asked), held until
+ * nfs3_file_done; 0 with the error in *e. */
+NFS_FILE *nfs3_file(const char *path, u32 write, s32 *e);
+void nfs3_file_done(NFS_FILE *f);
+/* Every open file of `path` or under it closed: before it is removed, renamed
+ * or truncated. */
+void nfs3_forget(const char *path);
+/* The sweeper that closes idle files; 0 on success. */
+s32  nfs3_files_start(void);
+/* What a connection holds open (its listing), at its end. */
+void nfs3_release(CONN *c);
 
 /* The verifier of WRITE and COMMIT: one for the server's life (writes go through). */
-extern const u8 nfs3_write_verf[8];
+extern u8 nfs3_write_verf[8];
+void nfs3_init(void);
 
 /* nfs3.c: files */
 void nfs3_getattr(NFS3_CALL *q);

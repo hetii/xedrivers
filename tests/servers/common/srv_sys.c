@@ -66,6 +66,11 @@ void *srv_alloc(u32 bytes)
     return calloc(1, bytes);
 }
 
+void srv_free(void *p)
+{
+    free(p);
+}
+
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 void srv_lock(void) { pthread_mutex_lock(&lock); }

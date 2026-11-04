@@ -99,11 +99,16 @@ s32  srv_rmdir(const char *root, const char *path);
 s32  srv_unlink(const char *root, const char *path);
 s32  srv_rename(const char *root, const char *from, const char *to);
 
-/* A directory listing: names one at a time from `*cookie` (0 at the start), the
- * cookie moved past each. 1 with a name, 0 at the end, < 0 on error. "." and ".."
- * are not returned. */
-s32  srv_readdir(const char *root, const char *path, u32 *cookie, char *name,
-                 u32 name_size, SRV_STAT *st);
+/* Data written so far on its way to the disk; 0 or an error. */
+s32  srv_flush(SRV_FILE f);
+
+/* A directory listing, read in order: opened, its names one at a time, closed.
+ * "." and ".." are not returned. */
+typedef void *SRV_DIR;              /* 0: none */
+s32  srv_opendir(const char *root, const char *path, SRV_DIR *out);
+/* 1 with the next name (and its attributes when `st`), 0 at the end, < 0 on error. */
+s32  srv_readdir(SRV_DIR d, char *name, u32 name_size, SRV_STAT *st);
+void srv_closedir(SRV_DIR d);
 
 /* The volume under `root`: bytes in all and free. */
 s32  srv_volume(const char *root, u32 *total_lo, u32 *total_hi, u32 *free_lo,
@@ -111,8 +116,9 @@ s32  srv_volume(const char *root, u32 *total_lo, u32 *total_hi, u32 *free_lo,
 
 /* --- memory ------------------------------------------------------------------ */
 
-/* Zeroed memory that lives as long as the server; 0 if there is none. */
+/* Zeroed memory; 0 if there is none. */
 void *srv_alloc(u32 bytes);
+void  srv_free(void *p);
 
 /* One lock for a server's shared tables: short sections only, never held across
  * a socket or file call. */

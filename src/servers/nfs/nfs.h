@@ -26,6 +26,7 @@ typedef struct {
     u32 portmap_port;       /* 0 for PORTMAP_PORT_DEFAULT; ~0u for no portmapper */
     u32 allow;              /* a client address (host order) and */
     u32 allow_mask;         /* its mask; 0 / 0 lets anyone in */
+    u32 handles;            /* names held at once; 0 for the default (16384) */
 } NFS_CONFIG;
 
 /* Counters, read by tools on the host. */
@@ -41,9 +42,13 @@ typedef struct {
     u32 writes;
     u32 write_bytes_lo, write_bytes_hi;
     u32 stale;              /* handles not in the table (any more) */
-    u32 handles;            /* paths in the table */
+    u32 handles;            /* names in the table */
+    u32 handles_full;       /* a handle refused: no leaf to give up */
     u32 portmap_calls;
     u32 mounts;
+    u32 commits;
+    u32 opens;              /* files opened for READ, WRITE, COMMIT */
+    u32 listings;           /* directories opened for READDIR */
 } NFS_STATS;
 
 extern volatile NFS_STATS nfs_stats;
