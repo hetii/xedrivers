@@ -97,7 +97,6 @@ static void serve(void *arg)
     s32 len;
     u32 n;
 
-    srv_share_add(c->sock);
     while ((len = recv_record(c)) >= 0) {
         n = rpc_call(c, c->in, (u32)len, c->out + 4, BUF_SIZE - 4);
         if (!n)
@@ -110,7 +109,6 @@ static void serve(void *arg)
             break;
     }
     nfs3_release(c);
-    srv_share_remove(c->sock);
     srv_close(c->sock);
     srv_lock();
     nfs_stats.active--;

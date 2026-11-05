@@ -598,10 +598,7 @@ def status(sym):
         tl = struct.unpack(">I", read(sym["srv_thread_last"], 4))[0]
         tr = struct.unpack(">I", read(sym["srv_thread_retries"], 4))[0]
         print("srv      send retries=%d last error=%d | thread starts retried=%d failed=%d "
-              "last status=%#x | window %d KB" % (
-                  r, e, tr, tf, tl,
-                  struct.unpack(">I", read(sym["srv_share_last_window"], 4))[0] >> 10
-                  if "srv_share_last_window" in sym else 0))
+              "last status=%#x" % (r, e, tr, tf, tl))
     if "ftp_stats" in sym:
         f = read_struct(sym, "ftp_stats")
         print("xeftp    started=%d sessions=%d active=%d refused=%d bad_logins=%d commands=%d "
@@ -901,9 +898,6 @@ def context(sym):
         ctx["band_ghz"] = 2.4 if ctx["channel"] <= 14 else 5
         ctx["radio"] = radio_settings(sym)
         ctx["router"] = router_state(ctx["band_ghz"])
-    if "srv_share_budget" in sym:
-        budget, most = struct.unpack(">II", read(sym["srv_share_budget"], 4) + read(sym["srv_share_most"], 4))
-        ctx["servers"] = {"windows_kb": budget >> 10, "window_kb": most >> 10}
     xs = read_struct(sym, "xnet_stats")
     ctx["xnet"] = {
         "rcvbuf_kb": xs["rcvbuf_after"] or xs["rcvbuf_before"],

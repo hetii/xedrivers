@@ -636,7 +636,19 @@ void xnet_title_pool(void)
 #define XNET_MAX_DGRAM          48u
 #define XNET_MAX_STREAM         49u
 #define TCP_SOCKETS_STOCK       16u
+/* With the file servers built in (servers=) 32: xnet's 16 are the console's in all, the
+ * services listening take 5 to 7 of them, and a xeftp session up to three: four
+ * sessions at once found none (425), xenfs nconnect=8 hung. On 32, one server at a
+ * time, 8 sessions or 8 connections carry on, one stream and ftpdll unchanged
+ * (2026-11-05, docs/speedtest.jsonl). Without servers xnet's own 16 stay. */
+#ifndef XE_SERVERS
+#define XE_SERVERS 0
+#endif
+#if XE_SERVERS
+#define TCP_SOCKETS_DEFAULT     32u
+#else
 #define TCP_SOCKETS_DEFAULT     0u      /* leave xnet's */
+#endif
 
 static void more_sockets(void)
 {

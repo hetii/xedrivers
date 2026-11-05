@@ -151,12 +151,6 @@ s32 srv_wait(SRV_SOCK s, u32 ms)
     return poll(&p, 1, (int)ms);
 }
 
-void srv_buffers(SRV_SOCK s, u32 bytes)
-{
-    setsockopt(s, SOL_SOCKET, SO_RCVBUF, &bytes, sizeof(bytes));
-    setsockopt(s, SOL_SOCKET, SO_SNDBUF, &bytes, sizeof(bytes));
-}
-
 void srv_close(SRV_SOCK s)
 {
     if (s >= 0)

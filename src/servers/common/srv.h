@@ -54,13 +54,6 @@ s32  srv_send(SRV_SOCK s, const void *buffer, u32 length);
 s32  srv_recvfrom(SRV_SOCK s, void *buffer, u32 length, u32 *address, u32 *port);
 s32  srv_sendto(SRV_SOCK s, const void *buffer, u32 length, u32 address, u32 port);
 void srv_close(SRV_SOCK s);
-/* The receive window and send buffer of `s`, in bytes. */
-void srv_buffers(SRV_SOCK s, u32 bytes);
-/* A connection that carries data, while it does: it takes its share of the budget
- * for socket buffers (srv_share.c). */
-void srv_share_init(void);
-void srv_share_add(SRV_SOCK s);
-void srv_share_remove(SRV_SOCK s);
 /* 1 when `s` has something to read (a listener: a connection to accept), 0 after
  * `ms` without, < 0 on error: before a call that would wait for a client that
  * may never come. */

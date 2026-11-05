@@ -277,7 +277,7 @@ $(BUILD)/test_ax88178: tests/drivers/ax88178/test_ax88178.c src/drivers/ax88178/
 
 # The file servers on the host: src/servers/<name>/ on tests/servers/common's POSIX
 # platform, mounted with the PC's own clients (skipped where sudo cannot mount).
-SERVERS_HOST := $(wildcard tests/servers/common/*.c) src/servers/common/srv_keep.c src/servers/common/srv_share.c
+SERVERS_HOST := $(wildcard tests/servers/common/*.c) src/servers/common/srv_keep.c
 $(BUILD)/test_nfs: tests/servers/xenfs/test_nfs.c $(wildcard src/servers/xenfs/*.c) \
                    $(SERVERS_HOST) $(HEADERS)
 	@mkdir -p $(BUILD)

@@ -14,8 +14,6 @@
  *   ftp_allow  = a.b.c.d/n      (anyone) the clients let in
  *   ftp_pasv_low, ftp_pasv_count (50000, 1000) the passive ports, taken in turn
  *   srv_delay  = <seconds>      (30) after boot before the first start
- *   srv_windows_kb = <KB>       (0: xnet's defaults) the budget for receive windows, shared
- *   srv_window_kb  = <KB>       (128) the most one connection gets of it (srv_share.c)
  */
 
 #include "servers.h"
@@ -157,6 +155,5 @@ void servers_tick(u32 tick)
     if (tick < delay)
         return;
     launched = 1;
-    srv_share_init();
     srv_thread(starter, 0);
 }
