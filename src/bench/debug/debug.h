@@ -5,6 +5,12 @@
 
 #include "kernel.h"
 
+/* What memory the console has: MmQueryStatistics' words, then how many 64 KB blocks can
+ * be taken, and given back at once (at most 1024 each): pool types 0 and 2, physical
+ * flags 0 and 2. */
+u32 debug_memory(void);
+extern volatile u32 debug_memory_stats[32];
+extern volatile u32 debug_memory_blocks[4];
 u32 debug_peek(u32 address, u32 little);
 u32 debug_pci(u32 bdf, u32 reg, u32 write);
 extern volatile u32 debug_pci_value;

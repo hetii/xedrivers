@@ -1099,8 +1099,11 @@ def console_ports():
     return ", ".join(out)
 
 
+FTP_AUTH = ""        # "user:password@" for a server that wants a login (ftpdll)
+
+
 def xeftp_start(up, name, port, folder, src=None):
-    url = "ftp://%s:%d/%s/%s" % (HOST, port, folder, name)
+    url = "ftp://%s%s:%d/%s/%s" % (FTP_AUTH, HOST, port, folder, name)
     args = (["-T", src, "-w", "%{size_upload}"] if up else ["-o", os.devnull, "-w", "%{size_download}"])
     return subprocess.Popen(["curl", "-s", "-S", "--connect-timeout", "20", "--max-time", str(GUARD_S),
                              *args, url], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1127,7 +1130,7 @@ def xeftp_wait(procs, each):
 
 def xeftp_size(name, port, folder):
     done = subprocess.run(["curl", "-s", "--connect-timeout", "20", "--max-time", "60", "-I",
-                           "ftp://%s:%d/%s/%s" % (HOST, port, folder, name)],
+                           "ftp://%s%s:%d/%s/%s" % (FTP_AUTH, HOST, port, folder, name)],
                           capture_output=True, text=True, timeout=90)
     m = re.search(r"Content-Length: (\d+)", done.stdout)
     return int(m.group(1)) if m else -1
@@ -1137,7 +1140,7 @@ def xeftp_delete(names, port, folder):
     for name in names:
         subprocess.run(["curl", "-s", "--connect-timeout", "20", "--max-time", "60", "-Q",
                         "DELE %s/%s" % (folder, name), "-o", os.devnull,
-                        "ftp://%s:%d/" % (HOST, port)], capture_output=True, timeout=90)
+                        "ftp://%s%s:%d/" % (FTP_AUTH, HOST, port)], capture_output=True, timeout=90)
 
 
 def xeftp_run(up, mb, files, port, folder):
@@ -1427,6 +1430,27 @@ def bench(sym, argv):
                   "  median of %d" % a.repeat if a.repeat > 1 else ""))
         keep(ctx, "udp discard %d B" % a.size, 1, DIRECTION["up"], rate, a)
         return
+    if a.test == "ftpdll" and a.files != "1,2":
+        # several sessions at once, as a client copying several files
+        global FTP_AUTH
+        FTP_AUTH = a.login + "@"
+        GUARD_S = a.guard
+        for files in (int(x) for x in a.files.split(",")):
+            names = ["xectl-xeftp-%d-%d.bin" % (files, i) for i in range(files)]
+            for w in sorted(ways, key=lambda w: w != "up"):
+                try:
+                    rate = median([xeftp_run(w == "up", a.mb, files, 21, a.dir) for _ in range(a.repeat)])
+                    print("ftpdll %-4s x%-2d %s  %d MB  %6.1f Mbit/s (%5.1f MB/s)" % (
+                        w, files, DIRECTION[w], a.mb, rate * 8 / 1e6, rate / 1e6))
+                except (BenchFailed, subprocess.TimeoutExpired, OSError) as e:
+                    print("ftpdll %-4s x%-2d FAILED: %s | %s" % (w, files, e, console_ports()))
+                    a.note, note = "failed: %s" % e, a.note
+                    keep(ctx, "ftpdll %d MB" % a.mb, files, DIRECTION[w], 0, a)
+                    a.note = note
+                    continue
+                keep(ctx, "ftpdll %d MB" % a.mb, files, DIRECTION[w], rate, a)
+            xeftp_delete(names, 21, a.dir)
+        return
     if a.test == "ftpdll":
         for w in sorted(ways, key=lambda w: w != "up"):     # the file goes up first
             runs = [ftp_run(w == "up", a.mb, a.login, a.dir) for _ in range(a.repeat)]
@@ -1507,6 +1531,14 @@ def main(argv):
         omni_log(sym)
     elif what == "prof":
         prof(sym, float(rest[0]) if rest else 5.0)
+    elif what == "memory":
+        # bench=debug: MmQueryStatistics' words, and 64 KB blocks that can be taken
+        st = command(sym, 25, wait=120)
+        words = struct.unpack(">32I", read(sym["debug_memory_stats"], 128))
+        blocks = struct.unpack(">4I", read(sym["debug_memory_blocks"], 16))
+        print("status %#x; words: %s" % (st[0], " ".join("%x" % w for w in words)))
+        print("64 KB blocks that can be taken (1024 = at least): pool type 0: %d, pool type 2: %d, "
+              "physical flags 0: %d, physical flags 2: %d" % blocks)
     elif what == "cmd":
         print("result %#x status %#x" % command(sym, num(rest[0]),
                                                 *[num(x) for x in rest[1:]]))

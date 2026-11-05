@@ -251,3 +251,52 @@ void debug_tick(u32 tick)
         last_frames[i] = frames;
     }
 }
+
+extern u32 MmQueryStatistics(u32 *stats);
+extern void *ExAllocatePoolTypeWithTag(u32 bytes, u32 tag, u32 pool_type);
+extern void ExFreePool(void *p);
+extern void MmFreePhysicalMemory(u32 flags, void *p);
+
+#define PROBE_BLOCK 0x10000u
+#define PROBE_MOST  1024u
+
+volatile u32 debug_memory_stats[32];
+volatile u32 debug_memory_blocks[4];
+static void *probe_blocks[PROBE_MOST];
+
+static u32 probe(u32 physical, u32 kind)
+{
+    u32 n = 0, i;
+
+    while (n < PROBE_MOST) {
+        void *p = physical ? MmAllocatePhysicalMemory(kind, PROBE_BLOCK, 4)
+                           : ExAllocatePoolTypeWithTag(PROBE_BLOCK, 0x626F7270u, kind);
+
+        if (!p)
+            break;
+        probe_blocks[n++] = p;
+    }
+    for (i = 0; i < n; i++) {
+        if (physical)
+            MmFreePhysicalMemory(kind, probe_blocks[i]);
+        else
+            ExFreePool(probe_blocks[i]);
+    }
+    return n;
+}
+
+u32 debug_memory(void)
+{
+    static u32 stats[32];
+    u32 i, status;
+
+    stats[0] = sizeof(stats);
+    status = MmQueryStatistics(stats);
+    for (i = 0; i < 32; i++)
+        debug_memory_stats[i] = stats[i];
+    debug_memory_blocks[0] = probe(0, 0);
+    debug_memory_blocks[1] = probe(0, 2);
+    debug_memory_blocks[2] = probe(1, 0);
+    debug_memory_blocks[3] = probe(1, 2);
+    return status;
+}
