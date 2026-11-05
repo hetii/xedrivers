@@ -294,9 +294,9 @@ u32 debug_memory(void)
     status = MmQueryStatistics(stats);
     for (i = 0; i < 32; i++)
         debug_memory_stats[i] = stats[i];
-    debug_memory_blocks[0] = probe(0, 0);
-    debug_memory_blocks[1] = probe(0, 2);
-    debug_memory_blocks[2] = probe(1, 0);
-    debug_memory_blocks[3] = probe(1, 2);
+    debug_memory_blocks[0] = probe(0, 2);
+    debug_memory_blocks[1] = probe(0, 1);
+    debug_memory_blocks[2] = probe(1, 2);
+    debug_memory_blocks[3] = probe(1, 1);
     return status;
 }

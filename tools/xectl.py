@@ -1537,8 +1537,8 @@ def main(argv):
         words = struct.unpack(">32I", read(sym["debug_memory_stats"], 128))
         blocks = struct.unpack(">4I", read(sym["debug_memory_blocks"], 16))
         print("status %#x; words: %s" % (st[0], " ".join("%x" % w for w in words)))
-        print("64 KB blocks that can be taken (1024 = at least): pool type 0: %d, pool type 2: %d, "
-              "physical flags 0: %d, physical flags 2: %d" % blocks)
+        print("64 KB blocks that can be taken (1024 = at least): pool type 2: %d, pool type 1: %d, "
+              "physical flags 2: %d, physical flags 1: %d" % blocks)
     elif what == "cmd":
         print("result %#x status %#x" % command(sym, num(rest[0]),
                                                 *[num(x) for x in rest[1:]]))
