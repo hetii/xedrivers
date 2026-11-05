@@ -43,7 +43,11 @@ s32 nfs_start(const NFS_CONFIG *config)
 /* TCP carries records (RFC 5531 section 11): a
  * 4-byte mark, its top bit "last fragment", before each fragment. */
 
-#define BUF_SIZE    (IO_MAX + 4096u)    /* a WRITE's data and its header */
+/* One buffer a connection: the request, and the reply right behind it. A WRITE has a
+ * large request and a small reply, a READ the other way round, so IO_MAX and some
+ * room for headers holds either. The system has about 1.8 MB to give: two buffers a
+ * connection stopped at 13 connections, and nconnect=16 hung (2026-11-05). */
+#define BUF_SIZE    (IO_MAX + 8192u)
 #define UDP_SIZE    8192u
 
 static CONN conns[CONN_MAX];
@@ -95,17 +99,20 @@ static void serve(void *arg)
 {
     CONN *c = (CONN *)arg;
     s32 len;
-    u32 n;
+    u32 n, room;
+    u8 *reply;
 
     while ((len = recv_record(c)) >= 0) {
-        n = rpc_call(c, c->in, (u32)len, c->out + 4, BUF_SIZE - 4);
+        reply = c->in + (((u32)len + 3) & ~3u);
+        room = BUF_SIZE - (u32)(reply - c->in);
+        n = rpc_call(c, c->in, (u32)len, reply + 4, room - 4);
         if (!n)
             continue;
-        c->out[0] = (u8)(0x80 | n >> 24);
-        c->out[1] = (u8)(n >> 16);
-        c->out[2] = (u8)(n >> 8);
-        c->out[3] = (u8)n;
-        if (srv_send(c->sock, c->out, n + 4) < 0)
+        reply[0] = (u8)(0x80 | n >> 24);
+        reply[1] = (u8)(n >> 16);
+        reply[2] = (u8)(n >> 8);
+        reply[3] = (u8)n;
+        if (srv_send(c->sock, reply, n + 4) < 0)
             break;
     }
     nfs3_release(c);
@@ -130,11 +137,9 @@ static CONN *take_conn(void)
             break;
         }
     srv_unlock();
-    if (c && !c->in) {
+    if (c && !c->in)
         c->in = (u8 *)srv_alloc(BUF_SIZE);
-        c->out = (u8 *)srv_alloc(BUF_SIZE);
-    }
-    if (c && (!c->in || !c->out)) {
+    if (c && !c->in) {
         c->busy = 0;
         return 0;
     }
@@ -162,6 +167,7 @@ static void listener(void *arg)
         if (!c) {
             nfs_stats.no_slot++;
             srv_close(s);
+            srv_sleep(50);              /* a client asking again at once gets no spin */
             continue;
         }
         c->sock = s;
