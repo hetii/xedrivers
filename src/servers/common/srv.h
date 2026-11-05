@@ -130,8 +130,7 @@ void srv_forget(const char *root, const char *path);
 
 /* --- memory ------------------------------------------------------------------ */
 
-/* Zeroed memory; 0 if there is none. Only what is under 32 KB can be given back to
- * srv_free: larger blocks are for the server's life. */
+/* Zeroed memory; 0 if there is none. */
 void *srv_alloc(u32 bytes);
 void  srv_free(void *p);
 
