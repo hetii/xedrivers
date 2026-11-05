@@ -39,6 +39,7 @@ CLI; default `xerunner` on PATH, else ../xerunner/.venv/bin/xerunner).
 
 import argparse
 import json
+import re
 import os
 import shutil
 import socket
@@ -124,7 +125,7 @@ STRUCTS = {
                   "tx_stalls", "rx_stalls", "stall_inflight", "stall_ep_busy", "stall_open",
                   "tx_transfers", "tx_aggregated", "rxs_busy", "rxs_parked", "rxs_errors",
                   "rxs_last_error", "rxs_rxpkt_num", "rxs_rxdma_status", "rxs_txdma_status",
-                  "rxs_fifo_info", "rx_kicks", "rx_kick_ok", "dig_igi", "dig_fa", "dig_rssi"],
+                  "rxs_fifo_info", "rx_kicks", "rx_kick_ok", "dig_igi", "dig_fa", "dig_rssi", "edcca_l2h"],
     "rtw_sta_stats": ["state", "scans", "probes", "auths", "auth_status", "assocs",
                       "assoc_status", "aid", "joins", "timeouts", "deauths",
                       "deauth_reason", "beacon_losses", "rx_data", "rx_eapol",
@@ -880,6 +881,8 @@ def context(sym):
         ctx.update(kind="wifi", channel=ch, width_mhz=BW_MHZ.get(a["join_width"], a["join_width"]))
     if ctx["kind"] == "wifi":
         ctx["band_ghz"] = 2.4 if ctx["channel"] <= 14 else 5
+        ctx["radio"] = radio_settings(sym)
+        ctx["router"] = router_state(ctx["band_ghz"])
     xs = read_struct(sym, "xnet_stats")
     ctx["xnet"] = {
         "rcvbuf_kb": xs["rcvbuf_after"] or xs["rcvbuf_before"],
@@ -892,6 +895,52 @@ def context(sym):
     return ctx
 
 
+RTS_NAMES = {0: "off", 1: "rts", 2: "cts"}
+EDCCA_NAMES = {0: "static", 1: "dynamic", 2: "off"}
+RADIO_DEFAULT = {"rts": "off", "edcca": "static"}
+
+
+def radio_settings(sym):
+    """wifi_rts and wifi_edcca as the plugin read them (wl_config, wireless.h):
+    after loaded, count, 4 name lengths, 4 names of 33, pass_len, pass[64] and
+    dashboard."""
+    if "wl_config" not in sym:
+        return dict(RADIO_DEFAULT)
+    rts, edcca = struct.unpack(">II", read(sym["wl_config"] + 228, 8))
+    return {"rts": RTS_NAMES.get(rts, rts), "edcca": EDCCA_NAMES.get(edcca, edcca)}
+
+
+ROUTER = os.environ.get("XE_ROUTER", "root@192.168.1.10")
+ROUTER_IF = {2.4: "phy0-ap0", 5: "phy1-ap0"}
+
+
+def router_state(band):
+    """The test router's side of the link at the time of a result, kept with it so a
+    lower figure can be checked against the router: channel, width, txpower, and
+    the console's station (signal, bitrates, retries). {} when it cannot be asked."""
+    dev = ROUTER_IF.get(band)
+    try:
+        out = subprocess.run(["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", ROUTER,
+                              "iw dev %s info; iw dev %s station dump" % (dev, dev)],
+                             capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    st = {}
+    m = re.search(r"channel (\d+) \((\d+) MHz\), width: (\d+) MHz", out)
+    if m:
+        st.update(channel=int(m.group(1)), width_mhz=int(m.group(3)))
+    m = re.search(r"txpower ([\d.]+) dBm", out)
+    if m:
+        st["txpower_dbm"] = float(m.group(1))
+    for key, pat in (("signal_dbm", r"signal:\s+(-?\d+)"), ("tx_bitrate", r"tx bitrate:\s+([\d.]+)"),
+                     ("rx_bitrate", r"rx bitrate:\s+([\d.]+)"), ("tx_retries", r"tx retries:\s+(\d+)"),
+                     ("tx_failed", r"tx failed:\s+(\d+)")):
+        m = re.search(pat, out)
+        if m:
+            st[key] = float(m.group(1)) if "." in m.group(1) else int(m.group(1))
+    return st
+
+
 def built_from(sym):
     """The commit the running plugin was built from, read off the console, and
     whether its tree had uncommitted changes."""
@@ -900,7 +949,15 @@ def built_from(sym):
 
 
 CONDITIONS = ("card", "kind", "link_mbps", "transport", "band_ghz", "channel", "width_mhz",
-              "xnet", "test", "streams", "direction")
+              "xnet", "radio", "test", "streams", "direction")
+
+
+def condition(row, k):
+    """A row's value for a condition; a Wi-Fi row kept before "radio" was recorded
+    ran the defaults."""
+    if k == "radio" and row.get("kind") == "wifi" and "radio" not in row:
+        return dict(RADIO_DEFAULT)
+    return row.get(k)
 
 
 def kept_rows(kind):
@@ -922,9 +979,16 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
            **{k: v for k, v in ctx.items() if k not in ("commit", "dirty")},
            "test": test, "streams": streams, "direction": direction,
            "mbit_s": round(bytes_per_s * 8 / 1e6, 1), "mbyte_s": round(bytes_per_s / 1e6, 2)}
-    key = [row.get(k) for k in CONDITIONS]
+    key = [condition(row, k) for k in CONDITIONS]
     path, rows = kept_rows(ctx["kind"])
-    old = next((r for r in rows if [r.get(k) for k in CONDITIONS] == key), None)
+    old = next((r for r in rows if [condition(r, k) for k in CONDITIONS] == key), None)
+    if ctx.get("router"):
+        rt = ctx["router"]
+        print("     router ch %s/%s MHz txpower %s dBm, console signal %s dBm, tx %s / rx %s "
+              "Mbit/s, retries %s failed %s" % (
+                  rt.get("channel"), rt.get("width_mhz"), rt.get("txpower_dbm"),
+                  rt.get("signal_dbm"), rt.get("tx_bitrate"), rt.get("rx_bitrate"),
+                  rt.get("tx_retries"), rt.get("tx_failed")))
     if old:
         change = (row["mbit_s"] - old["mbit_s"]) / old["mbit_s"] * 100 if old["mbit_s"] else 0.0
         verdict = ("within" if abs(change) <= a.tolerance else
@@ -950,7 +1014,7 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
         row["note"] = "lower accepted: " + a.accept_lower
     elif a.note:
         row["note"] = a.note
-    rows = [r for r in rows if [r.get(k) for k in CONDITIONS] != key] + [row]
+    rows = [r for r in rows if [condition(r, k) for k in CONDITIONS] != key] + [row]
     os.makedirs(os.path.dirname(RESULTS), exist_ok=True)
     with open(path, "w") as f:
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)

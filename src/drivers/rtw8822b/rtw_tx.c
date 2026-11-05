@@ -10,11 +10,13 @@
  */
 
 #include "rtw.h"
+#include "wireless.h"
 #include "prof.h"
 #include "bench.h"
 
 #define DESC_RATE1M         0x00
 #define DESC_RATE6M         0x04
+#define DESC_RATE24M        0x08
 #define DESC_RATE54M        0x0B
 #define RATEID_G            7           /* RTW_RATEID_G */
 #define RATEID_B_20M        8
@@ -198,8 +200,13 @@ static void fill(RTW *r, u8 *b, const u8 *head, u32 head_length, const u8 *body,
         } else {
             if (r->ampdu)                               /* AGG_EN, AMPDU_DEN, MAX_AGG_NUM */
                 put32(b + 8, 1u << 12 | (r->ampdu_density & 7) << 20);
+            /* wifi_rts: RTSEN with HW_RTS_EN, or CTS2SELF; the RTS at 24M */
             put32(b + 12, (r->data_use_rate ? 1u << 8 : 0) |
-                          (r->ampdu ? (r->ampdu_factor & 0x1F) << 17 : 0));
+                          (r->ampdu ? (r->ampdu_factor & 0x1F) << 17 : 0) |
+                          (wl_config.rts == WL_RTS_RTS ? 1u << 12 | 1u << 13 : 0) |
+                          (wl_config.rts == WL_RTS_CTS ? 1u << 11 : 0));
+            if (wl_config.rts != WL_RTS_OFF)
+                rate |= (u32)DESC_RATE24M << 24;        /* RTSRATE */
             put32(b + 20, r->data_bw << 5 | (r->data_sgi ? 1u << 4 : 0) |
                           (r->data_ldpc ? 1u << 7 : 0) | (r->data_stbc ? 1u << 8 : 0));
         }

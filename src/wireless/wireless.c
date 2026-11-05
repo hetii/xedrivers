@@ -181,6 +181,15 @@ void wl_scan_end(u32 status)
     wl_stats.scans_done++;
 }
 
+static u32 word_is(const char *value, u32 n, const char *word)
+{
+    u32 i;
+
+    for (i = 0; i < n && word[i] && value[i] == word[i]; i++)
+        ;
+    return i == n && !word[i];
+}
+
 /* --- which network to join --------------------------------------------------- */
 
 volatile WL_CONFIG wl_config;
@@ -216,6 +225,12 @@ void wl_load_config(void)
     for (i = 0; i < 9 && i < n && value[i] == "dashboard"[i]; i++)
         ;
     wl_config.dashboard = n == 9 && i == 9;
+    n = file_setting(WL_SETTINGS, "wifi_rts", value, sizeof(value));
+    wl_config.rts = word_is(value, n, "rts") ? WL_RTS_RTS :
+                    word_is(value, n, "cts") ? WL_RTS_CTS : WL_RTS_OFF;
+    n = file_setting(WL_SETTINGS, "wifi_edcca", value, sizeof(value));
+    wl_config.edcca = word_is(value, n, "dynamic") ? WL_EDCCA_DYNAMIC :
+                      word_is(value, n, "off") ? WL_EDCCA_OFF : WL_EDCCA_STATIC;
     wl_config.loaded = 1;
 }
 

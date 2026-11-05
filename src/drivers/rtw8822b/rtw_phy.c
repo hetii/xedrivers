@@ -3,6 +3,7 @@
  */
 
 #include "rtw.h"
+#include "wireless.h"
 #include "rtw8822b_defs.h"
 #include "rtw8822b_txpwr.h"
 
@@ -679,6 +680,15 @@ void rtw_dig(RTW *r)
     igi = igi < lower ? lower : igi > upper ? upper : igi;
     if (igi != r->dig_igi)
         dig_write(r, igi);
+    /* wifi_edcca = dynamic: the energy-detect threshold follows the gain, as
+     * rtw8822b_adaptivity's normal mode (L2H igi + 8, at least 48; H2L 8 below) */
+    if (wl_config.edcca == WL_EDCCA_DYNAMIC && (igi != r->dig_igi || !r->edcca_set)) {
+        u32 l2h = igi + 8 > 48 ? igi + 8 : 48;
+
+        rtw_write32_mask(r, 0x08A4, 0xFFFF, l2h | (l2h - 8) << 8);
+        r->edcca_set = 1;
+        r->st->edcca_l2h = l2h;
+    }
     r->dig_igi = igi;
     r->st->dig_igi = igi;
     r->st->dig_fa = fa;
@@ -692,6 +702,7 @@ void rtw_dig_reset(RTW *r)
         dig_write(r, r->igi);
     r->dig_igi = 0;
     r->dig_ticks = 0;
+    r->edcca_set = 0;
     r->ap_signal_x8 = -60 * 8;
     r->st->dig_igi = r->igi;
 }

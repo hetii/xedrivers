@@ -155,6 +155,7 @@ typedef struct {
     u32 dig_igi;                /* the receive gain the DIG last set, */
     u32 dig_fa;                 /* the false alarms it saw in its last 2 s, */
     u32 dig_rssi;               /* and the access point's RSSI, 100 + dBm */
+    u32 edcca_l2h;              /* wifi_edcca = dynamic: the threshold set last */
 } RTW_STATS;
 
 extern volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
@@ -177,6 +178,7 @@ typedef struct RTW {
     u32 igi;                    /* the gain the tables left, for the DIG */
     u32 dig_igi;                /* the DIG's gain, 0 until linked */
     u32 dig_ticks;
+    u32 edcca_set;              /* wifi_edcca = dynamic: written since the link */
     u8 bssid[6];
     s32 ap_signal_x8;           /* the access point's frames, dBm, averaged x8 */
 

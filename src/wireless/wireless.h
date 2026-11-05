@@ -82,7 +82,19 @@ typedef struct {
     u32  pass_len;              /* `wifi_pass =`, for a WPA2 network */
     char pass[WL_PASS_MAX + 1];
     u32  dashboard;             /* `wifi_mode = dashboard`, else ethernet */
+    u32  rts;                   /* `wifi_rts =`: WL_RTS_OFF (default), _RTS, _CTS */
+    u32  edcca;                 /* `wifi_edcca =`: WL_EDCCA_STATIC (default), _DYNAMIC, _OFF */
 } WL_CONFIG;
+
+/* Protection before a data frame: none, RTS/CTS, or CTS-to-self. */
+#define WL_RTS_OFF          0u
+#define WL_RTS_RTS          1u
+#define WL_RTS_CTS          2u
+/* Energy-detect CCA (when the card holds off sending): the threshold rtw88 sets
+ * for the gain at its link, one that follows the gain as rtw88's DIG does, or none. */
+#define WL_EDCCA_STATIC     0u
+#define WL_EDCCA_DYNAMIC    1u
+#define WL_EDCCA_OFF        2u
 
 extern volatile WL_CONFIG wl_config;
 

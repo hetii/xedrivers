@@ -345,7 +345,9 @@ static void op_set_link(void *c, const WL_LINK_INFO *link)
     rtw_write32_mask(r, REG_CR, PORT0_NET_TYPE, NET_MGD_LINKED);
     rtw_write32_mask(r, PORT0_AID, 0x7FF, link->aid);
     rtw_write32(r, REG_RCR, RCR_LINKED);
-    rtw_write32(r, REG_EDCCA_TH, EDCCA_LINKED);
+    /* wifi_edcca: rtw88's threshold for the gain at its link (static), the DIG's
+     * from here on (dynamic, rtw_phy.c), or never holding off (off) */
+    rtw_write32(r, REG_EDCCA_TH, wl_config.edcca == WL_EDCCA_OFF ? EDCCA_OFF : EDCCA_LINKED);
     {
         u32 mask, rate_id, top;
 
