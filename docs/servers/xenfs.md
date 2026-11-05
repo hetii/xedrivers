@@ -1,6 +1,6 @@
-# nfs: an NFSv3 server
+# xenfs: an NFSv3 server
 
-Directory: `src/servers/nfs/` · built with `make servers=nfs` · ports 2049 (NFS and
+Directory: `src/servers/xenfs/` · built with `make servers=xenfs` · ports 2049 (NFS and
 MOUNT, TCP and UDP) and 111 (portmapper and rpcbind)
 
 NFS v3 (RFC 1813) over TCP, with MOUNT v1-v3 and a portmapper v2 / rpcbind v3-v4
@@ -76,7 +76,7 @@ hardware thread (`srv_cpu` 2-5) changes nothing. On the RTL8822BU at 5 GHz:
 
 ## Tests
 
-`tests/servers/nfs/test_nfs.c` builds the server on the host and mounts it with
+`tests/servers/xenfs/test_xenfs.c` builds the server on the host and mounts it with
 the PC's own NFS client. It runs write, read after a remount, a directory, a
 listing, rename, truncate and remove. It lists 3000 names through a table of 256
 handles, and renames a file while it is open. Skipped without `mount.nfs` or

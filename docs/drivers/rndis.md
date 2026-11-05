@@ -27,7 +27,7 @@ tethered first keeps the uplink ([xedrivers.md](../xedrivers.md#uplinks)).
 
 ## Measured
 
-- xnet took an address from the phone's DHCP, and the console served FTP to a
+- xnet took an address from the phone's DHCP, and ftpdll on the console served files to a
   client on the phone.
 - Console to phone, UDP to the phone's broadcast address (`tools/xectl.py blast`):
 
@@ -42,6 +42,6 @@ tethered first keeps the uplink ([xedrivers.md](../xedrivers.md#uplinks)).
 ## Issues
 
 - **Large receive transfers make uploads from the phone crawl.** Offered 16 KB, the
-  phone held received frames back to fill the transfer (70 frames in 39), and an FTP
+  phone held received frames back to fill the transfer (70 frames in 39), and an ftpdll
   upload ran at 0.6 to 0.7 Mbit/s (75 to 90 KB/s). Hence 2048 bytes.
-- **No TCP or FTP figures from `xectl.py bench` yet.**
+- **No TCP or ftpdll figures from `xectl.py bench` yet.**

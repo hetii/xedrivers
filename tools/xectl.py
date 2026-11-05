@@ -20,7 +20,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py prof [SECONDS]             where a frame's time goes (bench=prof)
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
     xectl.py bench tcp [up|down|both] [--streams 1,4] [--seconds S] [--pace MB/s]
-    xectl.py bench ftp [up|down|both] [--mb 256] [--login U:P] [--dir Hdd1/xedrivers]
+    xectl.py bench ftpdll [up|down|both] [--mb 256] [--login U:P] [--dir Hdd1/xedrivers]
     xectl.py bench sockets [--count 80] how many TCP connections the console holds
 
 Every bench result is set against the kept one under the same conditions and the
@@ -567,7 +567,7 @@ def status(sym):
                           a["tx_transfers"], a["tx_too_big"], a["mii_errors"]))
     if "nfs_stats" in sym:
         n = read_struct(sym, "nfs_stats")
-        print("nfs      started=%d conns=%d active=%d calls=%d bad=%d refused=%d mounts=%d "
+        print("xenfs    started=%d conns=%d active=%d calls=%d bad=%d refused=%d mounts=%d "
               "read=%d/%dMB write=%d/%dMB commits=%d opens=%d listings=%d handles=%d full=%d "
               "stale=%d portmap=%d no_thread=%d" % (
                   n["started"], n["connections"], n["active"], n["calls"], n["bad_calls"],
@@ -586,7 +586,7 @@ def status(sym):
               "last status=%#x" % (r, e, tr, tf, tl))
     if "ftp_stats" in sym:
         f = read_struct(sym, "ftp_stats")
-        print("ftp      started=%d sessions=%d active=%d refused=%d bad_logins=%d commands=%d "
+        print("xeftp    started=%d sessions=%d active=%d refused=%d bad_logins=%d commands=%d "
               "retr=%d/%dMB stor=%d/%dMB lists=%d data_failed=%d (wait %d accept %d) "
               "retr stopped by disk %d / send %d no_thread=%d" % (
                   f["started"], f["sessions"], f["active"], f["refused"], f["bad_logins"],
@@ -1049,7 +1049,7 @@ DIRECTION = {"down": "console->pc", "up": "pc->console"}
 
 def bench(sym, argv):
     ap = argparse.ArgumentParser(prog="xectl.py bench")
-    ap.add_argument("test", choices=["tcp", "ftp", "sockets"])
+    ap.add_argument("test", choices=["tcp", "ftpdll", "sockets"])
     ap.add_argument("which", nargs="?", default="both", choices=["down", "up", "both"])
     ap.add_argument("--streams", default="1,4")
     ap.add_argument("--seconds", type=float, default=10)
@@ -1075,14 +1075,14 @@ def bench(sym, argv):
         return
     commit, dirty = built_from(sym)
     ctx = dict(context(sym), commit=commit, dirty=dirty)
-    if a.test == "ftp":
+    if a.test == "ftpdll":
         for w in sorted(ways, key=lambda w: w != "up"):     # the file goes up first
             runs = [ftp_run(w == "up", a.mb, a.login, a.dir) for _ in range(a.repeat)]
             rate = median(runs)
-            print("ftp  %-4s %s  %d MB  %6.1f Mbit/s (%5.1f MB/s)%s" % (
+            print("ftpdll %-4s %s  %d MB  %6.1f Mbit/s (%5.1f MB/s)%s" % (
                 w, DIRECTION[w], a.mb, rate * 8 / 1e6, rate / 1e6,
                 "  median of %d" % a.repeat if a.repeat > 1 else ""))
-            keep(ctx, "ftp %d MB" % a.mb, 1, DIRECTION[w], rate, a)
+            keep(ctx, "ftpdll %d MB" % a.mb, 1, DIRECTION[w], rate, a)
         return
     for n in (int(x) for x in a.streams.split(",")):
         for w in ways:

@@ -18,10 +18,10 @@
 
 #include "servers.h"
 #include "srv.h"
-#if XE_SERVER_NFS
+#if XE_SERVER_XENFS
 #include "nfs.h"
 #endif
-#if XE_SERVER_FTP
+#if XE_SERVER_XEFTP
 #include "ftp.h"
 #endif
 
@@ -81,7 +81,7 @@ static void setting(const char *key, char *out, u32 size, const char *fallback)
 /* Every volume the console has, Hdd1, Usb0... (src/servers/common/srv_file.c). */
 #define EVERY_VOLUME "*"
 
-#if XE_SERVER_NFS
+#if XE_SERVER_XENFS
 static void start_nfs(void *arg)
 {
     static char root[SRV_PATH_MAX];
@@ -103,7 +103,7 @@ static void start_nfs(void *arg)
 }
 #endif
 
-#if XE_SERVER_FTP
+#if XE_SERVER_XEFTP
 static void start_ftp(void *arg)
 {
     static char root[SRV_PATH_MAX], user[64], password[64];
@@ -136,10 +136,10 @@ static void start_ftp(void *arg)
 static void starter(void *arg)
 {
     (void)arg;
-#if XE_SERVER_NFS
+#if XE_SERVER_XENFS
     srv_thread(start_nfs, 0);
 #endif
-#if XE_SERVER_FTP
+#if XE_SERVER_XEFTP
     srv_thread(start_ftp, 0);
 #endif
 }

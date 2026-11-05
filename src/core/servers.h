@@ -1,6 +1,6 @@
 /* Where the core lets the file servers in (src/servers/), and nothing more.
  *
- * The servers are built only when named: `make servers=nfs`. Without any, these
+ * The servers are built only when named: `make servers=xenfs`. Without any, these
  * are empty inlines and the plugin carries none of their code (nor xam's sockets,
  * which only they and bench=tcp import).
  */

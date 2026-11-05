@@ -55,13 +55,13 @@ stack, not the throughput.
 ## Issues
 
 - **NCM is not the default.** On the RTL8156B it is 4 to 5% faster over TCP both
-  ways, but FTP uploads to the console are slower: 145 Mbit/s (18.1 MB/s) against
+  ways, but ftpdll uploads to the console are slower: 145 Mbit/s (18.1 MB/s) against
   ECM's 162 (20.3), with 8 KB receive blocks (`NTB_IN_SIZE`; 104 Mbit/s with 16
   KB, because the card holds frames back to fill a block). Older measurements are
   in the comments of `cdc_net.c`.
 - **`cdc_rx_cpu` stays 0.** Moving receive to another processor (`cdc_rx_cpu` 1)
   once stopped the console's network until a power cycle, under the plugin's TCP
-  server at full rate. With FTP every value worked but gained nothing.
+  server at full rate. With ftpdll every value worked but gained nothing.
 - **Only the RTL8156B has been tested** as a CDC device so far.
 - **RX 64 with TX 128 outstanding requests hangs the console.** Keep the counts as
   they are.

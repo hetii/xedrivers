@@ -100,7 +100,7 @@ make TRANSPORT=ncm           # CDC transport: ecm (default) or ncm
 make ADVERTISE=1000          # fastest Ethernet link offered: 2500 (default), 1000, 100, default
 make bench=tcp               # with the bench tools named, see below
 make bench=all               # with every bench tool
-make servers=nfs,ftp         # with the file servers named, see "File servers"
+make servers=xenfs,xeftp         # with the file servers named, see "File servers"
 make MODE=standalone IP=10.36.0.2 bench=stack
 ```
 
@@ -282,7 +282,7 @@ tools/xectl.py set|get SYMBOL [VALUE]  # any 32-bit global of the plugin
 
 ## File servers
 
-`make servers=nfs,ftp` builds in an NFSv3 server and an FTP server; a plain `make`
+`make servers=xenfs,xeftp` builds in an NFSv3 server (xenfs) and an FTP server (xeftp); a plain `make`
 has neither. They start 30 s after boot. `/` holds every volume the console has:
 `Hdd1`, `Usb0`..., a FATX disk on USB of any size included.
 
@@ -293,13 +293,13 @@ curl ftp://192.168.1.210/Hdd1/
 
 | Server | PC -> console | console -> PC |
 |---|---|---|
-| NFS | 207 Mbit/s (25.9 MB/s) | 182 Mbit/s (22.8 MB/s) |
-| FTP | 213 Mbit/s (26.6 MB/s) | 185 Mbit/s (23.1 MB/s) |
-| ftpdll, for comparison | 165 Mbit/s (20.7 MB/s) | 166 Mbit/s (20.8 MB/s) |
+| xenfs | 207 Mbit/s (25.9 MB/s) | 182 Mbit/s (22.8 MB/s) |
+| xeftp | 213 Mbit/s (26.6 MB/s) | 185 Mbit/s (23.1 MB/s) |
+| ftpdll | 165 Mbit/s (20.7 MB/s) | 166 Mbit/s (20.8 MB/s) |
 
 Measured 2026-11-04 on the RTL8156B (ECM) with 512 MiB files. Settings and
-details: [docs/servers/nfs.md](docs/servers/nfs.md),
-[docs/servers/ftp.md](docs/servers/ftp.md).
+details: [docs/servers/xenfs.md](docs/servers/xenfs.md),
+[docs/servers/xeftp.md](docs/servers/xeftp.md).
 
 ## Speedtests
 
@@ -309,20 +309,20 @@ details: [docs/servers/nfs.md](docs/servers/nfs.md),
 export XE_HOST=192.168.1.210
 tools/xectl.py cmd 14                       # start the TCP server (bench=tcp)
 tools/xectl.py bench tcp --streams 1,4,8 --repeat 3
-tools/xectl.py bench ftp both --mb 256 --login xboxftp:xboxftp
+tools/xectl.py bench ftpdll both --mb 256 --login xboxftp:xboxftp
 tools/xectl.py bench sockets --count 80     # how many connections the console holds
 ```
 
-### TCP and FTP
+### TCP and ftpdll
 
-| | TCP (`bench tcp`) | FTP (`bench ftp`) |
+| | TCP (`bench tcp`) | ftpdll (`bench ftpdll`) |
 |---|---|---|
-| Server | the plugin's own (`make bench=tcp`), port 5201 sends, 5202 receives | the console's FTP server (ftpdll) |
+| Server | the plugin's own (`make bench=tcp`), port 5201 sends, 5202 receives | ftpdll, the FTP server plugin |
 | Data | RAM to RAM | a file to and from `Hdd1` |
 | Shows | what the card, the driver and xnet carry | what a user gets copying games |
 | Run | 10 s, 1 or more parallel streams | one file each way, upload first |
 
-FTP is lower than TCP: ftpdll receives and writes the disk in turn on one thread.
+ftpdll is lower than TCP: it receives and writes the disk in turn on one thread.
 
 How it counts: every stream runs in one common window. Console -> PC is what the
 PC received in it; PC -> console is what the console's server received, read at
@@ -351,12 +351,12 @@ transport or Wi-Fi channel, xnet settings, test, streams and direction. With
 <!-- results:wired -->
 | Card | Transport, link | xnet | Test | Streams | Console -> PC | PC -> console | Date, commit | Note |
 |---|---|---|---|---|---|---|---|---|
-| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 166 Mbit/s (20.7 MB/s) | 164 Mbit/s (20.5 MB/s) | 2026-11-03, e500b723 / 2026-11-02, 58b851a |  |
+| rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftpdll 256 MB | 1 | 166 Mbit/s (20.7 MB/s) | 164 Mbit/s (20.5 MB/s) | 2026-11-03, e500b723 / 2026-11-02, 58b851a |  |
 | rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 186 Mbit/s (23.3 MB/s) | 212 Mbit/s (26.6 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
 | rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 182 Mbit/s (22.7 MB/s) | 214 Mbit/s (26.8 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
 | rtl8156 | ECM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 181 Mbit/s (22.7 MB/s) | 214 Mbit/s (26.8 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
 | rtl8156 | ECM, 1000 Mbit/s | rcv 32 / snd 128 / cwnd 256 KB, pool +767 KB, 64 TCP sockets | tcp ram | 32 | 175 Mbit/s (21.8 MB/s) | 212 Mbit/s (26.5 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-02, cc7b35d3 |  |
-| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 168 Mbit/s (21.0 MB/s) | 145 Mbit/s (18.1 MB/s) | 2026-11-03, e500b723 / 2026-11-03, 61f08246 |  |
+| rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftpdll 256 MB | 1 | 168 Mbit/s (21.0 MB/s) | 145 Mbit/s (18.1 MB/s) | 2026-11-03, e500b723 / 2026-11-03, 61f08246 |  |
 | rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 193 Mbit/s (24.2 MB/s) | 217 Mbit/s (27.1 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
 | rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 190 Mbit/s (23.8 MB/s) | 222 Mbit/s (27.8 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
 | rtl8156 | NCM, 1000 Mbit/s | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 190 Mbit/s (23.8 MB/s) | 223 Mbit/s (27.9 MB/s) | 2026-11-03, e500b723 / 2026-11-02, cc7b35d3 |  |
@@ -366,14 +366,14 @@ transport or Wi-Fi channel, xnet settings, test, streams and direction. With
 <!-- results:wifi -->
 | Card | Band, channel, width | xnet | Test | Streams | Console -> PC | PC -> console | Date, commit | Note |
 |---|---|---|---|---|---|---|---|---|
-| aic8800 | 5 GHz, ch 116, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 11 Mbit/s (1.4 MB/s) | 84 Mbit/s (10.4 MB/s) | 2026-11-03, 0f32c18e / 2026-11-03, 0f32c18e |  |
+| aic8800 | 5 GHz, ch 116, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftpdll 256 MB | 1 | 11 Mbit/s (1.4 MB/s) | 84 Mbit/s (10.4 MB/s) | 2026-11-03, 0f32c18e / 2026-11-03, 0f32c18e |  |
 | aic8800 | 5 GHz, ch 116, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 121 Mbit/s (15.1 MB/s) | 114 Mbit/s (14.3 MB/s) | 2026-11-03, 0f32c18e / 2026-11-03, 0f32c18e |  |
 | aic8800 | 5 GHz, ch 116, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 65 Mbit/s (8.1 MB/s) | 108 Mbit/s (13.5 MB/s) | 2026-11-03, 0f32c18e / 2026-11-03, 0f32c18e |  |
-| rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 90 Mbit/s (11.2 MB/s) | 90 Mbit/s (11.2 MB/s) | 2026-11-03, 87a6f44a / 2026-11-03, 87a6f44a |  |
+| rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftpdll 256 MB | 1 | 90 Mbit/s (11.2 MB/s) | 90 Mbit/s (11.2 MB/s) | 2026-11-03, 87a6f44a / 2026-11-03, 87a6f44a |  |
 | rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 123 Mbit/s (15.4 MB/s) | 130 Mbit/s (16.2 MB/s) | 2026-11-03, 87a6f44a / 2026-11-03, 87a6f44a |  |
 | rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 145 Mbit/s (18.2 MB/s) | 151 Mbit/s (18.9 MB/s) | 2026-11-03, 87a6f44a / 2026-11-03, 87a6f44a |  |
 | rtw8822b | 2.4 GHz, ch 10, 40 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 156 Mbit/s (19.5 MB/s) | 132 Mbit/s (16.5 MB/s) | 2026-11-03, 87a6f44a / 2026-11-02, cc7b35d3 |  |
-| rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftp 256 MB | 1 | 110 Mbit/s (13.8 MB/s) | 130 Mbit/s (16.2 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-03, 53ca8d10 |  |
+| rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | ftpdll 256 MB | 1 | 110 Mbit/s (13.8 MB/s) | 130 Mbit/s (16.2 MB/s) | 2026-11-02, cc7b35d3 / 2026-11-03, 53ca8d10 |  |
 | rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 1 | 178 Mbit/s (22.2 MB/s) | 165 Mbit/s (20.7 MB/s) | 2026-11-03, 53ca8d10 / 2026-11-02, cc7b35d3 |  |
 | rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 4 | 179 Mbit/s (22.4 MB/s) | 198 Mbit/s (24.7 MB/s) | 2026-11-03, 53ca8d10 / 2026-11-02, cc7b35d3 |  |
 | rtw8822b | 5 GHz, ch 116, 80 MHz | rcv 128 / snd 128 / cwnd 256 KB, pool +767 KB, 16 TCP sockets | tcp ram | 8 | 178 Mbit/s (22.2 MB/s) | 209 Mbit/s (26.2 MB/s) | 2026-11-03, 53ca8d10 / 2026-11-03, 53ca8d10 |  |

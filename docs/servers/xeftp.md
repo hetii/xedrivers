@@ -1,6 +1,6 @@
-# ftp: an FTP server
+# xeftp: an FTP server
 
-Directory: `src/servers/ftp/` · built with `make servers=ftp` · port 21 (`ftp_port`)
+Directory: `src/servers/xeftp/` · built with `make servers=xeftp` · port 21 (`ftp_port`)
 
 FTP (RFC 959) with SIZE, MDTM, REST STREAM and MLST/MLSD (RFC 3659), and EPSV/EPRT
 (RFC 2428). It uses only the platform of `src/servers/common/srv.h`.
@@ -50,7 +50,7 @@ With ftpdll loaded as well, give this one another port (`ftp_port = 2121`).
 
 ## Tests
 
-`tests/servers/ftp/test_ftp.c` builds the server on the host and drives it with
+`tests/servers/xeftp/test_xeftp.c` builds the server on the host and drives it with
 curl:
 - transfers in passive, EPRT and PORT mode;
 - a resumed upload and a resumed download;

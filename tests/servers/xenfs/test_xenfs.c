@@ -64,7 +64,7 @@ int main(void)
 
     if (run("test -x /sbin/mount.nfs || test -x /usr/sbin/mount.nfs") != 0 ||
         run("sudo -n mount -V >/dev/null 2>&1") != 0 || run("sudo -n modprobe nfs 2>/dev/null") != 0) {
-        printf("nfs test skipped: no NFS client here, or sudo cannot mount\n");
+        printf("xenfs test skipped: no NFS client here, or sudo cannot mount\n");
         return 0;
     }
     if (!mkdtemp(export_dir) || !mkdtemp(mnt)) {
@@ -233,6 +233,6 @@ int main(void)
 
     if (failures)
         return 1;
-    printf("all nfs tests passed (mounted with the kernel client)\n");
+    printf("all xenfs tests passed (mounted with the kernel client)\n");
     return 0;
 }

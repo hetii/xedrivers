@@ -59,7 +59,7 @@ int main(void)
     FILE *f;
 
     if (system("command -v curl >/dev/null 2>&1") != 0) {
-        printf("ftp test skipped: no curl\n");
+        printf("xeftp test skipped: no curl\n");
         return 0;
     }
     if (!mkdtemp(dir) || !mkdtemp(work))
@@ -134,6 +134,6 @@ int main(void)
     CHECK(ftp_stats.bad_logins >= 1);
     if (failures)
         return 1;
-    printf("all ftp tests passed (driven with curl)\n");
+    printf("all xeftp tests passed (driven with curl)\n");
     return 0;
 }
