@@ -163,12 +163,12 @@ s32 srv_recv(SRV_SOCK s, void *buffer, u32 length)
 
 /* What sending met, read by tools on the host (xectl): xnet runs out of send
  * buffers with eight connections sending at once (2026-11-05), and a send that
- * failed with WSAENOBUFS or WSAEWOULDBLOCK is tried again after 5 ms, for 10 s. */
+ * failed with WSAENOBUFS or WSAEWOULDBLOCK is tried again after 1 ms, for 10 s. */
 volatile u32 srv_send_retries, srv_send_last_error;
 
 #define WSAEWOULDBLOCK  10035
 #define WSAENOBUFS      10055
-#define SEND_RETRIES    2000u
+#define SEND_RETRIES    10000u
 
 s32 srv_send(SRV_SOCK s, const void *buffer, u32 length)
 {
@@ -186,7 +186,7 @@ s32 srv_send(SRV_SOCK s, const void *buffer, u32 length)
         srv_send_last_error = (u32)e;
         if (n < 0 && (e == WSAENOBUFS || e == WSAEWOULDBLOCK) && tries++ < SEND_RETRIES) {
             srv_send_retries++;
-            srv_sleep(5);
+            srv_sleep(1);
             continue;
         }
         return -1;
