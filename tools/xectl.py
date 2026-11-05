@@ -1205,6 +1205,38 @@ def xenfs_run(up, mb, nconnect, folder):
         xenfs_umount()
 
 
+def xenfs_files_run(mb, files, nconnect, folder):
+    """`mb` MiB in all as `files` files written at once through xenfs, into the console;
+    fsync included, sizes checked. Bytes per second."""
+    piece = mb // files
+    src = data_file(piece)
+    paths = [os.path.join(MOUNT_DIR, folder, "xectl-xenfs-f%d.bin" % i) for i in range(files)]
+    xenfs_mount(nconnect)
+    try:
+        begin = time.time()
+        procs = [subprocess.Popen(["dd", "if=" + src, "of=" + p, "bs=1M", "conv=fsync"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                 for p in paths]
+        deadline = begin + GUARD_S
+        for d in procs:
+            try:
+                _, err = d.communicate(timeout=max(1, deadline - time.time()))
+            except subprocess.TimeoutExpired:
+                for x in procs:
+                    x.kill()
+                raise BenchFailed("dd took over %d s" % GUARD_S)
+            if d.returncode:
+                raise BenchFailed("dd: %s" % err.strip()[:80])
+        seconds = time.time() - begin
+        for p in paths:
+            if os.path.getsize(p) != piece << 20:
+                raise BenchFailed("%s has the wrong size" % p)
+            os.remove(p)
+        return (piece << 20) * files / seconds
+    finally:
+        xenfs_umount()
+
+
 def xenfs_delete(mb, folder):
     xenfs_mount(1)
     try:
@@ -1321,6 +1353,12 @@ def bench_servers(a, ctx, ways):
                          "xeftp %d MB" % a.mb, files, DIRECTION[w],
                          lambda: xeftp_run(w == "up", a.mb, files, a.port, a.dir))
             xeftp_delete(names, a.port, a.dir)
+    elif a.test == "xenfs" and a.files != "1,2" and int(a.files) > 1:
+        files = int(a.files)
+        for nc in (int(x) for x in a.nconnect.split(",")):
+            measured("xenfs up   x%-2d %d files %s  %d MB " % (nc, files, DIRECTION["up"], a.mb),
+                     "xenfs %d MB in %d files" % (a.mb, files), nc, DIRECTION["up"],
+                     lambda: xenfs_files_run(a.mb, files, nc, a.dir))
     elif a.test == "xenfs":
         for nc in (int(x) for x in a.nconnect.split(",")):
             for w in sorted(ways, key=lambda w: w != "up"):
