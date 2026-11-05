@@ -167,6 +167,32 @@ typedef struct _URB {
     u32            Stamp;                       /* time base at submission (prof.h) */
 } URB;
 
+/* An isochronous request, what UsbdQueueIsochTransfer takes: the common head, the buffer
+ * eight bytes earlier than a URB's, then the packet count. The routine gets the request,
+ * each packet's status word and its actual length. As read on retail 17559 by
+ * usb-audio-x360; +0x19 and +0x1B are the kernel's to fill. */
+typedef struct _ISOCH ISOCH;
+typedef void (*ISOCH_COMPLETION)(ISOCH *request, u32 *statuses, u16 *lengths);
+struct _ISOCH {
+    void            *Context;                   /* +0x00, the endpoint */
+    ISOCH_COMPLETION Routine;                   /* +0x04 */
+    void            *Endpoint;                  /* +0x08 */
+    u32              Reserved;                  /* +0x0C */
+    void            *Buffer;                    /* +0x10 */
+    u32              Length;                    /* +0x14 */
+    u8               PacketCount;               /* +0x18 */
+    u8               HostController;
+    u8               Pad;
+    u8               EndpointIndex;
+    /* Ours from here on. */
+    struct _ISOCH   *Next;                      /* submit queue link */
+    struct USB_DEV  *Dev;
+    u16             *Lengths;                   /* each packet's length, for the kernel */
+    void            *Owner;
+};
+
+extern void  UsbdQueueIsochTransfer(void *device, ISOCH *request, u16 *lengths);
+
 extern int   UsbdRegisterDriverObject(USBD_DRIVER_OBJECT *driver);
 extern void  UsbdAddDeviceComplete(void *device, u32 status);
 extern void  UsbdRemoveDeviceComplete(void *device);

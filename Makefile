@@ -105,6 +105,7 @@ DRIVERS  ?= $(filter-out common,$(notdir $(patsubst %/,%,$(wildcard src/drivers/
 DRIVER_DIRS := $(sort $(DRIVERS) $(foreach d,$(DRIVERS),$(NEEDS_$(d))))
 SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
             $(addprefix src/drivers/,$(DRIVER_DIRS)) \
+            $(if $(filter uac,$(DRIVERS)),src/audio) \
             $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST))) \
             $(if $(SERVERS_LIST),src/servers src/servers/common $(addprefix src/servers/,$(SERVERS_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
@@ -224,7 +225,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
 test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis \
       $(BUILD)/test_asix $(BUILD)/test_ax88179 $(BUILD)/test_ax88178 $(BUILD)/test_nfs \
-      $(BUILD)/test_ftp \
+      $(BUILD)/test_ftp $(BUILD)/test_pcm $(BUILD)/test_descriptors \
       $(BUILD)/test_aic $(BUILD)/test_wpa $(BUILD)/test_reorder \
       $(BUILD)/test_bridge $(BUILD)/test_omni
 	@$(BUILD)/test_cdc
@@ -236,6 +237,8 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
 	@$(BUILD)/test_ax88178
 	@$(BUILD)/test_nfs
 	@$(BUILD)/test_ftp
+	@$(BUILD)/test_pcm
+	@$(BUILD)/test_descriptors
 	@AIC_FW=$(FW_DIR)/aic8800D80 $(BUILD)/test_aic
 	@$(BUILD)/test_wpa
 	@$(BUILD)/test_reorder
@@ -278,6 +281,16 @@ $(BUILD)/test_ax88178: tests/drivers/ax88178/test_ax88178.c src/drivers/ax88178/
 # The file servers on the host: src/servers/<name>/ on tests/servers/common's POSIX
 # platform, mounted with the PC's own clients (skipped where sudo cannot mount).
 SERVERS_HOST := $(wildcard tests/servers/common/*.c) src/servers/common/srv_keep.c
+$(BUILD)/test_pcm: tests/audio/test_pcm.c src/audio/pcm.c src/audio/pcm.h
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -I src/audio -o $@ tests/audio/test_pcm.c src/audio/pcm.c
+
+$(BUILD)/test_descriptors: tests/drivers/uac/test_descriptors.c src/drivers/uac/descriptors.c \
+                           src/drivers/uac/descriptors.h src/drivers/uac/pacer.h
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -I src/drivers/uac -o $@ tests/drivers/uac/test_descriptors.c \
+	    src/drivers/uac/descriptors.c
+
 $(BUILD)/test_nfs: tests/servers/xenfs/test_nfs.c $(wildcard src/servers/xenfs/*.c) \
                    $(SERVERS_HOST) $(HEADERS)
 	@mkdir -p $(BUILD)

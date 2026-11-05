@@ -31,6 +31,7 @@
 /* What kind of link a driver's device is, for choosing among several with a link
  * up (src/net/net.c). Higher wins: a phone that tethers was plugged in to be used,
  * a USB card over the console's own port. */
+#define XE_KIND_AUDIO   0u          /* no network at all: never an uplink, xnet not started */
 #define XE_KIND_WIFI    1u          /* a USB Wi-Fi card: still before the onboard port */
 #define XE_KIND_WIRED   2u          /* a USB Ethernet card */
 #define XE_KIND_TETHER  3u          /* a phone sharing its connection */

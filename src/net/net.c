@@ -395,7 +395,7 @@ static u32 any_ready(void)
     u32 i;
 
     for (i = 0; i < NET_MAX; i++)
-        if (net_devs[i].drv && net_stats[i].ready)
+        if (net_devs[i].drv && net_devs[i].drv->kind != XE_KIND_AUDIO && net_stats[i].ready)
             return 1;
     return 0;
 }
@@ -453,7 +453,7 @@ void net_bring_up(USB_DEV *dev)
         return;
     net_state.start_count++;
     net_state.start_result = net_start(nd);
-    if (net_state.start_result)
+    if (net_state.start_result || nd->drv->kind == XE_KIND_AUDIO)
         return;
     set_mode(xe_config.mode);
 }

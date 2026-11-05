@@ -197,6 +197,12 @@ STRUCTS = {
     "debug_omni_log": ["seq", "op", "option", "length", "result", "repeats",
                        "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7"],
     "debug_tx_stall": ["stalls", "inflight", "tx_frames", "rx_frames", "tick"],
+    "audio_stats": ["open_status", "readers", "callbacks", "capture_errors", "frames_in",
+                    "frames_out", "overruns", "underruns", "volume"],
+    "uac_stats": ["version", "play_interface", "play_alternate", "play_bytes", "play_endpoint",
+                  "play_max_packet", "play_sync", "feedback_endpoint", "transfers", "packets_ok",
+                  "packets_late", "packets_bad", "last_status", "gave_up", "feedback_taken",
+                  "feedback_rate", "audio_open"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
@@ -1531,6 +1537,12 @@ def main(argv):
         omni_log(sym)
     elif what == "prof":
         prof(sym, float(rest[0]) if rest else 5.0)
+    elif what == "audio":
+        print(read_struct(sym, "audio_stats"))
+        for i in range(NET_MAX):
+            one = read_struct(sym, "uac_stats", i)
+            if one["version"]:
+                print("slot %d: %s" % (i, one))
     elif what == "memory":
         # bench=debug: MmQueryStatistics' words, and 64 KB blocks that can be taken
         st = command(sym, 25, wait=120)

@@ -81,9 +81,41 @@ static void submit_now(URB *urb)
     }
 }
 
+static ISOCH *isoch_head, *isoch_tail;
+
+static void isoch_now(ISOCH *request)
+{
+    USB_DEV *dev = request->Dev;
+
+    if (dev->active && dev->device)
+        UsbdQueueIsochTransfer(dev->device, request, request->Lengths);
+}
+
+void usb_isoch(USB_DEV *dev, ISOCH *request, u16 *lengths)
+{
+    u32 irql;
+
+    request->Dev = dev;
+    request->Lengths = lengths;
+    if (ke_irql() >= DISPATCH_LEVEL && ke_processor() == USB_PROCESSOR) {
+        isoch_now(request);
+        return;
+    }
+    request->Next = 0;
+    irql = KfAcquireSpinLock(&submit_lock);
+    if (isoch_tail)
+        isoch_tail->Next = request;
+    else
+        isoch_head = request;
+    isoch_tail = request;
+    KfReleaseSpinLock(&submit_lock, irql);
+    KeInsertQueueDpc(&submit_dpc, 0, 0);
+}
+
 static void submit_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
 {
     URB *list;
+    ISOCH *isoch;
 
     (void)dpc;
     (void)context;
@@ -95,7 +127,18 @@ static void submit_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
     list = submit_head;
     submit_head = 0;
     submit_tail = 0;
+    isoch = isoch_head;
+    isoch_head = 0;
+    isoch_tail = 0;
     KeReleaseSpinLockFromRaisedIrql(&submit_lock);
+
+    while (isoch) {
+        ISOCH *next = isoch->Next;
+
+        isoch->Next = 0;
+        isoch_now(isoch);
+        isoch = next;
+    }
 
     while (list) {
         URB *next = list->Next;

@@ -14,6 +14,7 @@
 #include "kernel.h"
 
 #define USB_TYPE_CONTROL   0
+#define USB_TYPE_ISOCH     1
 #define USB_TYPE_BULK      2
 #define USB_TYPE_INTERRUPT 3
 
@@ -57,6 +58,10 @@ typedef struct {
 int   usb_register(const USB_CLIENT *client);
 void *usb_open(USB_DEV *dev, u32 type, u32 address, u32 max_packet, u32 interval);
 void  usb_submit(URB *urb);
+
+/* Queue an isochronous request on `dev`, its packets' lengths in `lengths`, which stays
+ * ours; from any thread, like usb_submit. */
+void  usb_isoch(USB_DEV *dev, ISOCH *request, u16 *lengths);
 
 /* Thread-only: wait until `urb` is not the host controller's any more, up to
  * `timeout_ms`; 0 if it still is. A synchronous request that timed out stays
