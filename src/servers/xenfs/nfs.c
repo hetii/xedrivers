@@ -160,6 +160,7 @@ static void listener(void *arg)
         }
         c = take_conn();
         if (!c) {
+            nfs_stats.no_slot++;
             srv_close(s);
             continue;
         }

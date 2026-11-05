@@ -104,7 +104,7 @@ STRUCTS = {
     "nfs_stats": ["started", "connections", "active", "calls", "bad_calls", "refused",
                   "reads", "read_bytes_lo", "read_bytes_hi", "writes", "write_bytes_lo",
                   "write_bytes_hi", "stale", "handles", "handles_full", "portmap_calls",
-                  "mounts", "commits", "opens", "listings", "no_thread"],
+                  "mounts", "commits", "opens", "listings", "no_thread", "no_slot"],
     "ftp_stats": ["started", "sessions", "active", "refused", "bad_logins", "commands",
                   "retrs", "stors", "lists", "sent_lo", "sent_hi", "received_lo",
                   "received_hi", "data_failed", "wait_failed", "accept_failed",
@@ -585,13 +585,13 @@ def status(sym):
         n = read_struct(sym, "nfs_stats")
         print("xenfs    started=%d conns=%d active=%d calls=%d bad=%d refused=%d mounts=%d "
               "read=%d/%dMB write=%d/%dMB commits=%d opens=%d listings=%d handles=%d full=%d "
-              "stale=%d portmap=%d no_thread=%d" % (
+              "stale=%d portmap=%d no_thread=%d no_slot=%d" % (
                   n["started"], n["connections"], n["active"], n["calls"], n["bad_calls"],
                   n["refused"], n["mounts"], n["reads"],
                   (n["read_bytes_hi"] << 32 | n["read_bytes_lo"]) >> 20, n["writes"],
                   (n["write_bytes_hi"] << 32 | n["write_bytes_lo"]) >> 20, n["commits"],
                   n["opens"], n["listings"], n["handles"], n["handles_full"], n["stale"],
-                  n["portmap_calls"], n["no_thread"]))
+                  n["portmap_calls"], n["no_thread"], n["no_slot"]))
     if "srv_send_retries" in sym:
         r = struct.unpack(">I", read(sym["srv_send_retries"], 4))[0]
         e = struct.unpack(">I", read(sym["srv_send_last_error"], 4))[0]
@@ -1160,7 +1160,8 @@ def xeftp_run(up, mb, files, port, folder):
     return (piece << 20) * files / seconds
 
 
-def run_guarded(cmd, what, timeout=GUARD_S):
+def run_guarded(cmd, what, timeout=None):
+    timeout = timeout or GUARD_S
     try:
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -1388,6 +1389,7 @@ def bench(sym, argv):
     ap.add_argument("--files", default="1,2", help="xeftp: sessions at once; mix: the last")
     ap.add_argument("--nconnect", default="1,4", help="xenfs: connections; mix: the last")
     ap.add_argument("--port", type=int, default=XEFTP_PORT, help="xeftp's port")
+    ap.add_argument("--guard", type=int, default=GUARD_S, help="seconds a step of a server bench may take")
     ap.add_argument("--ip", default=os.environ.get("XE_STACK_IP", ""),
                     help="udp: the standalone stack's address (XE_HOST reads its counters)")
     ap.add_argument("--size", type=int, default=1472, help="udp: payload bytes")
@@ -1410,6 +1412,8 @@ def bench(sym, argv):
     commit, dirty = built_from(sym)
     ctx = dict(context(sym), commit=commit, dirty=dirty)
     if a.test in ("xeftp", "xenfs", "mix"):
+        global GUARD_S
+        GUARD_S = a.guard
         bench_servers(a, ctx, ways)
         return
     if a.test == "udp":

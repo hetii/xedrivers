@@ -15,7 +15,9 @@
 #define PROG_MOUNT      100005u
 
 #define IO_MAX          65536u      /* the largest READ or WRITE: rtmax / wtmax */
-#define CONN_MAX        16          /* TCP connections served at once */
+/* TCP connections served at once: nconnect's 16 and, beside them, the client's calls
+ * to the portmapper before each (with 16, nconnect=16 got 13 and hung on the rest). */
+#define CONN_MAX        24
 
 extern NFS_CONFIG nfs_cfg;          /* as nfs_start was given it, defaults filled in */
 
