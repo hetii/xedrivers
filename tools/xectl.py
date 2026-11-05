@@ -20,6 +20,9 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py prof [SECONDS]             where a frame's time goes (bench=prof)
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
     xectl.py bench tcp [up|down|both] [--streams 1,4] [--seconds S] [--pace MB/s]
+    xectl.py bench xeftp [up|down|both] [--mb 512] [--files 1,2,4] [--port 2121] [--repeat 3]
+    xectl.py bench xenfs [up|down|both] [--mb 512] [--nconnect 1,4,8] [--repeat 3]
+    xectl.py bench mix [--mb 512] [--nconnect 4] [--files 8]   (both servers into the console at once)
     xectl.py bench ftpdll [up|down|both] [--mb 256] [--login U:P] [--dir Hdd1/xedrivers]
     xectl.py bench sockets [--count 80] how many TCP connections the console holds
 
@@ -1045,11 +1048,247 @@ def median(values):
 
 
 DIRECTION = {"down": "console->pc", "up": "pc->console"}
+XEFTP_PORT = int(os.environ.get("XE_XEFTP_PORT", "2121"))   # the bench's ini: ftpdll holds 21
+
+
+class BenchFailed(Exception):
+    """A server run that did not complete: no figure, and why."""
+
+
+GUARD_S = 600       # no single step of a server bench may take longer than this
+MOUNT_DIR = "/dev/shm/xectl-xenfs"
+
+
+def data_file(mb):
+    """`mb` MiB of random bytes in memory, so the PC's disk is not what is measured."""
+    src = os.path.join("/dev/shm" if os.path.isdir("/dev/shm") else "/tmp", "xectl-%d.bin" % mb)
+    if not os.path.exists(src) or os.path.getsize(src) != mb << 20:
+        with open(src, "wb") as f:
+            f.write(os.urandom(mb << 20))
+    return src
+
+
+def console_ports():
+    """Which of the console's services answer, for the report of a failed run."""
+    out = []
+    for name, port in (("xbdm", 730), ("xenfs", 2049), ("xeftp", XEFTP_PORT)):
+        try:
+            socket.create_connection((HOST, port), timeout=3).close()
+            out.append("%s up" % name)
+        except OSError:
+            out.append("%s DOWN" % name)
+    return ", ".join(out)
+
+
+def xeftp_start(up, name, port, folder, src=None):
+    url = "ftp://%s:%d/%s/%s" % (HOST, port, folder, name)
+    args = (["-T", src, "-w", "%{size_upload}"] if up else ["-o", os.devnull, "-w", "%{size_download}"])
+    return subprocess.Popen(["curl", "-s", "-S", "--connect-timeout", "20", "--max-time", str(GUARD_S),
+                             *args, url], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def xeftp_wait(procs, each):
+    """Every curl done, each with `each` bytes across; a failure raises."""
+    errors = []
+    for p in procs:
+        try:
+            out, err = p.communicate(timeout=GUARD_S + 30)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, err = p.communicate()
+            errors.append("curl hung")
+            continue
+        if p.returncode:
+            errors.append("curl %d: %s" % (p.returncode, err.strip()[:80]))
+        elif int(float(out.strip() or 0)) != each:
+            errors.append("%s of %d bytes" % (out.strip(), each))
+    if errors:
+        raise BenchFailed("; ".join(errors[:3]))
+
+
+def xeftp_size(name, port, folder):
+    done = subprocess.run(["curl", "-s", "--connect-timeout", "20", "--max-time", "60", "-I",
+                           "ftp://%s:%d/%s/%s" % (HOST, port, folder, name)],
+                          capture_output=True, text=True, timeout=90)
+    m = re.search(r"Content-Length: (\d+)", done.stdout)
+    return int(m.group(1)) if m else -1
+
+
+def xeftp_delete(names, port, folder):
+    for name in names:
+        subprocess.run(["curl", "-s", "--connect-timeout", "20", "--max-time", "60", "-Q",
+                        "DELE %s/%s" % (folder, name), "-o", os.devnull,
+                        "ftp://%s:%d/" % (HOST, port)], capture_output=True, timeout=90)
+
+
+def xeftp_run(up, mb, files, port, folder):
+    """`mb` MiB in all over `files` sessions at once, to or from the disk, by xeftp
+    (our server), with curl. Whole transfer, wall clock, sizes checked. Bytes per
+    second. The files of an upload stay for the download."""
+    piece = mb // files
+    names = ["xectl-xeftp-%d-%d.bin" % (files, i) for i in range(files)]
+    begin = time.time()
+    if up:
+        src = data_file(piece)
+        begin = time.time()
+        xeftp_wait([xeftp_start(True, n, port, folder, src) for n in names], piece << 20)
+    else:
+        xeftp_wait([xeftp_start(False, n, port, folder) for n in names], piece << 20)
+    seconds = time.time() - begin
+    if up:
+        for n in names:
+            if xeftp_size(n, port, folder) != piece << 20:
+                raise BenchFailed("%s has the wrong size on the console" % n)
+    return (piece << 20) * files / seconds
+
+
+def run_guarded(cmd, what, timeout=GUARD_S):
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise BenchFailed("%s took over %d s" % (what, timeout))
+    if done.returncode:
+        raise BenchFailed("%s: %s" % (what, (done.stderr or done.stdout).strip()[:100]))
+    return done.stdout
+
+
+def xenfs_umount():
+    subprocess.run(["sudo", "-n", "umount", "-f", "-l", MOUNT_DIR], capture_output=True, timeout=30)
+
+
+def xenfs_mount(nconnect):
+    """A hard mount, as anyone would use: the steps' timeouts are what guards a hang."""
+    os.makedirs(MOUNT_DIR, exist_ok=True)
+    xenfs_umount()
+    run_guarded(["sudo", "-n", "mount", "-t", "nfs", "-o", "vers=3,nolock,nconnect=%d" % nconnect,
+                 "%s:/" % HOST, MOUNT_DIR], "mount", 60)
+
+
+def xenfs_run(up, mb, nconnect, folder):
+    """`mb` MiB to or from the disk through xenfs (our server), the PC's kernel
+    client with `nconnect` connections; fsync included, read after a fresh mount.
+    Size checked. Bytes per second. The file of an upload stays for the download."""
+    path = os.path.join(MOUNT_DIR, folder, "xectl-xenfs-%d.bin" % mb)
+    xenfs_mount(nconnect)
+    try:
+        if up:
+            src = data_file(mb)
+            begin = time.time()
+            run_guarded(["dd", "if=" + src, "of=" + path, "bs=1M", "conv=fsync"], "dd up")
+            seconds = time.time() - begin
+            if os.path.getsize(path) != mb << 20:
+                raise BenchFailed("wrong size on the console: %d" % os.path.getsize(path))
+        else:
+            begin = time.time()
+            run_guarded(["dd", "if=" + path, "of=/dev/null", "bs=1M"], "dd down")
+            seconds = time.time() - begin
+        return (mb << 20) / seconds
+    finally:
+        xenfs_umount()
+
+
+def xenfs_delete(mb, folder):
+    xenfs_mount(1)
+    try:
+        path = os.path.join(MOUNT_DIR, folder, "xectl-xenfs-%d.bin" % mb)
+        if os.path.exists(path):
+            os.remove(path)
+    finally:
+        xenfs_umount()
+
+
+def mix_run(mb, nconnect, files, port, folder):
+    """Into the console at once: `mb` MiB through xenfs with `nconnect` connections
+    and `mb` MiB through xeftp over `files` sessions. Every byte checked by size.
+    Bytes per second, both together."""
+    piece = mb // files
+    src, psrc = data_file(mb), data_file(piece)
+    path = os.path.join(MOUNT_DIR, folder, "xectl-mix.bin")
+    names = ["xectl-mix-%d.bin" % i for i in range(files)]
+    xenfs_mount(nconnect)
+    try:
+        begin = time.time()
+        dd = subprocess.Popen(["dd", "if=" + src, "of=" + path, "bs=1M", "conv=fsync"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        procs = [xeftp_start(True, n, port, folder, psrc) for n in names]
+        error = None
+        try:
+            xeftp_wait(procs, piece << 20)
+        except BenchFailed as e:
+            error = "xeftp: %s" % e
+        try:
+            _, err = dd.communicate(timeout=GUARD_S)
+            if dd.returncode:
+                error = (error or "") + " xenfs: " + err.strip()[:80]
+        except subprocess.TimeoutExpired:
+            dd.kill()
+            error = (error or "") + " xenfs: dd took over %d s" % GUARD_S
+        seconds = time.time() - begin
+        if error:
+            raise BenchFailed(error.strip())
+        if os.path.getsize(path) != mb << 20:
+            raise BenchFailed("xenfs file has the wrong size")
+        for n in names:
+            if xeftp_size(n, port, folder) != piece << 20:
+                raise BenchFailed("%s has the wrong size" % n)
+        return ((mb << 20) + (piece << 20) * files) / seconds
+    finally:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        xenfs_umount()
+        xeftp_delete(names, port, folder)
+
+
+def bench_servers(a, ctx, ways):
+    """xeftp, xenfs and mix: a run that fails gives no figure; it is said, with what
+    still answers, and kept as 0 with the reason (once, as a new row)."""
+    def measured(label, test, streams, direction, run):
+        rates = []
+        for _ in range(a.repeat):
+            try:
+                rates.append(run())
+            except (BenchFailed, subprocess.TimeoutExpired, OSError) as e:
+                print("%s FAILED: %s | %s" % (label, e, console_ports()))
+                a_note, a.note = a.note, "failed: %s" % e
+                keep(ctx, test, streams, direction, 0, a)
+                a.note = a_note
+                return False
+        rate = median(rates)
+        print("%s %6.1f Mbit/s (%5.1f MB/s)%s" % (label, rate * 8 / 1e6, rate / 1e6,
+              "  median of %d" % a.repeat if a.repeat > 1 else ""))
+        keep(ctx, test, streams, direction, rate, a)
+        return True
+
+    if a.test == "xeftp":
+        for files in (int(x) for x in a.files.split(",")):
+            names = ["xectl-xeftp-%d-%d.bin" % (files, i) for i in range(files)]
+            for w in sorted(ways, key=lambda w: w != "up"):
+                measured("xeftp %-4s x%-2d %s  %d MB " % (w, files, DIRECTION[w], a.mb),
+                         "xeftp %d MB" % a.mb, files, DIRECTION[w],
+                         lambda: xeftp_run(w == "up", a.mb, files, a.port, a.dir))
+            xeftp_delete(names, a.port, a.dir)
+    elif a.test == "xenfs":
+        for nc in (int(x) for x in a.nconnect.split(",")):
+            for w in sorted(ways, key=lambda w: w != "up"):
+                measured("xenfs %-4s x%-2d %s  %d MB " % (w, nc, DIRECTION[w], a.mb),
+                         "xenfs %d MB" % a.mb, nc, DIRECTION[w],
+                         lambda: xenfs_run(w == "up", a.mb, nc, a.dir))
+            xenfs_delete(a.mb, a.dir)
+    else:
+        nc, files = int(a.nconnect.split(",")[-1]), int(a.files.split(",")[-1])
+        measured("mix  up  xenfs x%d + xeftp x%d  %d MB each " % (nc, files, a.mb),
+                 "mix xenfs x%d + xeftp x%d, %d MB each" % (nc, files, a.mb), nc + files,
+                 DIRECTION["up"],
+                 lambda: mix_run(a.mb, nc, files, a.port, a.dir))
+    print("     console: %s" % console_ports())
 
 
 def bench(sym, argv):
     ap = argparse.ArgumentParser(prog="xectl.py bench")
-    ap.add_argument("test", choices=["tcp", "ftpdll", "sockets"])
+    ap.add_argument("test", choices=["tcp", "ftpdll", "xeftp", "xenfs", "mix", "sockets"])
     ap.add_argument("which", nargs="?", default="both", choices=["down", "up", "both"])
     ap.add_argument("--streams", default="1,4")
     ap.add_argument("--seconds", type=float, default=10)
@@ -1057,6 +1296,9 @@ def bench(sym, argv):
     ap.add_argument("--mb", type=int, default=256)
     ap.add_argument("--login", default=os.environ.get("XE_FTP", "xboxftp:xboxftp"))
     ap.add_argument("--dir", default="Hdd1/xedrivers")
+    ap.add_argument("--files", default="1,2", help="xeftp: sessions at once; mix: the last")
+    ap.add_argument("--nconnect", default="1,4", help="xenfs: connections; mix: the last")
+    ap.add_argument("--port", type=int, default=XEFTP_PORT, help="xeftp's port")
     ap.add_argument("--count", type=int, default=80)
     ap.add_argument("--repeat", type=int, default=1, help="runs; the median counts")
     ap.add_argument("--tolerance", type=float, default=3.0, help="percent taken as noise")
@@ -1075,6 +1317,9 @@ def bench(sym, argv):
         return
     commit, dirty = built_from(sym)
     ctx = dict(context(sym), commit=commit, dirty=dirty)
+    if a.test in ("xeftp", "xenfs", "mix"):
+        bench_servers(a, ctx, ways)
+        return
     if a.test == "ftpdll":
         for w in sorted(ways, key=lambda w: w != "up"):     # the file goes up first
             runs = [ftp_run(w == "up", a.mb, a.login, a.dir) for _ in range(a.repeat)]
