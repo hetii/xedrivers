@@ -297,7 +297,19 @@ curl ftp://192.168.1.210/Hdd1/
 | xeftp | 213 Mbit/s (26.6 MB/s) | 185 Mbit/s (23.1 MB/s) |
 | ftpdll | 165 Mbit/s (20.7 MB/s) | 166 Mbit/s (20.8 MB/s) |
 
-Measured 2026-11-04 on the RTL8156B (ECM) with 512 MiB files. Settings and
+Measured 2026-11-04 on the RTL8156B (ECM) with 512 MiB files. On the RTL8822BU at
+5 GHz (2026-11-05, 512 MiB; ftpdll 256 MiB):
+
+| Server | PC -> console | console -> PC |
+|---|---|---|
+| xenfs | 169 Mbit/s (21.1 MB/s) | 172 Mbit/s (21.5 MB/s) |
+| xenfs, `nconnect=4` | 196 Mbit/s (24.5 MB/s) | 172 Mbit/s (21.5 MB/s) |
+| xeftp | 174 Mbit/s (21.7 MB/s) | 172 Mbit/s (21.5 MB/s) |
+| xeftp, 4 files at once | 202 Mbit/s (25.2 MB/s) | 179 Mbit/s (22.4 MB/s) |
+| ftpdll | 126 Mbit/s (15.7 MB/s) | 112 Mbit/s (14.0 MB/s) |
+
+A build with servers has 32 TCP sockets instead of xnet's 16 (`xnet_tcp_sockets`).
+Use one server at a time: both at once can overrun xnet's memory. Settings and
 details: [docs/servers/xenfs.md](docs/servers/xenfs.md),
 [docs/servers/xeftp.md](docs/servers/xeftp.md).
 

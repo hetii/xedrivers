@@ -74,6 +74,9 @@ hardware thread (`srv_cpu` 2-5) changes nothing. On the RTL8822BU at 5 GHz:
 167-191 Mbit/s (20.9-23.9 MB/s) in, 168-174 Mbit/s (21.0-21.8 MB/s) out.
 `ls -l` of a directory of 4000 files: 0.1 s.
 
+Use `nconnect` up to 4: 8 connections carry no more, and once went 108 to 122 Mbit/s
+(13.5 to 15.2 MB/s) out of the console when run right after 8 xeftp sessions.
+
 ## Tests
 
 `tests/servers/xenfs/test_nfs.c` builds the server on the host and mounts it with

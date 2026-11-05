@@ -48,6 +48,10 @@ With ftpdll loaded as well, give this one another port (`ftp_port = 2121`).
 | PC -> console | 213 Mbit/s (26.6 MB/s) | 165 Mbit/s (20.7 MB/s) |
 | console -> PC | 185 Mbit/s (23.1 MB/s) | 166 Mbit/s (20.8 MB/s) |
 
+A build with servers has 32 TCP sockets: a session holds up to three (control, passive
+listener, data), and on xnet's 16 four sessions at once found none. 8 at once on the
+RTL8822BU at 5 GHz: 204 Mbit/s (25.5 MB/s) in, 179 Mbit/s (22.4 MB/s) out.
+
 ## Tests
 
 `tests/servers/xeftp/test_ftp.c` builds the server on the host and drives it with
