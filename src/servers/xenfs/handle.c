@@ -49,9 +49,7 @@ s32 handle_init(u32 wanted)
     nodes = (NODE *)srv_alloc(count * sizeof(NODE));
     buckets = (u32 *)srv_alloc(count * sizeof(u32));
     if (!nodes || !buckets) {
-        srv_free(nodes);
-        srv_free(buckets);
-        nodes = 0;
+        nodes = 0;                          /* srv_alloc's large blocks stay; rare */
         return -1;
     }
     for (i = 0; i < count; i++)

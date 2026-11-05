@@ -116,9 +116,15 @@ void srv_sleep(u32 ms)
 
 /* --- memory and the lock ------------------------------------------------------ */
 
+/* Blocks of a connection's size and more from physical memory: the pool ran out at 13
+ * xenfs connections of two 68 KB buffers each (2026-11-05, nconnect=16 hung). Those are
+ * kept for good (srv.h); the pool serves the small ones. */
+#define LARGE_ALLOC 0x8000u
+
 void *srv_alloc(u32 bytes)
 {
-    u8 *p = (u8 *)ExAllocatePoolTypeWithTag(bytes, 0x76727378u /* "xsrv" */, 2);
+    u8 *p = bytes >= LARGE_ALLOC ? (u8 *)MmAllocatePhysicalMemory(2, bytes, 4)
+                                 : (u8 *)ExAllocatePoolTypeWithTag(bytes, 0x76727378u /* "xsrv" */, 2);
     u32 i;
 
     if (p)
