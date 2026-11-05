@@ -1377,6 +1377,7 @@ def bench_servers(a, ctx, ways):
 
 
 def bench(sym, argv):
+    global GUARD_S
     ap = argparse.ArgumentParser(prog="xectl.py bench")
     ap.add_argument("test", choices=["tcp", "udp", "ftpdll", "xeftp", "xenfs", "mix", "sockets"])
     ap.add_argument("which", nargs="?", default="both", choices=["down", "up", "both"])
@@ -1412,7 +1413,6 @@ def bench(sym, argv):
     commit, dirty = built_from(sym)
     ctx = dict(context(sym), commit=commit, dirty=dirty)
     if a.test in ("xeftp", "xenfs", "mix"):
-        global GUARD_S
         GUARD_S = a.guard
         bench_servers(a, ctx, ways)
         return
