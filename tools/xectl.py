@@ -102,7 +102,7 @@ STRUCTS = {
                   "mounts", "commits", "opens", "listings"],
     "ftp_stats": ["started", "sessions", "active", "refused", "bad_logins", "commands",
                   "retrs", "stors", "lists", "sent_lo", "sent_hi", "received_lo",
-                  "received_hi", "data_failed"],
+                  "received_hi", "data_failed", "wait_failed", "accept_failed"],
     "rndis_stats": ["init_status", "max_packets", "max_transfer", "alignment",
                     "filter_status", "media_status", "link_speed", "control_polls",
                     "keepalives", "indications", "last_indication", "rx_transfers",
@@ -577,11 +577,11 @@ def status(sym):
     if "ftp_stats" in sym:
         f = read_struct(sym, "ftp_stats")
         print("ftp      started=%d sessions=%d active=%d refused=%d bad_logins=%d commands=%d "
-              "retr=%d/%dMB stor=%d/%dMB lists=%d data_failed=%d" % (
+              "retr=%d/%dMB stor=%d/%dMB lists=%d data_failed=%d (wait %d accept %d)" % (
                   f["started"], f["sessions"], f["active"], f["refused"], f["bad_logins"],
                   f["commands"], f["retrs"], (f["sent_hi"] << 32 | f["sent_lo"]) >> 20,
                   f["stors"], (f["received_hi"] << 32 | f["received_lo"]) >> 20, f["lists"],
-                  f["data_failed"]))
+                  f["data_failed"], f["wait_failed"], f["accept_failed"]))
     if ss:
         print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
             ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],

@@ -13,6 +13,8 @@
 #include "srv.h"
 
 #define FTP_PORT_DEFAULT 21u
+#define FTP_PASV_LOW     50000u
+#define FTP_PASV_COUNT   1000u
 
 typedef struct {
     const char *root;       /* the directory served as "/" */
@@ -21,6 +23,8 @@ typedef struct {
     const char *password;
     u32 allow;              /* a client address (host order) and */
     u32 allow_mask;         /* its mask; 0 / 0 lets anyone in */
+    u32 pasv_low;           /* passive ports, taken in turn; 0 for FTP_PASV_LOW */
+    u32 pasv_count;         /* how many; 0 for FTP_PASV_COUNT */
 } FTP_CONFIG;
 
 typedef struct {
@@ -34,6 +38,8 @@ typedef struct {
     u32 sent_lo, sent_hi;
     u32 received_lo, received_hi;
     u32 data_failed;        /* a data connection not made */
+    u32 wait_failed;        /* of them: select on the passive listener failed */
+    u32 accept_failed;      /* of them: accept failed after the wait */
 } FTP_STATS;
 
 extern volatile FTP_STATS ftp_stats;

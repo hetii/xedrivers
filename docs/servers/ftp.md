@@ -37,6 +37,7 @@ FTP (RFC 959) with SIZE, MDTM, REST STREAM and MLST/MLSD (RFC 3659), and EPSV/EP
 | `ftp_port` | 21 | another server holding the port is waited for (2 minutes) |
 | `ftp_user`, `ftp_pass` | none | the login |
 | `ftp_allow` | anyone | `a.b.c.d/n`: the clients let in |
+| `ftp_pasv_low`, `ftp_pasv_count` | 50000, 1000 | the passive ports, taken in turn (xnet's own are only 1025-1255) |
 
 With ftpdll loaded as well, give this one another port (`ftp_port = 2121`).
 

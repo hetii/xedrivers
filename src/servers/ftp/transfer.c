@@ -13,17 +13,30 @@ void data_reset(SESSION *s)
     s->data_mode = DATA_NONE;
 }
 
-/* A listener on any port for the client to come to; its port, 0 on failure. */
+/* A listener for the client to come to, on the next port of the passive range;
+ * its port, 0 on failure. Not on a port xnet picks: its own are 1025-1255, 231
+ * of them in turn (2026-11-05), and after a lap the port given could still be a
+ * data connection's not yet closed -- one transfer in about 230 failed. */
 static u32 passive(SESSION *s)
 {
+    static u32 next;
+    u32 tries, port = 0;
+
     data_reset(s);
-    s->pasv = srv_listen(0, 1);
+    for (tries = 0; tries < 16; tries++) {
+        srv_lock();
+        port = ftp_cfg.pasv_low + next++ % ftp_cfg.pasv_count;
+        srv_unlock();
+        s->pasv = srv_listen(port, 1);
+        if (s->pasv >= 0)
+            break;
+    }
     if (s->pasv < 0) {
         s->pasv = -1;
         return 0;
     }
     s->data_mode = DATA_PASSIVE;
-    return srv_local_port(s->pasv);
+    return port;
 }
 
 /* "h1,h2,h3,h4,p1,p2" (PORT) into an address and port; 0 if it is not one. */
@@ -76,12 +89,22 @@ static SRV_SOCK open_data(SESSION *s, const char *what)
 {
     SRV_SOCK d = -1;
     u32 peer;
+    s32 w;
 
     reply3(s, 150, "Opening data connection for ", what, "");
-    if (s->data_mode == DATA_PASSIVE && srv_wait(s->pasv, ACCEPT_MS) > 0)
-        d = srv_accept(s->pasv, &peer);
-    else if (s->data_mode == DATA_ACTIVE)
+    if (s->data_mode == DATA_PASSIVE) {
+        /* a select that fails (not one that times out) does not stop the accept:
+         * the client may well be there (1 data connection lost in 83 rounds) */
+        w = srv_wait(s->pasv, ACCEPT_MS);
+        if (w < 0)
+            ftp_stats.wait_failed++;
+        if (w)
+            d = srv_accept(s->pasv, &peer);
+        if (w && d < 0)
+            ftp_stats.accept_failed++;
+    } else if (s->data_mode == DATA_ACTIVE) {
         d = srv_connect(s->port_address, s->port_port);
+    }
     data_reset(s);
     if (d < 0) {
         ftp_stats.data_failed++;

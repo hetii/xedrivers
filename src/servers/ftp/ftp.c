@@ -331,6 +331,11 @@ s32 ftp_start(const FTP_CONFIG *config)
     ftp_cfg = *config;
     if (!ftp_cfg.port)
         ftp_cfg.port = FTP_PORT_DEFAULT;
+    if (!ftp_cfg.pasv_low)
+        ftp_cfg.pasv_low = FTP_PASV_LOW;
+    if (!ftp_cfg.pasv_count || ftp_cfg.pasv_low + ftp_cfg.pasv_count > 65536u)
+        ftp_cfg.pasv_count = ftp_cfg.pasv_low + FTP_PASV_COUNT <= 65536u ? FTP_PASV_COUNT
+                                                                     : 65536u - ftp_cfg.pasv_low;
     str_copy(root, config->root, sizeof(root));
     str_copy(user, config->user ? config->user : "", sizeof(user));
     str_copy(password, config->password ? config->password : "", sizeof(password));

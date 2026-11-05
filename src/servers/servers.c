@@ -12,6 +12,7 @@
  *   ftp_port   = <port>         (21) taken from another server only once it lets go
  *   ftp_user, ftp_pass          (none) the login; without a user any login is taken
  *   ftp_allow  = a.b.c.d/n      (anyone) the clients let in
+ *   ftp_pasv_low, ftp_pasv_count (50000, 1000) the passive ports, taken in turn
  *   srv_delay  = <seconds>      (30) after boot before the first start
  */
 
@@ -115,6 +116,8 @@ static void start_ftp(void *arg)
         return;
     c.port = srv_setting_u32("ftp_port", FTP_PORT_DEFAULT);
     c.allow = c.allow_mask = 0;
+    c.pasv_low = srv_setting_u32("ftp_pasv_low", 0);
+    c.pasv_count = srv_setting_u32("ftp_pasv_count", 0);
     setting("ftp_root", root, sizeof(root), EVERY_VOLUME);
     setting("ftp_user", user, sizeof(user), "");
     setting("ftp_pass", password, sizeof(password), "");
