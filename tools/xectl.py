@@ -1029,7 +1029,8 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
                   rt.get("signal_dbm"), rt.get("tx_bitrate"), rt.get("rx_bitrate"),
                   rt.get("tx_retries"), rt.get("tx_failed")))
     if old:
-        change = (row["mbit_s"] - old["mbit_s"]) / old["mbit_s"] * 100 if old["mbit_s"] else 0.0
+        # a row of 0 is a run that failed: anything measured takes its place
+        change = (row["mbit_s"] - old["mbit_s"]) / old["mbit_s"] * 100 if old["mbit_s"] else 100.0
         verdict = ("within" if abs(change) <= a.tolerance else
                    "better" if change > 0 else "WORSE")
         print("     on file %.0f Mbit/s (%s, %s): %+.1f%%, %s +-%.0f%%" % (
