@@ -205,6 +205,7 @@ static void retr(SESSION *s, const char *path)
         srv_fclose(f);
         return;
     }
+    srv_share_add(d);
     for (;;) {
         n = srv_read(f, (u32)at, (u32)(at >> 32), s->buf, DATA_BUF);
         if (n < 0)
@@ -220,6 +221,7 @@ static void retr(SESSION *s, const char *path)
         add(&ftp_stats.sent_lo, &ftp_stats.sent_hi, (u32)n);
     }
     srv_fclose(f);
+    srv_share_remove(d);
     srv_close(d);
     ftp_stats.retrs++;
     if (n < 0)

@@ -37,6 +37,7 @@ extern int NetDll_select(u32 caller, int nfds, void *readfds, void *writefds, vo
 #define SO_REUSEADDR    0x0004
 #define SO_SNDTIMEO     0x1005
 #define SO_RCVBUF       0x1002
+#define SO_SNDBUF       0x1001
 #define SEND_TIMEOUT_MS 60000u              /* a send that cannot move this long fails */
 #define SO_XNET_5802    0x5802
 #define SO_XNET_5801    0x5801
@@ -163,12 +164,13 @@ s32 srv_recv(SRV_SOCK s, void *buffer, u32 length)
 
 /* What sending met, read by tools on the host (xectl): xnet runs out of send
  * buffers with eight connections sending at once (2026-11-05), and a send that
- * failed with WSAENOBUFS or WSAEWOULDBLOCK is tried again after 1 ms, for 10 s. */
+ * failed with WSAENOBUFS or WSAEWOULDBLOCK is tried again after 5 ms, for 10 s (1 ms took the processor from xnet at this
+ * thread's priority: eight sessions out 179 -> 125 Mbit/s). */
 volatile u32 srv_send_retries, srv_send_last_error;
 
 #define WSAEWOULDBLOCK  10035
 #define WSAENOBUFS      10055
-#define SEND_RETRIES    10000u
+#define SEND_RETRIES    2000u
 
 s32 srv_send(SRV_SOCK s, const void *buffer, u32 length)
 {
@@ -186,7 +188,7 @@ s32 srv_send(SRV_SOCK s, const void *buffer, u32 length)
         srv_send_last_error = (u32)e;
         if (n < 0 && (e == WSAENOBUFS || e == WSAEWOULDBLOCK) && tries++ < SEND_RETRIES) {
             srv_send_retries++;
-            srv_sleep(1);
+            srv_sleep(5);
             continue;
         }
         return -1;
@@ -238,9 +240,10 @@ s32 srv_wait(SRV_SOCK s, u32 ms)
     return NetDll_select(CALLER_SYSAPP, 0, &set, 0, 0, &t);
 }
 
-void srv_receive_window(SRV_SOCK s, u32 bytes)
+void srv_buffers(SRV_SOCK s, u32 bytes)
 {
     NetDll_setsockopt(CALLER_SYSAPP, (u32)s, SOL_SOCKET, SO_RCVBUF, &bytes, 4);
+    NetDll_setsockopt(CALLER_SYSAPP, (u32)s, SOL_SOCKET, SO_SNDBUF, &bytes, 4);
 }
 
 void srv_close(SRV_SOCK s)

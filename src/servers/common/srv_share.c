@@ -1,8 +1,9 @@
-/* The receive windows of the servers' data connections, sharing xnet's pool. What
- * a connection has not read yet lies in that pool (about 1 MB with the plugin's
+/* The socket buffers of the servers' data connections, sharing xnet's memory. What
+ * a connection has not read yet lies in its pool (about 1 MB with the plugin's
  * extension), and windows that add up to more stop every connection: twelve of
- * 128 KB broke uploads (2026-11-05). So each connection gets a share of a budget,
- * as much as `srv_window_kb` while few are receiving, and less as more come.
+ * 128 KB broke uploads (2026-11-05); eight senders of 128 KB run it out of buffers
+ * (WSAENOBUFS). So each connection gets a share of a budget, as much as
+ * `srv_window_kb` while few are at work, and less as more come.
  *
  * srv_windows_kb = 0, the default, leaves the sockets to xnet's defaults. Pure code
  * on srv.h: the console's platform and the host tests' both use it. */
@@ -38,7 +39,7 @@ static void apply(void)
     window = window > srv_share_most ? srv_share_most : window < WINDOW_MIN ? WINDOW_MIN : window;
     srv_share_last_window = window;
     for (i = 0; i < n; i++)
-        srv_receive_window(list[i], window);
+        srv_buffers(list[i], window);
 }
 
 void srv_share_init(void)
