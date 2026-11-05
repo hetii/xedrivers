@@ -5,9 +5,8 @@
  * yet.
  *
  * The kernel offers a composite device one interface at a time, having configured it
- * itself: we take the AudioStreaming ones, the first of a device does everything through
- * the default endpoint they share, and no SET_CONFIGURATION is sent. A second streaming
- * interface (the microphone's) stays idle, holding its slot.
+ * itself: we take its first AudioStreaming one, which does everything through the default
+ * endpoint all its interfaces share, and no SET_CONFIGURATION is sent.
  *
  * It is not a network card: its link stays down, so the network layer never picks it
  * as the uplink, and xmit has nothing to do.
@@ -21,7 +20,6 @@
 #define STEP_CONFIG     2u
 #define STEP_NOTHING    3u      /* nothing usable in the descriptors */
 #define STEP_HIGH_SPEED 4u
-#define STEP_BUSY       5u      /* a sibling interface, or another card, already plays */
 #define STEP_INTERFACE  6u
 #define STEP_RATE       7u
 #define STEP_ENDPOINT   8u
@@ -34,7 +32,10 @@
 volatile UAC_STATS uac_stats[NET_MAX];
 
 static UAC devices[NET_MAX];
-static UAC *playing;            /* one card at a time */
+
+/* One streaming interface of one card. Set in match, since the next interface is offered
+ * before the worker starts the first. */
+static volatile u32 taken;
 
 static u32 control(UAC *u, u32 type, u32 request, u32 value, u32 index, u32 length, u32 *actual)
 {
@@ -92,10 +93,8 @@ static u32 uac_start(NET_DEV *nd)
     u->stopping = 0;
     u->ep_play = u->ep_feedback = 0;
     nd->priv = u;
-    if ((dev->where & 3u) < 2u)
+    if (!USB_ON_COMPANION(dev))
         return STEP_HIGH_SPEED;
-    if (playing)
-        return STEP_BUSY;
     if (!u->control)
         u->control = (u8 *)net_dma_scratch(CONTROL_BYTES);
     if (!u->control)
@@ -111,6 +110,8 @@ static u32 uac_start(NET_DEV *nd)
     status = control(u, 0x80, 0x06, 0x0200, 0, total, &actual);
     if (!NT_SUCCESS(status) || actual < 9)
         return STEP_CONFIG;
+    if (actual > total)
+        actual = total;
     if (!uac_parse(u->control, actual, &u->info) || !u->info.play.found)
         return STEP_NOTHING;
 
@@ -146,7 +147,6 @@ static u32 uac_start(NET_DEV *nd)
         audio_close();
         return STEP_STREAM;
     }
-    playing = u;
     return 0;
 }
 
@@ -154,12 +154,10 @@ static void uac_detached(NET_DEV *nd)
 {
     UAC *u = (UAC *)nd->priv;
 
+    taken = 0;
     if (u) {
         u->stopping = 1;
-        if (playing == u) {
-            playing = 0;
-            audio_close();
-        }
+        audio_close();
     }
 }
 
@@ -182,9 +180,11 @@ static u32 uac_match(const u8 *device, const u8 *interface)
     /* Microsoft's own audio (Kinect, headsets) stays with the kernel's drivers. */
     if (device[8] == 0x5E && device[9] == 0x04)
         return XE_MATCH_NONE;
-    if (interface && interface[5] == 0x01 && interface[6] == 0x02 && !interface[3] &&
-        (interface[7] == 0x00 || interface[7] == 0x20))
+    if (!taken && interface && interface[5] == 0x01 && interface[6] == 0x02 && !interface[3] &&
+        (interface[7] == 0x00 || interface[7] == 0x20)) {
+        taken = 1;
         return XE_MATCH_CLASS;
+    }
     return XE_MATCH_NONE;
 }
 

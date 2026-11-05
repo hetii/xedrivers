@@ -3,12 +3,12 @@
 Plays the console's mixed sound on a USB sound card or headset. UAC1 and UAC2, chosen from
 the device's own descriptors, no list of products.
 
-**Not in the default build: it freezes the console.** With a CM108 (0d8c:013c, full speed,
-controller 3) in the console, the whole console stops on or soon after the first control
-transfer on the device's default endpoint; XBDM goes, the power button does not answer. Claiming
-the device without any transfer is fine, and a build without uac boots with the card in. Ruled out
-so far: taking two interfaces, a delay of 5 s before the transfer, endpoint 0's max packet (8).
-Still open. Local branch `uac-wip` has the probes. To build it anyway: `make DRIVERS="... uac"`.
+**Not in the default build: with its stream running, Aurora crashes.** Tested on a TI PCM2706
+(08bb:2706, full speed, controller 3). The USB side works: about 14000 transfers, 4 packets late,
+none bad. But Aurora dies 15-25 s after boot, at a different address each time (illegal instruction,
+execute at 0x003A002C, read at 0), and only while the stream runs: registering for the sound without
+a stream ran clean. Moving the stream's buffers from physical memory to the image changed nothing.
+Cause open. To build it anyway: `make DRIVERS="... uac"`.
 
 What it takes: a full-speed device on a companion (OHCI) controller with a stereo PCM output
 at 48 kHz, 16, 24 or 32 bits, adaptive, synchronous or asynchronous with explicit feedback.
@@ -18,7 +18,7 @@ What it refuses:
 - High-speed devices (controller 0 or 1): the kernel's isochronous path was only read for
   OHCI. `step` 4 in `xectl status`; the device keeps its USB slot until unplugged.
 - Microsoft's vendor id: the kernel's own drivers keep those.
-- A second card: `step` 5. The microphone's interface of the same card lands here too.
+- A second card, or a second streaming interface of the same card: never matched.
 
 How it works:
 

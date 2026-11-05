@@ -67,6 +67,32 @@ void usb_wait(u32 ms)
     KeWaitForSingleObject(&wake_event, 0, 0, 0, &timeout);
 }
 
+/* The kernel follows the Windows PowerPC convention: a callee may store its arguments in
+ * the caller's frame, at SP+0x10 and up (kit/kcall.S), and gcc keeps saved registers there.
+ * The OHCI side of UsbdQueueAsyncTransfer does so (17559, 0x800dc698: stw r5,276(r1) in a
+ * frame of 240), writing the controller's address over what its caller had saved: with
+ * submit_dpc_routine's frame that was r29, and the kernel's DPC loop returned through it,
+ * into the controller object. The whole console stopped. The EHCI side stores nothing, and
+ * nothing else from 0x800d8000 to 0x800de000 does; so only this call gets a frame of its own.
+ * Seen on the UART by bench_trace, 2026-11-06. */
+#if defined(__powerpc__)
+void usb_framed_call(void *routine, void *first, void *second);
+__asm__(".section .text\n"
+        ".globl usb_framed_call\n"
+        "usb_framed_call:\n"
+        "    mflr    0\n"
+        "    stw     0, 4(1)\n"
+        "    stwu    1, -128(1)\n"
+        "    mtctr   3\n"
+        "    mr      3, 4\n"
+        "    mr      4, 5\n"
+        "    bctrl\n"
+        "    addi    1, 1, 128\n"
+        "    lwz     0, 4(1)\n"
+        "    mtlr    0\n"
+        "    blr\n");
+#endif
+
 static void submit_now(URB *urb)
 {
     if (!urb->Dev || !urb->Dev->device) {
@@ -76,7 +102,12 @@ static void submit_now(URB *urb)
     mem_sync();                     /* buffer contents visible before the HC looks */
     {
         PROF_START(t);
-        UsbdQueueAsyncTransfer(urb->Dev->device, urb);
+#if defined(__powerpc__)
+        if (USB_ON_COMPANION(urb->Dev))
+            usb_framed_call((void *)UsbdQueueAsyncTransfer, urb->Dev->device, urb);
+        else
+#endif
+            UsbdQueueAsyncTransfer(urb->Dev->device, urb);
         PROF_END(submit, t, urb->Length);
     }
 }
@@ -258,6 +289,9 @@ void usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
     urb->Context = urb;
     urb->Routine = done;
     urb->Endpoint = endpoint;
+    /* OHCI: a short IN is no error (the kernel's queue reads +0x10: buffer rounding). */
+    if (USB_ON_COMPANION(dev))
+        urb->Flags = 1;
     urb->Dev = dev;
     urb->Buffer = length ? buffer : 0;
     urb->Length = length;

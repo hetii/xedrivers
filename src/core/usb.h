@@ -41,6 +41,9 @@ typedef struct USB_DEV {
     URB           close_urb;
 } USB_DEV;
 
+/* Controllers 0 and 1 are EHCI, 2 and 3 their USB 1.1 companions (OHCI). */
+#define USB_ON_COMPANION(dev) (((dev)->where & 3u) >= 2u)
+
 extern USB_DEV usb_devs[USB_MAX_DEVICES];
 
 /* Who decides which devices are ours and hears of their arrival and removal --
