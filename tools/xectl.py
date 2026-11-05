@@ -225,7 +225,19 @@ def xerunner(group, sub, *positional):
 
 
 def read(addr, length):
-    got = xerunner("console", "read-memory", hex(addr), hex(length))
+    """XBDM can be out of a socket for a minute after a burst of connections (xnet has
+    16 for everything, those closing among them): asked again for 2 minutes, and said."""
+    begin = time.time()
+    while True:
+        try:
+            got = xerunner("console", "read-memory", hex(addr), hex(length))
+            break
+        except SystemExit:
+            if time.time() - begin > 120:
+                raise
+            time.sleep(5)
+    if time.time() - begin > 5:
+        print("     XBDM did not answer for %.0f s" % (time.time() - begin))
     return bytes.fromhex((got.get("output") or got)["data"])
 
 
@@ -586,7 +598,10 @@ def status(sym):
         tl = struct.unpack(">I", read(sym["srv_thread_last"], 4))[0]
         tr = struct.unpack(">I", read(sym["srv_thread_retries"], 4))[0]
         print("srv      send retries=%d last error=%d | thread starts retried=%d failed=%d "
-              "last status=%#x" % (r, e, tr, tf, tl))
+              "last status=%#x | window %d KB" % (
+                  r, e, tr, tf, tl,
+                  struct.unpack(">I", read(sym["srv_share_last_window"], 4))[0] >> 10
+                  if "srv_share_last_window" in sym else 0))
     if "ftp_stats" in sym:
         f = read_struct(sym, "ftp_stats")
         print("xeftp    started=%d sessions=%d active=%d refused=%d bad_logins=%d commands=%d "
@@ -886,6 +901,9 @@ def context(sym):
         ctx["band_ghz"] = 2.4 if ctx["channel"] <= 14 else 5
         ctx["radio"] = radio_settings(sym)
         ctx["router"] = router_state(ctx["band_ghz"])
+    if "srv_share_budget" in sym:
+        budget, most = struct.unpack(">II", read(sym["srv_share_budget"], 4) + read(sym["srv_share_most"], 4))
+        ctx["servers"] = {"windows_kb": budget >> 10, "window_kb": most >> 10}
     xs = read_struct(sym, "xnet_stats")
     ctx["xnet"] = {
         "rcvbuf_kb": xs["rcvbuf_after"] or xs["rcvbuf_before"],
@@ -968,7 +986,8 @@ def built_from(sym):
 
 
 CONDITIONS = ("card", "kind", "link_mbps", "transport", "band_ghz", "channel", "width_mhz",
-              "xnet", "radio", "test", "streams", "direction")
+              "xnet", "radio", "servers", "test", "streams", "direction")
+SERVERS_DEFAULT = {"windows_kb": 0, "window_kb": 128}   # what server rows kept before it ran
 
 
 def condition(row, k):
@@ -976,6 +995,8 @@ def condition(row, k):
     ran the defaults."""
     if k == "radio" and row.get("kind") == "wifi" and "radio" not in row:
         return dict(RADIO_DEFAULT)
+    if k == "servers" and "servers" not in row and row["test"].startswith(("xeftp", "xenfs", "mix")):
+        return dict(SERVERS_DEFAULT)
     return row.get(k)
 
 
@@ -997,9 +1018,11 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
     if ctx.get("kind") == "wifi":
         ctx["router"] = router_state(ctx["band_ghz"])  # read now: busy covers this result
     row = {"date": time.strftime("%Y-%m-%d"), "commit": ctx["commit"],
-           **{k: v for k, v in ctx.items() if k not in ("commit", "dirty")},
+           **{k: v for k, v in ctx.items() if k not in ("commit", "dirty", "servers")},
            "test": test, "streams": streams, "direction": direction,
            "mbit_s": round(bytes_per_s * 8 / 1e6, 1), "mbyte_s": round(bytes_per_s / 1e6, 2)}
+    if test.startswith(("xeftp", "xenfs", "mix")) and ctx.get("servers"):
+        row["servers"] = ctx["servers"]
     key = [condition(row, k) for k in CONDITIONS]
     path, rows = kept_rows(ctx["kind"])
     old = next((r for r in rows if [condition(r, k) for k in CONDITIONS] == key), None)

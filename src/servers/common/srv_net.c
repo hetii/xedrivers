@@ -36,6 +36,7 @@ extern int NetDll_select(u32 caller, int nfds, void *readfds, void *writefds, vo
 #define SOL_SOCKET      0xFFFF
 #define SO_REUSEADDR    0x0004
 #define SO_SNDTIMEO     0x1005
+#define SO_RCVBUF       0x1002
 #define SEND_TIMEOUT_MS 60000u              /* a send that cannot move this long fails */
 #define SO_XNET_5802    0x5802
 #define SO_XNET_5801    0x5801
@@ -235,6 +236,11 @@ s32 srv_wait(SRV_SOCK s, u32 ms)
     t.sec = (s32)(ms / 1000);
     t.usec = (s32)(ms % 1000 * 1000);
     return NetDll_select(CALLER_SYSAPP, 0, &set, 0, 0, &t);
+}
+
+void srv_receive_window(SRV_SOCK s, u32 bytes)
+{
+    NetDll_setsockopt(CALLER_SYSAPP, (u32)s, SOL_SOCKET, SO_RCVBUF, &bytes, 4);
 }
 
 void srv_close(SRV_SOCK s)

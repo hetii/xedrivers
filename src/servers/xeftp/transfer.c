@@ -253,6 +253,7 @@ static void stor(SESSION *s, const char *path, u32 append)
         srv_fclose(f);
         return;
     }
+    srv_share_add(d);
     for (;;) {
         if (srv_wait(d, STALL_MS) <= 0) {
             n = -1;
@@ -269,6 +270,7 @@ static void stor(SESSION *s, const char *path, u32 append)
     }
     e = srv_flush(f);
     srv_fclose(f);
+    srv_share_remove(d);
     srv_close(d);
     ftp_stats.stors++;
     if (n < 0)
