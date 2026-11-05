@@ -23,6 +23,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py bench xeftp [up|down|both] [--mb 512] [--files 1,2,4] [--port 2121] [--repeat 3]
     xectl.py bench xenfs [up|down|both] [--mb 512] [--nconnect 1,4,8] [--repeat 3]
     xectl.py bench mix [--mb 512] [--nconnect 4] [--files 8]   (both servers into the console at once)
+    xectl.py bench udp --ip 192.168.1.250 [--size 1472] [--seconds 10] [--repeat 3]   (standalone)
     xectl.py bench ftpdll [up|down|both] [--mb 256] [--login U:P] [--dir Hdd1/xedrivers]
     xectl.py bench sockets [--count 80] how many TCP connections the console holds
 
@@ -1259,6 +1260,39 @@ def mix_run(mb, nconnect, files, port, folder):
         xeftp_delete(names, port, folder)
 
 
+def udp_run(sym, ip, seconds, size):
+    """UDP into the standalone stack's discard port (bench=stack, MODE=standalone), as
+    fast as the PC sends: no xnet in the way, the figure is what the console's stack
+    counted over the window. (received bytes/s, sent bytes/s)"""
+    stop = threading.Event()
+    sent = [0]
+
+    def sender():
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 << 20)
+        s.settimeout(1)
+        payload = b"x" * size
+        while not stop.is_set():
+            try:
+                sent[0] += s.sendto(payload, (ip, 9))
+            except OSError:
+                pass
+
+    def count():
+        st = read_struct(sym, "stack_stats")
+        return (st["discard_bytes_hi"] << 32 | st["discard_bytes"]), time.time()
+
+    t = threading.Thread(target=sender, daemon=True)
+    t.start()
+    time.sleep(2)
+    first, begin, sent0 = *count(), sent[0]
+    time.sleep(seconds)
+    last, end, sent1 = *count(), sent[0]
+    stop.set()
+    t.join(3)
+    return (last - first) / (end - begin), (sent1 - sent0) / (end - begin)
+
+
 def bench_servers(a, ctx, ways):
     """xeftp, xenfs and mix: a run that fails gives no figure; it is said, with what
     still answers, and kept as 0 with the reason (once, as a new row)."""
@@ -1305,7 +1339,7 @@ def bench_servers(a, ctx, ways):
 
 def bench(sym, argv):
     ap = argparse.ArgumentParser(prog="xectl.py bench")
-    ap.add_argument("test", choices=["tcp", "ftpdll", "xeftp", "xenfs", "mix", "sockets"])
+    ap.add_argument("test", choices=["tcp", "udp", "ftpdll", "xeftp", "xenfs", "mix", "sockets"])
     ap.add_argument("which", nargs="?", default="both", choices=["down", "up", "both"])
     ap.add_argument("--streams", default="1,4")
     ap.add_argument("--seconds", type=float, default=10)
@@ -1316,6 +1350,9 @@ def bench(sym, argv):
     ap.add_argument("--files", default="1,2", help="xeftp: sessions at once; mix: the last")
     ap.add_argument("--nconnect", default="1,4", help="xenfs: connections; mix: the last")
     ap.add_argument("--port", type=int, default=XEFTP_PORT, help="xeftp's port")
+    ap.add_argument("--ip", default=os.environ.get("XE_STACK_IP", ""),
+                    help="udp: the standalone stack's address (XE_HOST reads its counters)")
+    ap.add_argument("--size", type=int, default=1472, help="udp: payload bytes")
     ap.add_argument("--count", type=int, default=80)
     ap.add_argument("--repeat", type=int, default=1, help="runs; the median counts")
     ap.add_argument("--tolerance", type=float, default=3.0, help="percent taken as noise")
@@ -1336,6 +1373,16 @@ def bench(sym, argv):
     ctx = dict(context(sym), commit=commit, dirty=dirty)
     if a.test in ("xeftp", "xenfs", "mix"):
         bench_servers(a, ctx, ways)
+        return
+    if a.test == "udp":
+        runs = [udp_run(sym, a.ip, a.seconds, a.size) for _ in range(a.repeat)]
+        rate = median([r[0] for r in runs])
+        print("udp  up   %d B  pc->console  %6.1f Mbit/s (%5.1f MB/s) counted by the console, "
+              "PC sent %6.1f Mbit/s (%5.1f MB/s)%s" % (
+                  a.size, rate * 8 / 1e6, rate / 1e6, median([r[1] for r in runs]) * 8 / 1e6,
+                  median([r[1] for r in runs]) / 1e6,
+                  "  median of %d" % a.repeat if a.repeat > 1 else ""))
+        keep(ctx, "udp discard %d B" % a.size, 1, DIRECTION["up"], rate, a)
         return
     if a.test == "ftpdll":
         for w in sorted(ways, key=lambda w: w != "up"):     # the file goes up first
