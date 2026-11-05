@@ -316,7 +316,11 @@ static void listener(void *arg)
         ftp_stats.active++;
         srv_unlock();
         if (srv_thread(session, s)) {
+            ftp_stats.no_thread++;
             srv_close(c);
+            srv_lock();
+            ftp_stats.active--;
+            srv_unlock();
             s->busy = 0;
         }
     }

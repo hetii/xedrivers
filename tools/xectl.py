@@ -99,10 +99,11 @@ STRUCTS = {
     "nfs_stats": ["started", "connections", "active", "calls", "bad_calls", "refused",
                   "reads", "read_bytes_lo", "read_bytes_hi", "writes", "write_bytes_lo",
                   "write_bytes_hi", "stale", "handles", "handles_full", "portmap_calls",
-                  "mounts", "commits", "opens", "listings"],
+                  "mounts", "commits", "opens", "listings", "no_thread"],
     "ftp_stats": ["started", "sessions", "active", "refused", "bad_logins", "commands",
                   "retrs", "stors", "lists", "sent_lo", "sent_hi", "received_lo",
-                  "received_hi", "data_failed", "wait_failed", "accept_failed"],
+                  "received_hi", "data_failed", "wait_failed", "accept_failed",
+                  "read_failed", "send_failed", "no_thread"],
     "rndis_stats": ["init_status", "max_packets", "max_transfer", "alignment",
                     "filter_status", "media_status", "link_speed", "control_polls",
                     "keepalives", "indications", "last_indication", "rx_transfers",
@@ -567,21 +568,31 @@ def status(sym):
         n = read_struct(sym, "nfs_stats")
         print("nfs      started=%d conns=%d active=%d calls=%d bad=%d refused=%d mounts=%d "
               "read=%d/%dMB write=%d/%dMB commits=%d opens=%d listings=%d handles=%d full=%d "
-              "stale=%d portmap=%d" % (
+              "stale=%d portmap=%d no_thread=%d" % (
                   n["started"], n["connections"], n["active"], n["calls"], n["bad_calls"],
                   n["refused"], n["mounts"], n["reads"],
                   (n["read_bytes_hi"] << 32 | n["read_bytes_lo"]) >> 20, n["writes"],
                   (n["write_bytes_hi"] << 32 | n["write_bytes_lo"]) >> 20, n["commits"],
                   n["opens"], n["listings"], n["handles"], n["handles_full"], n["stale"],
-                  n["portmap_calls"]))
+                  n["portmap_calls"], n["no_thread"]))
+    if "srv_send_retries" in sym:
+        r = struct.unpack(">I", read(sym["srv_send_retries"], 4))[0]
+        e = struct.unpack(">I", read(sym["srv_send_last_error"], 4))[0]
+        tf = struct.unpack(">I", read(sym["srv_thread_failed"], 4))[0]
+        tl = struct.unpack(">I", read(sym["srv_thread_last"], 4))[0]
+        tr = struct.unpack(">I", read(sym["srv_thread_retries"], 4))[0]
+        print("srv      send retries=%d last error=%d | thread starts retried=%d failed=%d "
+              "last status=%#x" % (r, e, tr, tf, tl))
     if "ftp_stats" in sym:
         f = read_struct(sym, "ftp_stats")
         print("ftp      started=%d sessions=%d active=%d refused=%d bad_logins=%d commands=%d "
-              "retr=%d/%dMB stor=%d/%dMB lists=%d data_failed=%d (wait %d accept %d)" % (
+              "retr=%d/%dMB stor=%d/%dMB lists=%d data_failed=%d (wait %d accept %d) "
+              "retr stopped by disk %d / send %d no_thread=%d" % (
                   f["started"], f["sessions"], f["active"], f["refused"], f["bad_logins"],
                   f["commands"], f["retrs"], (f["sent_hi"] << 32 | f["sent_lo"]) >> 20,
                   f["stors"], (f["received_hi"] << 32 | f["received_lo"]) >> 20, f["lists"],
-                  f["data_failed"], f["wait_failed"], f["accept_failed"]))
+                  f["data_failed"], f["wait_failed"], f["accept_failed"],
+                  f["read_failed"], f["send_failed"], f["no_thread"]))
     if ss:
         print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
             ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],

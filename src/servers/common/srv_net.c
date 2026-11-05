@@ -23,6 +23,7 @@ extern int NetDll_recvfrom(u32 caller, u32 socket, void *buffer, int length, int
 extern int NetDll_sendto(u32 caller, u32 socket, const void *buffer, int length, int flags,
                          const void *to, int to_length);
 extern int NetDll_XNetGetTitleXnAddr(u32 caller, void *xnaddr);
+extern int NetDll_WSAGetLastError(void);
 extern int NetDll_select(u32 caller, int nfds, void *readfds, void *writefds, void *exceptfds,
                          const void *timeout);
 
@@ -34,6 +35,8 @@ extern int NetDll_select(u32 caller, int nfds, void *readfds, void *writefds, vo
 #define IPPROTO_UDP     17
 #define SOL_SOCKET      0xFFFF
 #define SO_REUSEADDR    0x0004
+#define SO_SNDTIMEO     0x1005
+#define SEND_TIMEOUT_MS 60000u              /* a send that cannot move this long fails */
 #define SO_XNET_5802    0x5802
 #define SO_XNET_5801    0x5801
 #define INVALID_SOCKET  0xFFFFFFFFu
@@ -118,6 +121,11 @@ SRV_SOCK srv_accept(SRV_SOCK listener, u32 *peer)
     if (s == INVALID_SOCKET)
         return -1;
     insecure(s);
+    {
+        u32 ms = SEND_TIMEOUT_MS;
+
+        NetDll_setsockopt(CALLER_SYSAPP, s, SOL_SOCKET, SO_SNDTIMEO, &ms, 4);
+    }
     if (peer)
         *peer = a.address;
     return (SRV_SOCK)s;
@@ -152,17 +160,35 @@ s32 srv_recv(SRV_SOCK s, void *buffer, u32 length)
     return n < 0 ? -1 : n;
 }
 
+/* What sending met, read by tools on the host (xectl): xnet runs out of send
+ * buffers with eight connections sending at once (2026-11-05), and a send that
+ * failed with WSAENOBUFS or WSAEWOULDBLOCK is tried again after 5 ms, for 10 s. */
+volatile u32 srv_send_retries, srv_send_last_error;
+
+#define WSAEWOULDBLOCK  10035
+#define WSAENOBUFS      10055
+#define SEND_RETRIES    2000u
+
 s32 srv_send(SRV_SOCK s, const void *buffer, u32 length)
 {
     const u8 *p = (const u8 *)buffer;
-    u32 done = 0;
-    int n;
+    u32 done = 0, tries = 0;
+    int n, e;
 
     while (done < length) {
         n = NetDll_send(CALLER_SYSAPP, (u32)s, p + done, (int)(length - done), 0);
-        if (n <= 0)
-            return -1;
-        done += (u32)n;
+        if (n > 0) {
+            done += (u32)n;
+            continue;
+        }
+        e = NetDll_WSAGetLastError();
+        srv_send_last_error = (u32)e;
+        if (n < 0 && (e == WSAENOBUFS || e == WSAEWOULDBLOCK) && tries++ < SEND_RETRIES) {
+            srv_send_retries++;
+            srv_sleep(5);
+            continue;
+        }
+        return -1;
     }
     return (s32)done;
 }

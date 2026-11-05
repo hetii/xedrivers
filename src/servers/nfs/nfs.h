@@ -49,6 +49,7 @@ typedef struct {
     u32 commits;
     u32 opens;              /* files opened for READ, WRITE, COMMIT */
     u32 listings;           /* directories opened for READDIR */
+    u32 no_thread;          /* a connection closed: its thread did not start */
 } NFS_STATS;
 
 extern volatile NFS_STATS nfs_stats;

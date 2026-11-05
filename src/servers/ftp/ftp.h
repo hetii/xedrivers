@@ -40,6 +40,9 @@ typedef struct {
     u32 data_failed;        /* a data connection not made */
     u32 wait_failed;        /* of them: select on the passive listener failed */
     u32 accept_failed;      /* of them: accept failed after the wait */
+    u32 read_failed;        /* a RETR stopped by the disk */
+    u32 send_failed;        /* a RETR stopped by the data connection */
+    u32 no_thread;          /* a session closed: its thread did not start */
 } FTP_STATS;
 
 extern volatile FTP_STATS ftp_stats;

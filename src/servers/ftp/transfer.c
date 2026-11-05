@@ -207,8 +207,15 @@ static void retr(SESSION *s, const char *path)
     }
     for (;;) {
         n = srv_read(f, (u32)at, (u32)(at >> 32), s->buf, DATA_BUF);
-        if (n <= 0 || srv_send(d, s->buf, (u32)n) < 0)
+        if (n < 0)
+            ftp_stats.read_failed++;
+        if (n <= 0)
             break;
+        if (srv_send(d, s->buf, (u32)n) < 0) {
+            ftp_stats.send_failed++;
+            n = -1;
+            break;
+        }
         at += (u32)n;
         add(&ftp_stats.sent_lo, &ftp_stats.sent_hi, (u32)n);
     }

@@ -17,7 +17,7 @@ extern void ExFreePool(void *p);
 /* --- threads ----------------------------------------------------------------- */
 
 #define THREAD_PRIORITY 20
-#define THREAD_STACK    0x10000u
+#define THREAD_STACK    0x8000u         /* 32 KB: 64 KB ran the kernel out of resources (0xC000009A) with eight FTP sessions starting at once */
 #define STARTS          32
 
 /* The hardware thread the servers run on (srv_cpu in the ini, 4 by default): not
@@ -33,6 +33,9 @@ typedef struct {
 } START;
 
 static START starts[STARTS];
+
+/* Read by tools on the host (xectl): threads that did not start, and the last status. */
+volatile u32 srv_thread_failed, srv_thread_last, srv_thread_retries;
 
 static inline void *current_thread(void)
 {
@@ -62,6 +65,7 @@ static u32 trampoline(void *p)
 
 s32 srv_thread(void (*fn)(void *arg), void *arg)
 {
+    u32 tries, status;
     void *thread = 0;
     u32 i;
     START *s = 0;
@@ -84,9 +88,20 @@ s32 srv_thread(void (*fn)(void *arg), void *arg)
 
         thread_cpu = cpu >= 2 && cpu <= 5 ? cpu : 4;
     }
-    if (ExCreateThread(&thread, THREAD_STACK, 0, 0, (void *)trampoline, s, 2) < 0) {
-        s->used = 0;
-        return -1;
+    /* ExCreateThread failed now and then right after eight sessions ended at once
+     * (2026-11-05): tried again for a second before the caller hears of it */
+    for (tries = 0;; tries++) {
+        status = (u32)ExCreateThread(&thread, THREAD_STACK, 0, 0, (void *)trampoline, s, 2);
+        if (!(status & 0x80000000u))
+            break;
+        srv_thread_last = status;
+        srv_thread_retries++;
+        if (tries == 20) {
+            srv_thread_failed++;
+            s->used = 0;
+            return -1;
+        }
+        srv_sleep(50);
     }
     NtClose(thread);
     return 0;

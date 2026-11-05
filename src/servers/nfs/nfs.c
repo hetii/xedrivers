@@ -174,7 +174,11 @@ static void listener(void *arg)
         srv_unlock();
         if (srv_thread(serve, c)) {
             srv_close(s);
+            srv_lock();
+            nfs_stats.active--;
+            nfs_stats.no_thread++;
             c->busy = 0;
+            srv_unlock();
         }
     }
 }
