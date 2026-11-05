@@ -1,7 +1,14 @@
 # uac: USB Audio Class
 
 Plays the console's mixed sound on a USB sound card or headset. UAC1 and UAC2, chosen from
-the device's own descriptors, no list of products. Not yet run on a real card.
+the device's own descriptors, no list of products.
+
+**Not in the default build: it freezes the console.** With a CM108 (0d8c:013c, full speed,
+controller 3) in the console, the whole console stops on or soon after the first control
+transfer on the device's default endpoint; XBDM goes, the power button does not answer. Claiming
+the device without any transfer is fine, and a build without uac boots with the card in. Ruled out
+so far: taking two interfaces, a delay of 5 s before the transfer, endpoint 0's max packet (8).
+Still open. Local branch `uac-wip` has the probes. To build it anyway: `make DRIVERS="... uac"`.
 
 What it takes: a full-speed device on a companion (OHCI) controller with a stereo PCM output
 at 48 kHz, 16, 24 or 32 bits, adaptive, synchronous or asynchronous with explicit feedback.

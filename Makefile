@@ -101,7 +101,8 @@ NEEDS_rtl8156 := cdc common/realtek
 NEEDS_rtl8153 := cdc common/realtek
 NEEDS_ax88179 := common/asix
 NEEDS_ax88178 := common/asix
-DRIVERS  ?= $(filter-out common,$(notdir $(patsubst %/,%,$(wildcard src/drivers/*/))))
+# uac is left out until it stops freezing the console: docs/drivers/uac.md. Ask for it by DRIVERS=.
+DRIVERS  ?= $(filter-out common uac,$(notdir $(patsubst %/,%,$(wildcard src/drivers/*/))))
 DRIVER_DIRS := $(sort $(DRIVERS) $(foreach d,$(DRIVERS),$(NEEDS_$(d))))
 SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
             $(addprefix src/drivers/,$(DRIVER_DIRS)) \
