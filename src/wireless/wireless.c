@@ -226,8 +226,12 @@ void wl_load_config(void)
         ;
     wl_config.dashboard = n == 9 && i == 9;
     n = file_setting(WL_SETTINGS, "wifi_rts", value, sizeof(value));
-    wl_config.rts = word_is(value, n, "rts") ? WL_RTS_RTS :
-                    word_is(value, n, "cts") ? WL_RTS_CTS : WL_RTS_OFF;
+    /* RTS by default: on 2.4 GHz (channel 10, shared, 17% busy) four streams out
+     * 150-156 -> 175-176 Mbit/s, the rest unchanged; on 5 GHz no change either way
+     * (2026-11-05, xectl bench tcp --record, RTL8822BU). CTS-to-self did alike. */
+    wl_config.rts = word_is(value, n, "off") ? WL_RTS_OFF :
+                    word_is(value, n, "cts") ? WL_RTS_CTS : WL_RTS_RTS;
+    /* static by default: dynamic and off were no better on either band (same day) */
     n = file_setting(WL_SETTINGS, "wifi_edcca", value, sizeof(value));
     wl_config.edcca = word_is(value, n, "dynamic") ? WL_EDCCA_DYNAMIC :
                       word_is(value, n, "off") ? WL_EDCCA_OFF : WL_EDCCA_STATIC;

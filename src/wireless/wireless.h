@@ -82,7 +82,7 @@ typedef struct {
     u32  pass_len;              /* `wifi_pass =`, for a WPA2 network */
     char pass[WL_PASS_MAX + 1];
     u32  dashboard;             /* `wifi_mode = dashboard`, else ethernet */
-    u32  rts;                   /* `wifi_rts =`: WL_RTS_OFF (default), _RTS, _CTS */
+    u32  rts;                   /* `wifi_rts =`: WL_RTS_RTS (default), _OFF, _CTS */
     u32  edcca;                 /* `wifi_edcca =`: WL_EDCCA_STATIC (default), _DYNAMIC, _OFF */
 } WL_CONFIG;
 

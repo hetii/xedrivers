@@ -897,7 +897,7 @@ def context(sym):
 
 RTS_NAMES = {0: "off", 1: "rts", 2: "cts"}
 EDCCA_NAMES = {0: "static", 1: "dynamic", 2: "off"}
-RADIO_DEFAULT = {"rts": "off", "edcca": "static"}
+RADIO_DEFAULT = {"rts": "off", "edcca": "static"}   # what rows kept before "radio" ran
 
 
 def radio_settings(sym):
@@ -912,6 +912,7 @@ def radio_settings(sym):
 
 ROUTER = os.environ.get("XE_ROUTER", "root@192.168.1.10")
 ROUTER_IF = {2.4: "phy0-ap0", 5: "phy1-ap0"}
+SURVEY = {}
 
 
 def router_state(band):
@@ -926,6 +927,21 @@ def router_state(band):
     except (OSError, subprocess.TimeoutExpired):
         return {}
     st = {}
+    try:
+        sv = subprocess.run(["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", ROUTER,
+                             "iw dev %s survey dump | grep -A3 'in use'" % dev],
+                            capture_output=True, text=True, timeout=15).stdout
+        act = re.search(r"active time:\s+(\d+)", sv)
+        busy = re.search(r"busy time:\s+(\d+)", sv)
+        if act and busy:
+            now = (int(act.group(1)), int(busy.group(1)))
+            last = SURVEY.get(dev)
+            if last and now[0] > last[0]:
+                # busy share of the channel since the last result, the router's count
+                st["busy_pct"] = round(100.0 * (now[1] - last[1]) / (now[0] - last[0]), 1)
+            SURVEY[dev] = now
+    except (OSError, subprocess.TimeoutExpired):
+        pass
     m = re.search(r"channel (\d+) \((\d+) MHz\), width: (\d+) MHz", out)
     if m:
         st.update(channel=int(m.group(1)), width_mhz=int(m.group(3)))
@@ -975,6 +991,8 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
     more only with --accept-lower REASON -- a drop is a regression until shown
     otherwise. The file holds the current figure for each set of conditions; git
     log -p the older ones."""
+    if ctx.get("kind") == "wifi":
+        ctx["router"] = router_state(ctx["band_ghz"])  # read now: busy covers this result
     row = {"date": time.strftime("%Y-%m-%d"), "commit": ctx["commit"],
            **{k: v for k, v in ctx.items() if k not in ("commit", "dirty")},
            "test": test, "streams": streams, "direction": direction,
@@ -984,9 +1002,9 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
     old = next((r for r in rows if [condition(r, k) for k in CONDITIONS] == key), None)
     if ctx.get("router"):
         rt = ctx["router"]
-        print("     router ch %s/%s MHz txpower %s dBm, console signal %s dBm, tx %s / rx %s "
+        print("     router ch %s/%s MHz busy %s%% txpower %s dBm, console signal %s dBm, tx %s / rx %s "
               "Mbit/s, retries %s failed %s" % (
-                  rt.get("channel"), rt.get("width_mhz"), rt.get("txpower_dbm"),
+                  rt.get("channel"), rt.get("width_mhz"), rt.get("busy_pct", "?"), rt.get("txpower_dbm"),
                   rt.get("signal_dbm"), rt.get("tx_bitrate"), rt.get("rx_bitrate"),
                   rt.get("tx_retries"), rt.get("tx_failed")))
     if old:
