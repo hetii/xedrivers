@@ -50,7 +50,7 @@ With ftpdll loaded as well, give this one another port (`ftp_port = 2121`).
 
 ## Tests
 
-`tests/servers/xeftp/test_xeftp.c` builds the server on the host and drives it with
+`tests/servers/xeftp/test_ftp.c` builds the server on the host and drives it with
 curl:
 - transfers in passive, EPRT and PORT mode;
 - a resumed upload and a resumed download;

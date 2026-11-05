@@ -76,7 +76,7 @@ hardware thread (`srv_cpu` 2-5) changes nothing. On the RTL8822BU at 5 GHz:
 
 ## Tests
 
-`tests/servers/xenfs/test_xenfs.c` builds the server on the host and mounts it with
+`tests/servers/xenfs/test_nfs.c` builds the server on the host and mounts it with
 the PC's own NFS client. It runs write, read after a remount, a directory, a
 listing, rename, truncate and remove. It lists 3000 names through a table of 256
 handles, and renames a file while it is open. Skipped without `mount.nfs` or

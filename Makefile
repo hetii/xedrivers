@@ -223,8 +223,8 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # reached by the test translation units, so they build with the host compiler.
 # Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
 test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis \
-      $(BUILD)/test_asix $(BUILD)/test_ax88179 $(BUILD)/test_ax88178 $(BUILD)/test_xenfs \
-      $(BUILD)/test_xeftp \
+      $(BUILD)/test_asix $(BUILD)/test_ax88179 $(BUILD)/test_ax88178 $(BUILD)/test_nfs \
+      $(BUILD)/test_ftp \
       $(BUILD)/test_aic $(BUILD)/test_wpa $(BUILD)/test_reorder \
       $(BUILD)/test_bridge $(BUILD)/test_omni
 	@$(BUILD)/test_cdc
@@ -234,8 +234,8 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
 	@$(BUILD)/test_asix
 	@$(BUILD)/test_ax88179
 	@$(BUILD)/test_ax88178
-	@$(BUILD)/test_xenfs
-	@$(BUILD)/test_xeftp
+	@$(BUILD)/test_nfs
+	@$(BUILD)/test_ftp
 	@AIC_FW=$(FW_DIR)/aic8800D80 $(BUILD)/test_aic
 	@$(BUILD)/test_wpa
 	@$(BUILD)/test_reorder
@@ -278,18 +278,18 @@ $(BUILD)/test_ax88178: tests/drivers/ax88178/test_ax88178.c src/drivers/ax88178/
 # The file servers on the host: src/servers/<name>/ on tests/servers/common's POSIX
 # platform, mounted with the PC's own clients (skipped where sudo cannot mount).
 SERVERS_HOST := $(wildcard tests/servers/common/*.c) src/servers/common/srv_keep.c
-$(BUILD)/test_xenfs: tests/servers/xenfs/test_xenfs.c $(wildcard src/servers/xenfs/*.c) \
+$(BUILD)/test_nfs: tests/servers/xenfs/test_nfs.c $(wildcard src/servers/xenfs/*.c) \
                    $(SERVERS_HOST) $(HEADERS)
 	@mkdir -p $(BUILD)
 	gcc -std=gnu99 -Wall -Wextra -O2 -I src/core -I src/servers/common -I src/servers/xenfs \
-	    -o $@ tests/servers/xenfs/test_xenfs.c $(wildcard src/servers/xenfs/*.c) \
+	    -o $@ tests/servers/xenfs/test_nfs.c $(wildcard src/servers/xenfs/*.c) \
 	    $(SERVERS_HOST) -lpthread
 
-$(BUILD)/test_xeftp: tests/servers/xeftp/test_xeftp.c $(wildcard src/servers/xeftp/*.c) \
+$(BUILD)/test_ftp: tests/servers/xeftp/test_ftp.c $(wildcard src/servers/xeftp/*.c) \
                    $(SERVERS_HOST) $(HEADERS)
 	@mkdir -p $(BUILD)
 	gcc -std=gnu99 -Wall -Wextra -O2 -I src/core -I src/servers/common -I src/servers/xeftp \
-	    -o $@ tests/servers/xeftp/test_xeftp.c $(wildcard src/servers/xeftp/*.c) \
+	    -o $@ tests/servers/xeftp/test_ftp.c $(wildcard src/servers/xeftp/*.c) \
 	    $(SERVERS_HOST) -lpthread
 
 $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c $(HEADERS)
