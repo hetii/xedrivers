@@ -513,7 +513,7 @@ u32 aic_data_open(AIC *a)
 
     if (!a->reorder_pool) {
         a->reorder_pool = (u8 *)MmAllocatePhysicalMemory(2, WL_REORDER_POOL, 4);
-        KeInitializeDpc(&a->reorder_dpc, reorder_dpc_routine, a);
+        usb_dpc_init(&a->reorder_dpc, reorder_dpc_routine, a);
         a->reorder_dpc.TargetNumber = USB_PROCESSOR + 1;
     }
     wl_reorder_init(&a->reorder, a->reorder_pool, reorder_deliver, a, &a->st->reorder);

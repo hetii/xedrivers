@@ -817,7 +817,7 @@ u32 cdc_start(NET_DEV *nd)
     if (!NT_SUCCESS(status))
         return fail(c, CDC_STEP_FILTER, status);
 
-    KeInitializeDpc(&c->rx_dpc, rx_dpc_routine, c);
+    usb_dpc_init(&c->rx_dpc, rx_dpc_routine, c);
     c->rx_head = c->rx_tail = 0;
 
     c->tx_next = 0;

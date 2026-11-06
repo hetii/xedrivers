@@ -32,6 +32,7 @@ typedef struct {
     u32 overruns;           /* frames lost: nobody read them in time */
     u32 underruns;          /* frames of silence given: none there */
     u32 volume;             /* out of 256, from audio_volume (0-100) in the ini */
+    u32 callback_context;   /* processor << 8 | IRQL of the kernel's call */
 } AUDIO_STATS;
 
 extern volatile AUDIO_STATS audio_stats;

@@ -108,7 +108,7 @@ u32 stream_start(UAC *u)
         if (!u->play_buf[slot])
             return 1;
         u->play[slot].Context = u->ep_play;
-        u->play[slot].Routine = play_done;
+        u->play[slot].Done = play_done;
         u->play[slot].Endpoint = u->ep_play;
         u->play[slot].Buffer = u->play_buf[slot];
         u->play[slot].PacketCount = UAC_PACKETS;
@@ -123,7 +123,7 @@ u32 stream_start(UAC *u)
             if (!u->feedback_buf[slot])
                 return 1;
             u->feedback[slot].Context = u->ep_feedback;
-            u->feedback[slot].Routine = feedback_done;
+            u->feedback[slot].Done = feedback_done;
             u->feedback[slot].Endpoint = u->ep_feedback;
             u->feedback[slot].Buffer = u->feedback_buf[slot];
             u->feedback[slot].Length = fb;

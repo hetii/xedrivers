@@ -56,6 +56,8 @@ typedef struct _KDPC {
     void              *DeferredContext;
     void              *SystemArgument1;
     void              *SystemArgument2;
+    /* Ours, past what the kernel touches: the routine usb_dpc_init was given. */
+    PKDEFERRED_ROUTINE Entry;
 } KDPC;
 
 /* Read off KeRaiseIrqlToDpcLevel and KeInsertQueueDpc: IRQL is the byte at PCR+0x18,
@@ -165,7 +167,12 @@ typedef struct _URB {
     struct USB_DEV *Dev;                        /* the device it goes to (usb_prepare) */
     void          *Owner;                       /* the driver instance it belongs to */
     u32            Stamp;                       /* time base at submission (prof.h) */
+    URB_COMPLETION Done;                        /* +0x40 what usb_prepare was asked to call */
 } URB;
+
+#if defined(__powerpc__)
+_Static_assert(__builtin_offsetof(URB, Done) == 0x40, "usb.c's usb_urb_stub reads it there");
+#endif
 
 /* An isochronous request, what UsbdQueueIsochTransfer takes: the common head, the buffer
  * eight bytes earlier than a URB's, then the packet count. The routine gets the request,
@@ -189,7 +196,12 @@ struct _ISOCH {
     struct USB_DEV  *Dev;
     u16             *Lengths;                   /* each packet's length, for the kernel */
     void            *Owner;
+    ISOCH_COMPLETION Done;                      /* +0x2C what the driver wants called */
 };
+
+#if defined(__powerpc__)
+_Static_assert(__builtin_offsetof(struct _ISOCH, Done) == 0x2C, "usb.c's usb_isoch_stub reads it there");
+#endif
 
 extern void  UsbdQueueIsochTransfer(void *device, ISOCH *request, u16 *lengths);
 

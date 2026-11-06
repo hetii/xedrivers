@@ -56,6 +56,47 @@ typedef struct {
     void (*detached)(USB_DEV *dev);
 } USB_CLIENT;
 
+/* The entry for a routine the kernel calls at DISPATCH_LEVEL: why, in usb.c. `load` puts
+ * the routine's address in r12; the arguments go through as they came. */
+#if defined(__powerpc__)
+#define USB_STUB(name, load)                                                        \
+    __asm__(".section .text\n"                                                       \
+            ".machine ppc64\n"                                                       \
+            ".globl " name "\n"                                                      \
+            name ":\n"                                                               \
+            "    mflr    0\n"                                                        \
+            "    stw     0, 4(1)\n"                                                  \
+            "    stwu    1, -176(1)\n"                                               \
+            "    std 14, 16(1)\n  std 15, 24(1)\n  std 16, 32(1)\n  std 17, 40(1)\n"  \
+            "    std 18, 48(1)\n  std 19, 56(1)\n  std 20, 64(1)\n  std 21, 72(1)\n"  \
+            "    std 22, 80(1)\n  std 23, 88(1)\n  std 24, 96(1)\n  std 25, 104(1)\n" \
+            "    std 26, 112(1)\n std 27, 120(1)\n std 28, 128(1)\n std 29, 136(1)\n" \
+            "    std 30, 144(1)\n std 31, 152(1)\n"                                  \
+            "    " load "\n"                                                         \
+            "    mtctr   12\n"                                                       \
+            "    bctrl\n"                                                            \
+            "    ld 14, 16(1)\n   ld 15, 24(1)\n   ld 16, 32(1)\n   ld 17, 40(1)\n"   \
+            "    ld 18, 48(1)\n   ld 19, 56(1)\n   ld 20, 64(1)\n   ld 21, 72(1)\n"   \
+            "    ld 22, 80(1)\n   ld 23, 88(1)\n   ld 24, 96(1)\n   ld 25, 104(1)\n"  \
+            "    ld 26, 112(1)\n  ld 27, 120(1)\n  ld 28, 128(1)\n  ld 29, 136(1)\n"  \
+            "    ld 30, 144(1)\n  ld 31, 152(1)\n"                                   \
+            "    addi    1, 1, 176\n"                                                \
+            "    lwz     0, 4(1)\n"                                                  \
+            "    mtlr    0\n"                                                        \
+            "    blr\n"                                                              \
+            ".machine any\n")
+#endif
+
+/* A DPC of ours, entered so that the thread it interrupts keeps its registers: see usb.c. */
+#if defined(__powerpc__)
+void usb_dpc_init(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *context);
+#else
+static inline void usb_dpc_init(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *context)
+{
+    KeInitializeDpc(dpc, routine, context);
+}
+#endif
+
 #define USB_PROCESSOR 2             /* hardware thread the USB stack runs on */
 
 int   usb_register(const USB_CLIENT *client);

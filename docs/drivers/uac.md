@@ -3,12 +3,10 @@
 Plays the console's mixed sound on a USB sound card or headset. UAC1 and UAC2, chosen from
 the device's own descriptors, no list of products.
 
-**Not in the default build: with its stream running, Aurora crashes.** Tested on a TI PCM2706
-(08bb:2706, full speed, controller 3). The USB side works: about 14000 transfers, 4 packets late,
-none bad. But Aurora dies 15-25 s after boot, at a different address each time (illegal instruction,
-execute at 0x003A002C, read at 0), and only while the stream runs: registering for the sound without
-a stream ran clean. Moving the stream's buffers from physical memory to the image changed nothing.
-Cause open. To build it anyway: `make DRIVERS="... uac"`.
+Tested on a TI PCM2706 (08bb:2706, full speed, controller 3): sound heard in headphones during the
+boot intro; Aurora up on 5 of 5 boots; about 155000 packets, 4 late, none bad but those cancelled by
+3 resets, after each of which the stream came back by itself. Not tried yet: pulling the card out
+by hand, an asynchronous card (its feedback endpoint), UAC2.
 
 What it takes: a full-speed device on a companion (OHCI) controller with a stereo PCM output
 at 48 kHz, 16, 24 or 32 bits, adaptive, synchronous or asynchronous with explicit feedback.

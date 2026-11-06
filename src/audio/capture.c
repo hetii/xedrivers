@@ -9,6 +9,7 @@
 #include "audio.h"
 #include "file.h"
 #include "pcm.h"
+#include "usb.h"
 
 #define RING_FRAMES     4096u           /* a power of two: ~85 ms */
 #define START_FRAMES    1024u           /* ~21 ms gathered before the first frame goes */
@@ -34,11 +35,12 @@ static s32 *ring;
 static volatile u32 write_at, read_at;      /* in frames, running on; one writer, one reader */
 static volatile u32 reading, started;
 
-static void callback(void *context)
+void audio_callback(void *context)
 {
     u32 w, i, used;
 
     (void)context;
+    audio_stats.callback_context = ke_processor() << 8 | ke_irql();
     if (!reading || !handle)
         return;
     audio_stats.callbacks++;
@@ -63,6 +65,9 @@ static void callback(void *context)
     write_at = w + AUDIO_FRAME_SAMPLES;
     audio_stats.frames_in += AUDIO_FRAME_SAMPLES;
 }
+
+USB_STUB("audio_entry", "lis 12, audio_callback@ha\n    addi 12, 12, audio_callback@l");
+void audio_entry(void *context);
 
 static u32 volume_setting(void)
 {
@@ -91,7 +96,7 @@ u32 audio_open(void)
         void *h = 0;
         s32 status;
 
-        client.callback = callback;
+        client.callback = audio_entry;
         client.context = 0;
         status = XAudioRegisterRenderDriverMECClient(&client, &h);
         audio_stats.open_status = (u32)status;

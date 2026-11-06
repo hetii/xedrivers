@@ -67,6 +67,33 @@ void usb_wait(u32 ms)
     KeWaitForSingleObject(&wake_event, 0, 0, 0, &timeout);
 }
 
+/* Every way the kernel calls into us at DISPATCH_LEVEL goes through one of these. A DPC runs
+ * on whatever thread the processor was in, and only r0-r12 of it are saved on the way in: r14-r31
+ * are that thread's own, live, 64 bits wide. gcc in -m32 saves what it uses with stw and lwz,
+ * so the upper half of each comes back zero. A game holding a 64-bit value or a sign-extended
+ * pointer across the interrupt then runs on with it broken, crashing anywhere. The kernel's DPC
+ * loop saves r28-r31 itself, which is why a routine that stayed within those was fine and the same
+ * work using r26 and r27 was not (0 of 8 boots against 12 of 12, 2026-11-06, Aurora).
+ * Costs 18 stores and 18 loads a completion. */
+#if defined(__powerpc__)
+USB_STUB("usb_urb_stub", "lwz 12, 0x40(3)");    /* (urb, status): urb->Done */
+USB_STUB("usb_isoch_stub", "lwz 12, 0x2C(3)");  /* (request, statuses, lengths): request->Done */
+USB_STUB("usb_dpc_stub", "lwz 12, 0x1C(3)");    /* (dpc, context, ...): dpc->Entry */
+
+void usb_urb_stub(URB *urb, u32 status);
+void usb_isoch_stub(ISOCH *request, u32 *statuses, u16 *lengths);
+void usb_dpc_stub(KDPC *dpc, void *context, void *a1, void *a2);
+#define URB_ENTRY usb_urb_stub
+
+void usb_dpc_init(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *context)
+{
+    dpc->Entry = routine;
+    KeInitializeDpc(dpc, usb_dpc_stub, context);
+}
+#else
+#define URB_ENTRY urb->Done
+#endif
+
 /* The kernel follows the Windows PowerPC convention: a callee may store its arguments in
  * the caller's frame, at SP+0x10 and up (kit/kcall.S), and gcc keeps saved registers there.
  * The OHCI side of UsbdQueueAsyncTransfer does so (17559, 0x800dc698: stw r5,276(r1) in a
@@ -128,6 +155,11 @@ void usb_isoch(USB_DEV *dev, ISOCH *request, u16 *lengths)
 
     request->Dev = dev;
     request->Lengths = lengths;
+#if defined(__powerpc__)
+    request->Routine = usb_isoch_stub;
+#else
+    request->Routine = request->Done;
+#endif
     if (ke_irql() >= DISPATCH_LEVEL && ke_processor() == USB_PROCESSOR) {
         isoch_now(request);
         return;
@@ -287,7 +319,8 @@ void usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
     for (i = 0; i < 0x28; i++)
         raw[i] = 0;
     urb->Context = urb;
-    urb->Routine = done;
+    urb->Done = done;
+    urb->Routine = URB_ENTRY;
     urb->Endpoint = endpoint;
     /* OHCI: a short IN is no error (the kernel's queue reads +0x10: buffer rounding). */
     if (USB_ON_COMPANION(dev))
@@ -565,9 +598,9 @@ int usb_register(const USB_CLIENT *who)
     KeInitializeEvent(&wake_event, 1, 0);
     mem_sync();
     wake_ready = 1;
-    KeInitializeDpc(&submit_dpc, submit_dpc_routine, 0);
+    usb_dpc_init(&submit_dpc, submit_dpc_routine, 0);
     submit_dpc.TargetNumber = USB_PROCESSOR + 1;
-    KeInitializeDpc(&cancel_dpc, cancel_dpc_routine, 0);
+    usb_dpc_init(&cancel_dpc, cancel_dpc_routine, 0);
     cancel_dpc.TargetNumber = USB_PROCESSOR + 1;
 
     /* xerunner: usb-driver-object-f2@1 -- both list words zero or a bug check. */
