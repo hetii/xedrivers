@@ -110,6 +110,25 @@ chip's.
 A Wi-Fi link is an uplink like any other: below a USB Ethernet card, above the
 onboard port.
 
+## Calling between gcc code and the kernel
+
+The plugin is gcc code in `-m32`, the kernel Microsoft's in 64-bit registers. Two differences
+have stopped the console, and neither shows on a normal bench run:
+
+- **The kernel stores arguments in its caller's frame.** Home area SP+0x10 to +0x4F (`kit/kcall.S`).
+  gcc keeps saved registers there. The OHCI side of `UsbdQueueAsyncTransfer` does it, so that call
+  goes through `usb_framed_call`; nothing else in 0x800d8000-0x800de000 does. A new kernel call
+  into code not read yet can do the same.
+- **gcc saves r14-r31 with `stw` and `lwz`.** A DPC runs on the thread it interrupted, whose r14-r31
+  are live and 64 bits wide, and the upper half comes back zero: a game then crashes anywhere. So
+  everything the kernel calls at DISPATCH_LEVEL enters through a stub that saves them with `std`:
+  `usb_prepare` and `usb_isoch` do it for completions, `usb_dpc_init` for DPCs, `USB_STUB` for the
+  rest. Never give the kernel a plugin function directly for a DPC or a completion.
+
+To see a hang: `bench_trace` marks and `xerunner flash read-uart`, which also shows the system's
+crash dumps. `flash power --off` switches off a frozen console. Boot several times: one boot proves
+little.
+
 ## Console limits
 
 ### USB

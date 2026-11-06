@@ -4,9 +4,8 @@ Plays the console's mixed sound on a USB sound card or headset. UAC1 and UAC2, c
 the device's own descriptors, no list of products.
 
 Tested on a TI PCM2706 (08bb:2706, full speed, controller 3): sound heard in headphones during the
-boot intro; Aurora up on 5 of 5 boots; about 155000 packets, 4 late, none bad but those cancelled by
-3 resets, after each of which the stream came back by itself. Not tried yet: pulling the card out
-by hand, an asynchronous card (its feedback endpoint), UAC2.
+boot intro; Aurora up on 5 of 5 boots; two hours with network traffic beside it, 3.7 million packets.
+The stream came back by itself after each of 3 device resets. Nobody has listened past the intro yet.
 
 What it takes: a full-speed device on a companion (OHCI) controller with a stereo PCM output
 at 48 kHz, 16, 24 or 32 bits, adaptive, synchronous or asynchronous with explicit feedback.
@@ -28,6 +27,11 @@ How it works:
 - 16 failed transfers in a row stop the stream (`gave_up`) so completions cannot chain.
 
 `audio_volume` in xedrivers.ini is 0-100, default 100. `tools/xectl.py audio` prints the counters.
+
+## Issues
+
+- Pulling the card out by hand is untested; the same path ran on 3 device resets.
+- An asynchronous card (feedback endpoint) and UAC2 are written and tested on the host only.
 
 Not done: microphone (XamVoice), the 4 ms + ring latency is not tuned, UAC2 clock selectors.
 The isochronous request layout and status words come from usb-audio-x360's reading of retail

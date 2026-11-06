@@ -5,13 +5,14 @@
 xedrivers is a DashLaunch plugin for the Xbox 360. It drives USB devices that the
 console has no driver for.
 
-Today these are network devices:
+Today these are network devices and sound cards:
 
 - USB Ethernet adapters,
 - Android phones that tether over USB,
-- USB Wi-Fi dongles.
+- USB Wi-Fi dongles,
+- USB sound cards and headsets, which play the console's sound.
 
-The plugin hands each device to the console's own network stack (xnet, in xam) in
+The plugin hands each network device to the console's own network stack (xnet, in xam) in
 place of the onboard port. Everything that uses the network then runs over the USB
 device unchanged: DHCP, XBDM, FTP servers, the dashboard and games.
 
@@ -37,6 +38,7 @@ limits): [docs/xedrivers.md](docs/xedrivers.md).
 | 6 | `0b95:1780`, `08dd:0114`, `0411:006e`, `0df6:0056`, `0df6:061c`, `0789:0160`, `1737:0039`, `04bb:0930`, `050d:5055`, `14ea:ab11` | ASIX AX88178 | 1G Ethernet | [ax88178.md](docs/drivers/ax88178.md#issues) |
 | 7 | `a69c:8d80`, `a69c:8d81` | AICSemi AIC8800D80 | Wi-Fi 6 and Bluetooth | [aic8800.md](docs/drivers/aic8800.md#issues) |
 | 8 | `0bda:b812` | Realtek RTL8822BU | Wi-Fi 5 | [rtw8822b.md](docs/drivers/rtw8822b.md#issues) |
+| 9 | by class | any full-speed USB Audio Class device, stereo at 48 kHz (tested: TI PCM2706) | Sound | [uac.md](docs/drivers/uac.md#issues) |
 
 The RNDIS driver matches by class. Row 2 is the phone that was tested; other
 Android phones that tether over RNDIS should work too.
@@ -279,6 +281,13 @@ tools/xectl.py transport ecm|ncm       # resets the card to apply
 tools/xectl.py advertise 2500|1000|100|default
 tools/xectl.py set|get SYMBOL [VALUE]  # any 32-bit global of the plugin
 ```
+
+## Sound
+
+A USB sound card or headset plugged in plays what the console plays, from the first seconds of
+boot. The kernel's own outputs keep playing. High-speed devices are not supported yet, nor is
+the microphone. `audio_volume` in `xedrivers.ini` sets the level, 0-100, default 100.
+`tools/xectl.py audio` shows the counters. More in [uac.md](docs/drivers/uac.md).
 
 ## File servers
 
