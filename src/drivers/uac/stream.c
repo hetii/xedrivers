@@ -3,7 +3,7 @@
  * stream keeps itself going with nothing else to wake.
  *
  * Status words, as the kernel's OHCI side gives them (usb-audio-x360's audit, retail
- * 17559): 0 good, 0xC005100E not reached in time (late, nothing lost but that packet),
+ * 17559; the EHCI side's are not read yet): 0 good, 0xC005100E not reached in time (late, nothing lost but that packet),
  * 0xC0050003 data underrun, which on an IN packet is only a short one.
  */
 
@@ -21,7 +21,7 @@ static u32 keep_going(UAC *u, u32 *statuses, u32 bad)
 {
     if (u->stopping)
         return 0;
-    if (!statuses || bad == UAC_PACKETS) {
+    if (!statuses || bad == u->packets / u->period) {
         if (++u->bad_in_a_row >= BAD_IN_A_ROW) {
             u->stopping = 1;
             u->st->gave_up = 1;
@@ -39,8 +39,8 @@ static void fill(UAC *u, u32 slot)
     const UAC_STREAM *p = &u->info.play;
     u32 packet, frames = 0, one = p->channels * p->bytes;
 
-    for (packet = 0; packet < UAC_PACKETS; packet++) {
-        u32 n = pacer_next(&u->pacer);
+    for (packet = 0; packet < u->packets; packet++) {
+        u32 n = packet % u->period != u->period - 1 ? 0 : pacer_next(&u->pacer);
 
         u->play_lengths[slot][packet] = (u16)(n * one);
         frames += n;
@@ -57,7 +57,7 @@ static void play_done(ISOCH *t, u32 *statuses, u16 *lengths)
 
     (void)lengths;
     u->st->transfers++;
-    for (i = 0; statuses && i < UAC_PACKETS; i++) {
+    for (i = u->period - 1; statuses && i < u->packets; i += u->period) {
         if (statuses[i] == 0) {
             u->st->packets_ok++;
         } else if (statuses[i] == STATUS_LATE) {
@@ -79,7 +79,7 @@ static void feedback_done(ISOCH *t, u32 *statuses, u16 *lengths)
     UAC *u = (UAC *)t->Owner;
     u32 slot = (u32)(t - u->feedback), i, room = u->info.play.feedback_max_packet, bad = 0;
 
-    for (i = 0; statuses && lengths && i < UAC_PACKETS; i++) {
+    for (i = u->feedback_period - 1; statuses && lengths && i < u->packets; i += u->feedback_period) {
         if (statuses[i] != 0 && statuses[i] != STATUS_UNDERRUN && statuses[i] != STATUS_LATE)
             bad++;
         if ((statuses[i] == 0 || statuses[i] == STATUS_UNDERRUN) && lengths[i] &&
@@ -88,20 +88,20 @@ static void feedback_done(ISOCH *t, u32 *statuses, u16 *lengths)
             u->st->feedback_rate = u->pacer.rate;
         }
     }
-    if (!keep_going(u, statuses, bad))
+    if (!keep_going(u, statuses, bad * u->period / u->feedback_period))
         return;
-    for (i = 0; i < UAC_PACKETS; i++)
-        u->feedback_lengths[slot][i] = (u16)room;
+    for (i = 0; i < u->packets; i++)
+        u->feedback_lengths[slot][i] = i % u->feedback_period != u->feedback_period - 1 ? 0 : (u16)room;
     usb_isoch(u->dev, t, u->feedback_lengths[slot]);
 }
 
 u32 stream_start(UAC *u)
 {
     const UAC_STREAM *p = &u->info.play;
-    u32 slot, i, room = uac_packet_bytes(p) * UAC_PACKETS;
+    u32 slot, i, room = (u->packets / u->period) * (u->frames_nominal + 1) * p->channels * p->bytes;
 
     u->bad_in_a_row = 0;
-    pacer_begin(&u->pacer, p->sync == UAC_SYNC_ASYNC, UAC_MOST_FRAMES);
+    pacer_begin(&u->pacer, p->sync == UAC_SYNC_ASYNC, u->frames_nominal, u->frames_nominal + 1);
     if (!u->play_buf[0]) {
         /* Once, at the size the largest output needs: 6 channels of 4 bytes. */
         u8 *block = (u8 *)MmAllocatePhysicalMemory(2, UAC_SLOTS * UAC_BUFFER, 4);
@@ -118,11 +118,11 @@ u32 stream_start(UAC *u)
         u->play[slot].Done = play_done;
         u->play[slot].Endpoint = u->ep_play;
         u->play[slot].Buffer = u->play_buf[slot];
-        u->play[slot].PacketCount = UAC_PACKETS;
+        u->play[slot].PacketCount = (u8)u->packets;
         u->play[slot].Owner = u;
     }
     if (u->ep_feedback) {
-        u32 fb = p->feedback_max_packet * UAC_PACKETS;
+        u32 fb = p->feedback_max_packet * u->packets;
 
         for (slot = 0; slot < UAC_SLOTS; slot++) {
             if (!u->feedback_buf[slot])
@@ -134,10 +134,11 @@ u32 stream_start(UAC *u)
             u->feedback[slot].Endpoint = u->ep_feedback;
             u->feedback[slot].Buffer = u->feedback_buf[slot];
             u->feedback[slot].Length = fb;
-            u->feedback[slot].PacketCount = UAC_PACKETS;
+            u->feedback[slot].PacketCount = (u8)u->packets;
             u->feedback[slot].Owner = u;
-            for (i = 0; i < UAC_PACKETS; i++)
-                u->feedback_lengths[slot][i] = (u16)p->feedback_max_packet;
+            for (i = 0; i < u->packets; i++)
+                u->feedback_lengths[slot][i] = i % u->feedback_period != u->feedback_period - 1 ? 0 :
+                                               (u16)p->feedback_max_packet;
             usb_isoch(u->dev, &u->feedback[slot], u->feedback_lengths[slot]);
         }
     }

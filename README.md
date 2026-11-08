@@ -38,7 +38,7 @@ limits): [docs/xedrivers.md](docs/xedrivers.md).
 | 6 | `0b95:1780`, `08dd:0114`, `0411:006e`, `0df6:0056`, `0df6:061c`, `0789:0160`, `1737:0039`, `04bb:0930`, `050d:5055`, `14ea:ab11` | ASIX AX88178 | 1G Ethernet | [ax88178.md](docs/drivers/ax88178.md#issues) |
 | 7 | `a69c:8d80`, `a69c:8d81` | AICSemi AIC8800D80 | Wi-Fi 6 and Bluetooth | [aic8800.md](docs/drivers/aic8800.md#issues) |
 | 8 | `0bda:b812` | Realtek RTL8822BU | Wi-Fi 5 | [rtw8822b.md](docs/drivers/rtw8822b.md#issues) |
-| 9 | by class | any full-speed USB Audio Class device, stereo at 48 kHz (tested: TI PCM2706) | Sound | [uac.md](docs/drivers/uac.md#issues) |
+| 9 | by class | any USB Audio Class device, full or high speed, stereo or 5.1 at 48 kHz (tested: TI PCM2706, a UAC2 gadget) | Sound | [uac.md](docs/drivers/uac.md#issues) |
 
 The RNDIS driver matches by class. Row 2 is the phone that was tested; other
 Android phones that tether over RNDIS should work too.
@@ -285,8 +285,7 @@ tools/xectl.py set|get SYMBOL [VALUE]  # any 32-bit global of the plugin
 ## Sound
 
 A USB sound card or headset plugged in plays what the console plays, from the first seconds of
-boot. The kernel's own outputs keep playing. High-speed devices are not supported yet, nor is
-the microphone. `audio_volume` in `xedrivers.ini` sets the level, 0-100, default 50 (-6 dB).
+boot. The kernel's own outputs keep playing. The microphone is not supported yet. `audio_volume` in `xedrivers.ini` sets the level, 0-100, default 50 (-6 dB).
 `tools/xectl.py audio` shows the counters. More in [uac.md](docs/drivers/uac.md).
 
 ## File servers

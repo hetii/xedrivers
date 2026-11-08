@@ -100,9 +100,9 @@ static void finish_alt(ALT *a, UAC_INFO *out)
         else
             return;
     }
-    if (a->s.max_packet < uac_packet_bytes(&a->s) && a->s.sync == UAC_SYNC_ASYNC)
-        return;
-    if (a->s.max_packet < (UAC_RATE / 1000u) * a->s.channels * a->s.bytes)
+    /* Whether a packet is large enough depends on the speed, known at bring-up: here only
+     * the least any speed needs, a microframe's 6 frames. */
+    if (a->s.max_packet < (UAC_RATE / 8000u) * a->s.channels * a->s.bytes)
         return;
     if (better(&a->s, to)) {
         const u32 *from = (const u32 *)&a->s;
@@ -138,11 +138,6 @@ static void endpoint(ALT *a, const u8 *d, u32 n)
     a->s.sync = (attributes >> 2) & 3u;
     if (n >= 9)
         a->synch_address = d[8];            /* UAC1's longer endpoint descriptor */
-}
-
-u32 uac_packet_bytes(const UAC_STREAM *s)
-{
-    return (UAC_RATE / 1000u + 1u) * s->channels * s->bytes;
 }
 
 u32 uac_parse(const u8 *config, u32 length, UAC_INFO *out)

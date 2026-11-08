@@ -49,8 +49,5 @@ typedef struct {
 /* Read a whole configuration descriptor. 1 if there is anything usable in it. */
 u32 uac_parse(const u8 *config, u32 length, UAC_INFO *out);
 
-/* The largest packet a stream needs at UAC_RATE: one frame more than a millisecond's
- * worth, as an asynchronous device may ask. */
-u32 uac_packet_bytes(const UAC_STREAM *s);
 
 #endif /* XE_UAC_DESCRIPTORS_H */

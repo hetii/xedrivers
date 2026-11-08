@@ -174,6 +174,37 @@ void bench_event(u32 code, u32 a, u32 b, u32 c)
 #endif
 }
 
+#if XE_BENCH_DEBUG
+/* Set to 1 over XBDM and every frame of the console's sound becomes a triangle wave of
+ * (c + 1) kHz at -12 dB in channel c (48 kHz: periods 48, 24, 16, 12, 9, 8 samples, all of
+ * which divide 144). On the far side, which channel went where shows by frequency, and a
+ * sample lost or repeated breaks the 144-sample period. */
+volatile u32 audio_test_tone;
+static u32 tone_phase;
+#endif
+
+void bench_audio_frame(float *frame)
+{
+#if XE_BENCH_DEBUG
+    u32 c, i;
+
+    if (!audio_test_tone)
+        return;
+    for (c = 0; c < 6; c++) {
+        u32 period = 48u / (c + 1);
+
+        for (i = 0; i < 256; i++) {
+            float x = (float)((tone_phase + i) % period) / (float)period;
+
+            frame[c * 256 + i] = 0.25f * (x < 0.5f ? 4.0f * x - 1.0f : 3.0f - 4.0f * x);
+        }
+    }
+    tone_phase += 256;
+#else
+    (void)frame;
+#endif
+}
+
 void bench_trace(const char *mark)
 {
 #if XE_BENCH_DEBUG

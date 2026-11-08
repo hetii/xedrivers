@@ -10,6 +10,7 @@
 #include "file.h"
 #include "pcm.h"
 #include "usb.h"
+#include "bench.h"
 
 #define RING_FRAMES     4096u           /* a power of two: ~85 ms */
 #define START_FRAMES    1024u           /* ~21 ms gathered before the first frame goes */
@@ -39,6 +40,7 @@ static volatile u32 write_at, read_at;      /* in frames, running on; one writer
 static volatile u32 reading, started;
 static u32 channels = 2;                   /* a ring frame's values */
 
+
 void audio_callback(void *context)
 {
     u32 w, i, used;
@@ -52,6 +54,7 @@ void audio_callback(void *context)
         audio_stats.capture_errors++;
         return;
     }
+    bench_audio_frame(frame);
     w = write_at;
     used = w - read_at;
     if (used + AUDIO_FRAME_SAMPLES > RING_FRAMES) {

@@ -1,8 +1,7 @@
 /* USB Audio Class: any UAC1 or UAC2 device with a stereo output at 48 kHz plays the
  * console's sound. Chosen from the device's own descriptors (descriptors.c), not a list
- * of products. Full speed only: the kernel's isochronous path was read for OHCI, so a
- * device on an EHCI controller is refused rather than tried. The microphone is not done
- * yet.
+ * of products. Full speed on the companion (OHCI) controllers and high speed on EHCI; see
+ * stream.h for how the two differ. The microphone is not done yet.
  *
  * The kernel offers a composite device one interface at a time, having configured it
  * itself: we take its first AudioStreaming one, which does everything through the default
@@ -19,12 +18,13 @@
 #define STEP_MEMORY     1u
 #define STEP_CONFIG     2u
 #define STEP_NOTHING    3u      /* nothing usable in the descriptors */
-#define STEP_HIGH_SPEED 4u
+#define STEP_SPEED      4u      /* full speed behind a high-speed hub, or an interval past 8 microframes */
 #define STEP_INTERFACE  6u
 #define STEP_RATE       7u
 #define STEP_ENDPOINT   8u
 #define STEP_AUDIO      9u
 #define STEP_STREAM     10u
+#define STEP_PACKET     11u     /* the endpoint's packets too small for a packet's frames */
 
 #define CONTROL_BYTES   1024u
 #define CONTROL_MS      1000u
@@ -101,8 +101,6 @@ static u32 uac_start(NET_DEV *nd)
     u->stopping = 0;
     u->ep_play = u->ep_feedback = 0;
     nd->priv = u;
-    if (!USB_ON_COMPANION(dev))
-        return STEP_HIGH_SPEED;
     if (!u->control)
         u->control = (u8 *)net_dma_scratch(CONTROL_BYTES);
     if (!u->control)
@@ -132,6 +130,30 @@ static u32 uac_start(NET_DEV *nd)
     }
     u->st->channels = u->info.play.channels;
 
+    /* The speed: a full-speed device on a companion controller, a high-speed one on EHCI
+     * (node byte 8 bits 5-6 0x40, xerunner: usb-node-layout@1). A full-speed device behind
+     * a high-speed hub would need split transactions (0x800ddab0), not read: refused. */
+    if (USB_ON_COMPANION(dev)) {
+        u->packets = UAC_FS_PACKETS;
+        u->period = 1;
+        u->feedback_period = 1;
+        u->frames_nominal = UAC_RATE / 1000u;
+    } else if ((dev->where & 0x60u) == 0x40u && u->info.play.interval >= 1 &&
+               u->info.play.interval <= 4) {
+        u->packets = UAC_HS_PACKETS;
+        u->period = 1u << (u->info.play.interval - 1);
+        u->feedback_period = u->info.play.feedback_interval >= 1 &&
+            u->info.play.feedback_interval <= 4 ? 1u << (u->info.play.feedback_interval - 1) : 8u;
+        u->frames_nominal = UAC_RATE / 8000u * u->period;
+    } else {
+        return STEP_SPEED;
+    }
+    if (u->info.play.max_packet < (u->frames_nominal + (u->info.play.sync == UAC_SYNC_ASYNC)) *
+                                  u->info.play.channels * u->info.play.bytes)
+        return STEP_PACKET;
+    u->st->high_speed = u->packets == UAC_HS_PACKETS;
+    u->st->period = u->period;
+
     u->st->version = u->info.version;
     u->st->play_interface = u->info.play.interface;
     u->st->play_alternate = u->info.play.alternate;
@@ -147,13 +169,19 @@ static u32 uac_start(NET_DEV *nd)
     if (set_rate(u))
         return STEP_RATE;
 
+    /* High speed: opened with interval 1 whatever the descriptor says, so that the kernel links
+     * every one of the endpoint's iTDs into the schedule; the interval is kept by leaving the
+     * microframes between empty (stream.c). Opened with 4, the iTDs of the frames in between were
+     * never run and the first transfer never completed (17559, 2026-11-08). */
     u->ep_play = usb_open(dev, USB_TYPE_ISOCH, u->info.play.endpoint, u->info.play.max_packet,
-                          u->info.play.interval);
+                          u->packets == UAC_HS_PACKETS ? 1 : u->info.play.interval);
     if (!u->ep_play)
         return STEP_ENDPOINT;
     if (u->info.play.feedback) {
         u->ep_feedback = usb_open(dev, USB_TYPE_ISOCH, u->info.play.feedback,
-                                  u->info.play.feedback_max_packet, 1);
+                                  u->info.play.feedback_max_packet,
+                                  u->packets == UAC_HS_PACKETS || !u->info.play.feedback_interval ? 1 :
+                                  u->info.play.feedback_interval);
         if (!u->ep_feedback)
             return STEP_ENDPOINT;
     }

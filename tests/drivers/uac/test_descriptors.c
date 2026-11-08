@@ -101,7 +101,6 @@ int main(void)
     CHECK(!i.play.found && i.play6.found && i.play6.channels == 6 && i.play6.max_packet == 588);
     CHECK(!uac_parse(cut, sizeof(cut), &i));
     CHECK(!uac_parse(cut, 0, &i));
-    CHECK(uac_packet_bytes(&(UAC_STREAM){ .channels = 2, .bytes = 2 }) == 196);
 
     {
         UAC_PACER p;
@@ -110,9 +109,9 @@ int main(void)
         static const u8 q16_16[] = { 0x00, 0x80, 0x30, 0x00 }; /* 48.5 in 16.16 */
         static const u8 wild[] = { 0xFF, 0xFF, 0xFF, 0x7F };
 
-        pacer_begin(&p, 0, 49);
+        pacer_begin(&p, 0, 48, 49);
         CHECK(pacer_next(&p) == 48);
-        pacer_begin(&p, 1, 49);
+        pacer_begin(&p, 1, 48, 49);
         CHECK(pacer_next(&p) == 48);
         CHECK(pacer_feedback(&p, q10_14, 3) && p.rate == 48u << 16);
         CHECK(pacer_feedback(&p, q16_16, 4) && p.rate == (48u << 16 | 0x8000u));
@@ -121,6 +120,28 @@ int main(void)
         CHECK(sum == 48500);                                  /* the clock followed exactly */
         CHECK(!pacer_feedback(&p, wild, 4) || p.rate <= 49u << 16);
         CHECK(!pacer_feedback(&p, q10_14, 2));
+
+        /* High speed, every microframe: 6 nominal, 16.16 per microframe from the device. */
+        {
+            static const u8 hs[] = { 0x00, 0x80, 0x06, 0x00 };        /* 6.5 */
+
+            pacer_begin(&p, 0, 6, 7);
+            CHECK(pacer_next(&p) == 6);
+            pacer_begin(&p, 1, 6, 7);
+            CHECK(pacer_feedback(&p, hs, 4) && p.rate == (6u << 16 | 0x8000u));
+            sum = 0;
+            for (k = 0; k < 8000; k++)
+                sum += pacer_next(&p);
+            CHECK(sum == 52000);
+            /* Every 8th microframe (1 ms): the device still counts per microframe. */
+            {
+                static const u8 hs_slow[] = { 0x00, 0x10, 0x06, 0x00 };   /* 6.0625 */
+
+                pacer_begin(&p, 1, 48, 49);
+                CHECK(pacer_feedback(&p, hs_slow, 4) && p.rate == (48u << 16 | 0x8000u));
+                CHECK(!pacer_feedback(&p, hs, 4));                  /* 52 a millisecond: no */
+            }
+        }
     }
 
     if (failures)

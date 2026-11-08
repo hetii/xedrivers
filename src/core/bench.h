@@ -47,6 +47,10 @@ u32    bench_wired_hidden(void);
 void   bench_trace(const char *mark);
 
 
+/* Every mixed frame the sound capture takes (6 x 256 floats, planar), before anything is
+ * done with it: bench=debug can replace it by a test tone (bench.c). */
+void   bench_audio_frame(float *frame);
+
 /* Something that changes the link, for the recorder that survives a hang
  * (bench=trace): a code and three words. Any IRQL. */
 void   bench_event(u32 code, u32 a, u32 b, u32 c);
@@ -66,6 +70,7 @@ static inline u32    bench_command(u32 what, volatile u32 *args)
 static inline BENCH_RX bench_mode(u32 mode) { (void)mode; return 0; }
 static inline u32    bench_wired_hidden(void) { return 0; }
 static inline void   bench_trace(const char *mark) { (void)mark; }
+static inline void   bench_audio_frame(float *frame) { (void)frame; }
 static inline void   bench_event(u32 code, u32 a, u32 b, u32 c)
 { (void)code; (void)a; (void)b; (void)c; }
 static inline void   bench_frame_out(const u8 *frame, u32 length) { (void)frame; (void)length; }
