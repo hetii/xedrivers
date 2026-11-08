@@ -46,7 +46,7 @@ static void fill(UAC *u, u32 slot)
         frames += n;
     }
     audio_read(u->frames, frames);
-    pcm_to_packet(u->frames, frames, u->play_buf[slot], p->bytes);
+    pcm_to_packet(u->frames, frames * p->channels, u->play_buf[slot], p->bytes);
     u->play[slot].Length = frames * one;
 }
 
@@ -102,11 +102,18 @@ u32 stream_start(UAC *u)
 
     u->bad_in_a_row = 0;
     pacer_begin(&u->pacer, p->sync == UAC_SYNC_ASYNC, UAC_MOST_FRAMES);
-    for (slot = 0; slot < UAC_SLOTS; slot++) {
-        if (!u->play_buf[slot])
-            u->play_buf[slot] = (u8 *)net_dma_scratch(room);
-        if (!u->play_buf[slot])
+    if (!u->play_buf[0]) {
+        /* Once, at the size the largest output needs: 6 channels of 4 bytes. */
+        u8 *block = (u8 *)MmAllocatePhysicalMemory(2, UAC_SLOTS * UAC_BUFFER, 4);
+
+        if (!block)
             return 1;
+        for (slot = 0; slot < UAC_SLOTS; slot++)
+            u->play_buf[slot] = block + slot * UAC_BUFFER;
+    }
+    if (room > UAC_BUFFER)
+        return 1;
+    for (slot = 0; slot < UAC_SLOTS; slot++) {
         u->play[slot].Context = u->ep_play;
         u->play[slot].Done = play_done;
         u->play[slot].Endpoint = u->ep_play;

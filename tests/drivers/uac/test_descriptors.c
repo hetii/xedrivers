@@ -60,14 +60,14 @@ static const u8 uac2[] = {
     7, 5, 0x83, 0x11, 4, 0, 1,
 };
 
-/* A surround-only output: nothing to use. */
+/* A surround-only output: 5.1, taken as play6. */
 static const u8 surround[] = {
     9, 4, 0, 0, 0, 1, 1, 0, 0,
     9, 0x24, 1, 0x00, 0x01, 40, 0, 1, 1,
     9, 4, 1, 1, 1, 1, 2, 0, 0,
     7, 0x24, 1, 1, 1, 1, 0,
     11, 0x24, 2, 1, 6, 2, 16, 1, 0x80, 0xBB, 0,
-    9, 5, 0x01, 0x09, 0, 2, 1, 0, 0,
+    9, 5, 0x01, 0x09, 0x4C, 2, 1, 0, 0,                  /* 588: 49 frames of 6 x 2 bytes */
 };
 
 /* Stops mid-descriptor: read as far as it goes, no further. */
@@ -97,7 +97,8 @@ int main(void)
     CHECK(i.play.sync == UAC_SYNC_ASYNC && i.play.feedback == 0x83);
     CHECK(i.play.terminal == 2);
 
-    CHECK(!uac_parse(surround, sizeof(surround), &i));
+    CHECK(uac_parse(surround, sizeof(surround), &i));
+    CHECK(!i.play.found && i.play6.found && i.play6.channels == 6 && i.play6.max_packet == 588);
     CHECK(!uac_parse(cut, sizeof(cut), &i));
     CHECK(!uac_parse(cut, 0, &i));
     CHECK(uac_packet_bytes(&(UAC_STREAM){ .channels = 2, .bytes = 2 }) == 196);

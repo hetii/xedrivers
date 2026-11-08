@@ -23,8 +23,9 @@ typedef struct {
 
 extern s32 XAudioRegisterRenderDriverMECClient(MEC_CLIENT *client, void **handle);
 extern s32 XAudioCaptureRenderDriverFrame(void *handle, float *samples);
-/* Kernel 511. To be checked against the dashboard's setting before anything follows it. */
+/* Kernel 511: the dashboard's speaker setting. The digital part, above 16 bits. */
 extern s32 XAudioGetSpeakerConfig(u32 *config);
+#define SPEAKERS_DIGITAL 0xFFFF0000u
 extern void *ExAllocatePoolTypeWithTag(u32 bytes, u32 tag, u32 pool_type);
 
 volatile AUDIO_STATS audio_stats;
@@ -32,10 +33,11 @@ volatile AUDIO_STATS audio_stats;
 static MEC_CLIENT client;
 static void *handle;
 static float frame[AUDIO_CHANNELS * AUDIO_FRAME_SAMPLES] __attribute__((aligned(128)));
-static s32 converted[AUDIO_FRAME_SAMPLES * 2];
+static s32 converted[AUDIO_FRAME_SAMPLES * 6];
 static s32 *ring;
 static volatile u32 write_at, read_at;      /* in frames, running on; one writer, one reader */
 static volatile u32 reading, started;
+static u32 channels = 2;                   /* a ring frame's values */
 
 void audio_callback(void *context)
 {
@@ -56,12 +58,17 @@ void audio_callback(void *context)
         audio_stats.overruns += AUDIO_FRAME_SAMPLES;
         return;                             /* the reader moves read_at: this frame goes */
     }
-    pcm_stereo_downmix(frame, converted, audio_stats.volume);
+    if (audio_stats.layout == AUDIO_SIX)
+        pcm_six(frame, converted, audio_stats.volume);
+    else if (audio_stats.layout == AUDIO_STEREO_IN_SIX)
+        pcm_stereo_in_six(frame, converted, audio_stats.volume);
+    else
+        pcm_stereo_downmix(frame, converted, audio_stats.volume);
     for (i = 0; i < AUDIO_FRAME_SAMPLES; i++) {
-        u32 at = (w + i) & (RING_FRAMES - 1);
+        u32 at = ((w + i) & (RING_FRAMES - 1)) * channels, c;
 
-        ring[at * 2] = converted[i * 2];
-        ring[at * 2 + 1] = converted[i * 2 + 1];
+        for (c = 0; c < channels; c++)
+            ring[at + c] = converted[i * channels + c];
     }
     mem_sync();
     write_at = w + AUDIO_FRAME_SAMPLES;
@@ -83,15 +90,25 @@ static u32 volume_setting(void)
     return v > 100 ? 100 : v;
 }
 
-u32 audio_open(void)
+u32 audio_surround(void)
 {
     u32 speakers = 0;
 
-    audio_stats.volume = volume_setting() * 256u / 100u;
     audio_stats.speaker_status = (u32)XAudioGetSpeakerConfig(&speakers);
     audio_stats.speaker_config = speakers;
+    return (s32)audio_stats.speaker_status >= 0 && (speakers & SPEAKERS_DIGITAL) != 0;
+}
+
+u32 audio_open(u32 layout)
+{
+    reading = 0;                            /* the callback leaves the ring alone */
+    mem_sync();
+    audio_stats.volume = volume_setting() * 256u / 100u;
+    audio_stats.layout = layout;
+    channels = layout == AUDIO_STEREO ? 2 : 6;
     if (!ring) {
-        ring = (s32 *)ExAllocatePoolTypeWithTag(RING_FRAMES * 2 * sizeof(s32), POOL_TAG, 2);
+        /* Room for six channels whichever card comes first. */
+        ring = (s32 *)ExAllocatePoolTypeWithTag(RING_FRAMES * 6 * sizeof(s32), POOL_TAG, 2);
         if (!ring)
             return 1;
     }
@@ -121,9 +138,9 @@ void audio_close(void)
     audio_stats.readers = 0;
 }
 
-void audio_read(s32 *stereo, u32 frames)
+void audio_read(s32 *out, u32 frames)
 {
-    u32 r = read_at, have = write_at - r, n, i;
+    u32 r = read_at, have = write_at - r, n, i, c;
 
     if (!started) {
         if (have < START_FRAMES)
@@ -133,15 +150,14 @@ void audio_read(s32 *stereo, u32 frames)
     }
     n = have < frames ? have : frames;
     for (i = 0; i < n; i++) {
-        u32 at = (r + i) & (RING_FRAMES - 1);
+        u32 at = ((r + i) & (RING_FRAMES - 1)) * channels;
 
-        stereo[i * 2] = ring[at * 2];
-        stereo[i * 2 + 1] = ring[at * 2 + 1];
+        for (c = 0; c < channels; c++)
+            out[i * channels + c] = ring[at + c];
     }
-    for (; i < frames; i++) {
-        stereo[i * 2] = 0;
-        stereo[i * 2 + 1] = 0;
-    }
+    for (; i < frames; i++)
+        for (c = 0; c < channels; c++)
+            out[i * channels + c] = 0;
     mem_sync();
     read_at = r + n;
     audio_stats.frames_out += n;

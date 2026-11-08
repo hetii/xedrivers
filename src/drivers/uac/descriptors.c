@@ -93,9 +93,12 @@ static void finish_alt(ALT *a, UAC_INFO *out)
             return;
         to = &out->mic;
     } else {
-        if (a->s.channels != 2)
+        if (a->s.channels == 2)
+            to = &out->play;
+        else if (a->s.channels == 6)
+            to = &out->play6;
+        else
             return;
-        to = &out->play;
     }
     if (a->s.max_packet < uac_packet_bytes(&a->s) && a->s.sync == UAC_SYNC_ASYNC)
         return;
@@ -201,5 +204,5 @@ u32 uac_parse(const u8 *config, u32 length, UAC_INFO *out)
     }
     if (in_streaming)
         finish_alt(&a, out);
-    return out->version && (out->play.found || out->mic.found);
+    return out->version && (out->play.found || out->play6.found || out->mic.found);
 }

@@ -81,11 +81,19 @@ static u32 set_rate(UAC *u)
     return (u->control[0] | (u32)u->control[1] << 8 | (u32)u->control[2] << 16) != UAC_RATE;
 }
 
+static void copy_stream(UAC_STREAM *to, const UAC_STREAM *from)
+{
+    u32 i;
+
+    for (i = 0; i < sizeof(*to) / sizeof(u32); i++)     /* no memcpy in the plugin */
+        ((u32 *)to)[i] = ((const u32 *)from)[i];
+}
+
 static u32 uac_start(NET_DEV *nd)
 {
     USB_DEV *dev = nd->usb;
     UAC *u = &devices[dev->index];
-    u32 status, actual = 0, total;
+    u32 status, actual = 0, total, layout;
 
     u->nd = nd;
     u->dev = dev;
@@ -112,8 +120,17 @@ static u32 uac_start(NET_DEV *nd)
         return STEP_CONFIG;
     if (actual > total)
         actual = total;
-    if (!uac_parse(u->control, actual, &u->info) || !u->info.play.found)
+    if (!uac_parse(u->control, actual, &u->info) || (!u->info.play.found && !u->info.play6.found))
         return STEP_NOTHING;
+    /* 5.1 to a 5.1 card when the dashboard asks for it; otherwise the stereo mix, on the stereo
+     * output if there is one. From here on info.play is the output in use. */
+    u->surround = audio_surround();
+    layout = AUDIO_STEREO;
+    if (u->info.play6.found && (u->surround || !u->info.play.found)) {
+        layout = u->surround ? AUDIO_SIX : AUDIO_STEREO_IN_SIX;
+        copy_stream(&u->info.play, &u->info.play6);
+    }
+    u->st->channels = u->info.play.channels;
 
     u->st->version = u->info.version;
     u->st->play_interface = u->info.play.interface;
@@ -140,7 +157,7 @@ static u32 uac_start(NET_DEV *nd)
         if (!u->ep_feedback)
             return STEP_ENDPOINT;
     }
-    u->st->audio_open = audio_open();
+    u->st->audio_open = audio_open(layout);
     if (u->st->audio_open)
         return STEP_AUDIO;
     if (stream_start(u)) {
@@ -158,6 +175,21 @@ static void uac_detached(NET_DEV *nd)
     if (u) {
         u->stopping = 1;
         audio_close();
+    }
+}
+
+/* About every 3 s: the dashboard's setting changed under a card that has a 5.1 output. The
+ * device is reset, which is the same path as unplugging it, and chosen for again. */
+static void uac_tick(NET_DEV *nd)
+{
+    UAC *u = (UAC *)nd->priv;
+
+    if (!u || u->stopping || !u->info.play6.found || ++u->ticks < 90)
+        return;
+    u->ticks = 0;
+    if (audio_surround() != u->surround) {
+        u->stopping = 1;
+        UsbdResetDevice(u->dev->device);
     }
 }
 
@@ -196,4 +228,5 @@ const XE_DRIVER xe_driver_uac = {
     .detached = uac_detached,
     .xmit = uac_xmit,
     .tx_space = uac_tx_space,
+    .tick = uac_tick,
 };

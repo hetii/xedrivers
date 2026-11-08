@@ -12,6 +12,7 @@ static int failures;
 static float frame[AUDIO_CHANNELS * AUDIO_FRAME_SAMPLES];
 static s32 stereo[AUDIO_FRAME_SAMPLES * 2];
 static u8 out[16];
+static s32 six[AUDIO_FRAME_SAMPLES * 6];
 
 static int s16le(const u8 *p) { return (short)(p[0] | p[1] << 8); }
 
@@ -30,7 +31,7 @@ int main(void)
     CHECK(stereo[3] == (s32)0x80000000u);
     CHECK(stereo[4] == 0);
 
-    pcm_to_packet(stereo, 2, out, 2);
+    pcm_to_packet(stereo, 4, out, 2);
     CHECK(s16le(out) == 16384 && s16le(out + 2) == -16384);
     CHECK(s16le(out + 4) == 32767 && s16le(out + 6) == -32768);
 
@@ -38,11 +39,11 @@ int main(void)
     CHECK(stereo[0] == 0x20000000);
 
     pcm_from_frame(frame, stereo, 256);
-    pcm_to_packet(stereo, 1, out, 3);                /* 24 bits, little-endian */
+    pcm_to_packet(stereo, 2, out, 3);                /* 24 bits, little-endian */
     CHECK(out[0] == 0x00 && out[1] == 0x00 && out[2] == 0x40);
     CHECK(out[3] == 0x00 && out[4] == 0x00 && out[5] == 0xC0);
 
-    pcm_to_packet(stereo, 1, out, 4);
+    pcm_to_packet(stereo, 2, out, 4);
     CHECK(out[3] == 0x40 && out[7] == 0xC0);
 
     /* The downmix: centre and surrounds into both sides, LFE nowhere. */
@@ -60,6 +61,16 @@ int main(void)
     CHECK(stereo[4] > 0x50000000 && stereo[4] < 0x52000000);  /* C alone on the left */
     pcm_stereo_downmix(frame, stereo, 128);
     CHECK(stereo[0] > 0x16800000 && stereo[0] < 0x17000000);
+
+    /* Six channels, interleaved in the frame's order; and stereo in six slots. */
+    memset(frame, 0, sizeof(frame));
+    frame[AUDIO_C * AUDIO_FRAME_SAMPLES + 1] = 0.5f;
+    frame[AUDIO_SR * AUDIO_FRAME_SAMPLES + 1] = -0.5f;
+    pcm_six(frame, six, 256);
+    CHECK(six[6 + AUDIO_C] == 0x40000000 && six[6 + AUDIO_SR] == -0x40000000 && six[6] == 0);
+    pcm_stereo_in_six(frame, six, 256);
+    CHECK(six[6] > 0x2D000000 && six[6 + AUDIO_C] == 0 && six[6 + AUDIO_SR] == 0);
+    CHECK(six[6 + 1] > -0x100 && six[6 + 1] < 0x100);   /* C and SR cancel on the right */
 
     if (failures)
         return 1;

@@ -28,10 +28,23 @@ How it works:
 
 `audio_volume` in xedrivers.ini is 0-100, default 50 (-6 dB). `tools/xectl.py audio` prints the counters.
 
+## Channels
+
+A stereo card gets the console's 5.1 mixed down (ITU-R BS.775: centre and surrounds at -3 dB
+into both sides, LFE left out), as the console does for HDMI. A card with a six-channel output
+gets the six channels when the dashboard's audio setting is Dolby Digital 5.1 or Dolby Digital
+with WMA Pro (`XAudioGetSpeakerConfig`, kernel 511: 0x00000003 digital stereo, 0x00010001
+Dolby Digital, 0x00030001 with WMA Pro), else the stereo mix in its front pair. The setting is
+read about every 3 s; a change resets the card, which then chooses again.
+
 ## Issues
 
 - Pulling the card out by hand is untested; the same path ran on 3 device resets.
 - An asynchronous card (feedback endpoint) and UAC2 are written and tested on the host only.
+- **The six-channel output is tested on the host only.** No 5.1 card was at hand, and the Orange Pi
+  gadget that could act as one enumerates high speed, which this driver refuses.
+- At boot the speaker setting reads 0x00000003 before the dashboard applies its own; a 5.1 card
+  is corrected by the 3 s check, a stereo card does not care.
 
 Not done: microphone (XamVoice), the 4 ms + ring latency is not tuned, UAC2 clock selectors.
 The isochronous request layout and status words come from usb-audio-x360's reading of retail

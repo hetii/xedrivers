@@ -12,15 +12,26 @@
 
 #include "kernel.h"
 
-/* Worker thread, PASSIVE_LEVEL: start hearing the console; 0, or what failed. */
-u32  audio_open(void);
+/* What a card is sent. */
+#define AUDIO_STEREO        2u      /* 5.1 mixed down to two channels */
+#define AUDIO_SIX           6u      /* the six channels as they are */
+#define AUDIO_STEREO_IN_SIX 7u      /* the stereo mix in a six-channel stream, the rest silent */
+
+/* Worker thread, PASSIVE_LEVEL: start hearing the console, in one of the layouts above;
+ * 0, or what failed. */
+u32  audio_open(u32 layout);
+
+/* Worker thread: whether the dashboard's audio setting asks for 5.1 (Dolby Digital, with
+ * or without WMA Pro), read from the kernel each call. Checked on 17559: 0x00000003 for
+ * digital stereo, 0x00010001 for Dolby Digital 5.1, 0x00030001 with WMA Pro. */
+u32  audio_surround(void);
 /* Any IRQL: nobody is reading any more. */
 void audio_close(void);
 
-/* `frames` of stereo into `stereo` (2 x s32 at full scale, left first), whatever there
+/* `frames` into `out` (channels x s32 at full scale, as the layout opened), whatever there
  * is: the rest is silence and is counted. From the player's completion, DISPATCH_LEVEL.
  * Nothing is given until a little has gathered, so that the first frames do not run dry. */
-void audio_read(s32 *stereo, u32 frames);
+void audio_read(s32 *out, u32 frames);
 
 typedef struct {
     u32 open_status;        /* of the registration */
@@ -33,8 +44,9 @@ typedef struct {
     u32 underruns;          /* frames of silence given: none there */
     u32 volume;             /* out of 256, from audio_volume (0-100) in the ini */
     u32 callback_context;   /* processor << 8 | IRQL of the kernel's call */
-    u32 speaker_status;     /* XAudioGetSpeakerConfig at the last audio_open: what it returned */
+    u32 speaker_status;     /* XAudioGetSpeakerConfig, last call: what it returned */
     u32 speaker_config;     /* and the word it gave */
+    u32 layout;             /* AUDIO_* in use */
 } AUDIO_STATS;
 
 extern volatile AUDIO_STATS audio_stats;

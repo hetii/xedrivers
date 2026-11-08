@@ -26,8 +26,16 @@ void pcm_from_frame(const float *frame, s32 *stereo, u32 volume);
  * mix is what the game made and -6 dB is the default volume. */
 void pcm_stereo_downmix(const float *frame, s32 *stereo, u32 volume);
 
-/* `frames` of that to little-endian PCM of `bytes` per sample (2, 3 or 4), what USB
- * Audio wants. Writes frames x 2 x bytes. */
-void pcm_to_packet(const s32 *stereo, u32 frames, u8 *out, u32 bytes);
+/* All six channels, interleaved in the frame's own order (which is USB Audio's for 5.1:
+ * L, R, C, LFE, then the surrounds), `volume` applied. Writes 6 x 256 values. */
+void pcm_six(const float *frame, s32 *six, u32 volume);
+
+/* The stereo downmix in the first two of six slots, the other four silent: for a 5.1 card
+ * while the console is set to stereo. */
+void pcm_stereo_in_six(const float *frame, s32 *six, u32 volume);
+
+/* `samples` values (frames x channels) to little-endian PCM of `bytes` per sample (2, 3 or
+ * 4), what USB Audio wants. Writes samples x bytes. */
+void pcm_to_packet(const s32 *values, u32 samples, u8 *out, u32 bytes);
 
 #endif /* XE_AUDIO_PCM_H */

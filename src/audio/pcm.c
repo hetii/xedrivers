@@ -40,12 +40,35 @@ void pcm_stereo_downmix(const float *frame, s32 *stereo, u32 volume)
     }
 }
 
-void pcm_to_packet(const s32 *stereo, u32 frames, u8 *out, u32 bytes)
+void pcm_six(const float *frame, s32 *six, u32 volume)
+{
+    u32 i, c;
+
+    for (i = 0; i < AUDIO_FRAME_SAMPLES; i++)
+        for (c = 0; c < 6; c++)
+            six[i * 6 + c] = scale(frame[c * AUDIO_FRAME_SAMPLES + i], volume);
+}
+
+void pcm_stereo_in_six(const float *frame, s32 *six, u32 volume)
+{
+    s32 two[2 * AUDIO_FRAME_SAMPLES];
+    u32 i, c;
+
+    pcm_stereo_downmix(frame, two, volume);
+    for (i = 0; i < AUDIO_FRAME_SAMPLES; i++) {
+        six[i * 6] = two[i * 2];
+        six[i * 6 + 1] = two[i * 2 + 1];
+        for (c = 2; c < 6; c++)
+            six[i * 6 + c] = 0;
+    }
+}
+
+void pcm_to_packet(const s32 *values, u32 samples, u8 *out, u32 bytes)
 {
     u32 i;
 
-    for (i = 0; i < frames * 2; i++) {
-        u32 v = (u32)stereo[i];
+    for (i = 0; i < samples; i++) {
+        u32 v = (u32)values[i];
 
         /* the top `bytes` of the value, low byte first */
         if (bytes == 4)

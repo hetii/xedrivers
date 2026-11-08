@@ -41,7 +41,8 @@ typedef struct {
     u32 version;                /* 1 or 2; 0: no Audio Control interface */
     u32 control_interface;
     u32 clock;                  /* UAC2: the first clock source's id */
-    UAC_STREAM play;
+    UAC_STREAM play;            /* a stereo output */
+    UAC_STREAM play6;           /* a 5.1 output: six channels, taken as L R C LFE and the surrounds */
     UAC_STREAM mic;
 } UAC_INFO;
 
