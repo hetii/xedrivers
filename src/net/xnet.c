@@ -7,6 +7,7 @@
 #include "net.h"
 #include "txq.h"
 #include "file.h"
+#include "thunk.h"
 
 volatile XNET_STATS xnet_stats;
 
@@ -52,37 +53,9 @@ volatile u32 xnet_rx_iface = 0x08u;  /* NicInterfaceUsbEnet */
 typedef void (*RX_CALLBACK)(void *context, void *frame, u32 length, u32 interface,
                             u32 dest);
 
-static u32 saved_xmit_lis, saved_xmit_addi;
-static u32 saved_link_lis, saved_link_addi;
+static u32 saved_xmit[2], saved_link[2];
 static u32 saved_flags;
 static void *title_user;
-
-/* Build/decode the `lis r11,hi` + `addi r11,r11,lo` pair, with the sign extension
- * addi applies to the low half compensated in the high half. */
-static u32 thunk_target(u32 lis, u32 addi)
-{
-    u32 hi = lis & 0xFFFF;
-    s64 lo = (s16)(addi & 0xFFFF);
-    return (u32)((hi << 16) + lo);
-}
-
-static void thunk_set(u32 at, void *target)
-{
-    u32 a = (u32)(unsigned long)target;
-    u32 hi = (a + 0x8000u) >> 16;
-    u32 lo = a & 0xFFFFu;
-
-    *(volatile u32 *)(unsigned long)at = 0x3D600000u | (hi & 0xFFFF);        /* lis r11,hi  */
-    *(volatile u32 *)(unsigned long)(at + 4) = 0x396B0000u | lo;             /* addi r11,.. */
-    KeSweepIcacheRange((void *)(unsigned long)at, 8);
-}
-
-static void thunk_restore(u32 at, u32 lis, u32 addi)
-{
-    *(volatile u32 *)(unsigned long)at = lis;
-    *(volatile u32 *)(unsigned long)(at + 4) = addi;
-    KeSweepIcacheRange((void *)(unsigned long)at, 8);
-}
 
 /* The one title user already attached to the EMAC at boot: the first plausible
  * entry on g_NicEmac's list whose standard receive filter is set. */
@@ -719,18 +692,14 @@ u32 xnet_enable(void)
     extend_pool();
     more_sockets();
 
-    saved_xmit_lis = xmit[0];
-    saved_xmit_addi = xmit[1];
-    saved_link_lis = link[0];
-    saved_link_addi = link[1];
     saved_flags = *flags;
     xnet_stats.flags_before = saved_flags;
 
     *flags = saved_flags | NIC_IFACE_USBENET;
     xnet_stats.flags_after = *flags;
 
-    thunk_set(THUNK_XMIT, (void *)nic_xmit_hook);
-    thunk_set(THUNK_LINK_STATE, (void *)nic_link_state_hook);
+    thunk_set(THUNK_XMIT, (void *)nic_xmit_hook, saved_xmit);
+    thunk_set(THUNK_LINK_STATE, (void *)nic_link_state_hook, saved_link);
     xnet_stats.patched = 2;
 
     net_rx = deliver;
@@ -753,8 +722,8 @@ void xnet_disable(void)
     mem_sync();
     net_txq_flush(&xq);
 
-    thunk_restore(THUNK_XMIT, saved_xmit_lis, saved_xmit_addi);
-    thunk_restore(THUNK_LINK_STATE, saved_link_lis, saved_link_addi);
+    thunk_restore(THUNK_XMIT, saved_xmit);
+    thunk_restore(THUNK_LINK_STATE, saved_link);
     *(volatile u32 *)(unsigned long)IFACE_FLAGS = saved_flags;
 
     xnet_stats.patched = 0;

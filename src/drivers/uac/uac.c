@@ -212,7 +212,12 @@ static void uac_tick(NET_DEV *nd)
 {
     UAC *u = (UAC *)nd->priv;
 
-    if (!u || u->stopping || !u->info.play6.found || ++u->ticks < 90)
+    if (!u || u->stopping || !u->info.play6.found)
+        return;
+    /* Asked rather than told: the dashboard calls XAudioSetSpeakerConfig through its own
+     * import, reloaded with every dash.xex, so a hook would have to be put back each time
+     * (counted 2026-11-08: 5 of 5 changes that way, none through xam). The call reads one word. */
+    if (++u->ticks < 90)
         return;
     u->ticks = 0;
     if (audio_surround() != u->surround) {
