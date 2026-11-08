@@ -27,6 +27,9 @@
 #include "net.h"
 #include "bench.h"
 #include "servers.h"
+#if XE_AUDIO
+#include "audio.h"
+#endif
 
 #define XE_VERSION 0x00020000u
 
@@ -147,6 +150,9 @@ static void worker(void *parameter)
     bench_init();
     net_learn_console_mac();            /* before any device is brought up */
     net_layer_init();
+#if XE_AUDIO
+    audio_voice_init();                 /* before a title can open the voice chat */
+#endif
 
     for (tick = 0;; tick++) {
         xe_state.worker_ticks = tick;
@@ -182,6 +188,9 @@ static void worker(void *parameter)
             }
         }
         net_tick();
+#if XE_AUDIO
+        audio_voice_tick();
+#endif
         servers_tick(tick);
 
         what = xe_cmd[0];

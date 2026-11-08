@@ -66,4 +66,29 @@ typedef struct {
 
 extern volatile AUDIO_MIC_STATS audio_mic_stats;
 
+/* The console's voice chat (voice.c). init once, early, from the worker; tick every worker
+ * tick; answer whenever the microphone has written (the capture's completion does). */
+void audio_voice_init(void);
+void audio_voice_tick(void);
+void audio_voice_answer(void);
+
+typedef struct {
+    u32 hooks;              /* bits: 0 present, 1 submit, 2 battery hooked */
+    u32 bind_routine;       /* xam's binding routine is the one checked */
+    u32 alive;              /* the microphone wrote since the last tick */
+    u32 bound;              /* player 0's voice route is ours */
+    u32 binds;
+    u32 queued;             /* microphone requests taken */
+    u32 answered;
+    u32 failed;
+    u32 full;               /* requests passed on: no slot free */
+    u32 bind_step;          /* why not bound: 1 not signed in, 2 route not freed, 3 bind failed,
+                             * 4 given to another player */
+    u32 signin;             /* XamUserGetSigninState(0) */
+    u32 bind_status;
+    u32 bind_user;
+} AUDIO_VOICE_STATS;
+
+extern volatile AUDIO_VOICE_STATS audio_voice_stats;
+
 #endif /* XE_AUDIO_H */

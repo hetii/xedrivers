@@ -41,6 +41,13 @@ typedef struct USB_DEV {
     URB           close_urb;
 } USB_DEV;
 
+/* A call into Microsoft's code from ours, with a frame that has the home area it may store
+ * its arguments in (SP+0x10 to +0x4F, kit/kcall.S): `routine` gets up to seven words, and its
+ * return comes back. See usb.c for the freeze that taught it. */
+#if defined(__powerpc__)
+u32 usb_framed_call(void *routine, ...);
+#endif
+
 /* Controllers 0 and 1 are EHCI, 2 and 3 their USB 1.1 companions (OHCI). */
 #define USB_ON_COMPANION(dev) (((dev)->where & 3u) >= 2u)
 

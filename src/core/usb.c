@@ -103,7 +103,6 @@ void usb_dpc_init(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *context)
  * nothing else from 0x800d8000 to 0x800de000 does; so only this call gets a frame of its own.
  * Seen on the UART by bench_trace, 2026-11-06. */
 #if defined(__powerpc__)
-void usb_framed_call(void *routine, void *first, void *second);
 __asm__(".section .text\n"
         ".globl usb_framed_call\n"
         "usb_framed_call:\n"
@@ -113,6 +112,11 @@ __asm__(".section .text\n"
         "    mtctr   3\n"
         "    mr      3, 4\n"
         "    mr      4, 5\n"
+        "    mr      5, 6\n"
+        "    mr      6, 7\n"
+        "    mr      7, 8\n"
+        "    mr      8, 9\n"
+        "    mr      9, 10\n"
         "    bctrl\n"
         "    addi    1, 1, 128\n"
         "    lwz     0, 4(1)\n"

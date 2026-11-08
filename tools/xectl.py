@@ -207,6 +207,9 @@ STRUCTS = {
                   "mic_transfers", "mic_packets_ok", "mic_packets_bad", "mic_last_status",
                   "mic_samples"],
     "audio_mic_stats": ["samples", "overruns", "peak", "writes"],
+    "audio_voice_stats": ["hooks", "bind_routine", "alive", "bound", "binds", "queued",
+                          "answered", "failed", "full", "bind_step", "signin", "bind_status",
+                          "bind_user"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
@@ -1545,6 +1548,8 @@ def main(argv):
         print(read_struct(sym, "audio_stats"))
         if "audio_mic_stats" in sym:
             print("mic", read_struct(sym, "audio_mic_stats"))
+        if "audio_voice_stats" in sym:
+            print("voice", read_struct(sym, "audio_voice_stats"))
         for i in range(NET_MAX):
             one = read_struct(sym, "uac_stats", i)
             if one["version"]:

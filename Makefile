@@ -211,6 +211,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 	$(PYTHON) $(KIT)/plugin.py $(SRC) $(addprefix --ordinals ,$(TABLES)) \
 	    --base $(BASE) \
 	    $(INCLUDES) -D XE_DEBUG=$(DEBUG) -D XE_MODE=$(MODE_VALUE)u \
+	    -D XE_AUDIO=$(if $(filter uac,$(DRIVERS)),1,0) \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) -D NTB_IN_SIZE=$(NTB_IN_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \

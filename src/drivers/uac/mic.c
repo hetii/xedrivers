@@ -43,6 +43,7 @@ static void take(UAC *u, const u8 *data, u32 length)
     if (made) {
         audio_mic_write(out, made);
         u->st->mic_samples += made;
+        audio_voice_answer();
     }
 }
 
