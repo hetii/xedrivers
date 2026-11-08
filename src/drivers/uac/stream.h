@@ -20,6 +20,8 @@
 #define UAC_SLOTS       3u          /* transfers out at once */
 #define UAC_FRAMES_MAX  (4u * 48u + UAC_PACKETS_MAX)    /* a transfer's frames at most */
 #define UAC_BUFFER      (UAC_FRAMES_MAX * 6u * 4u)      /* and its bytes: 6 channels of 4 */
+#define UAC_MIC_SLOTS   2u
+#define UAC_MIC_BUFFER  8192u                           /* a microphone transfer at most */
 
 /* What the host sees: xectl status. One a device slot. */
 typedef struct {
@@ -38,6 +40,12 @@ typedef struct {
     u32 channels;           /* of the output in use */
     u32 high_speed;
     u32 period;             /* microframes between packets with data (1 at full speed) */
+    u32 mic_step;           /* 0 capturing, else why not (mic.c) */
+    u32 mic_transfers;
+    u32 mic_packets_ok;
+    u32 mic_packets_bad;
+    u32 mic_last_status;
+    u32 mic_samples;        /* 16 kHz samples handed to audio_mic_write */
 } UAC_STATS;
 
 extern volatile UAC_STATS uac_stats[NET_MAX];
@@ -65,9 +73,23 @@ typedef struct UAC {
     s32 frames[UAC_FRAMES_MAX * 6];
     u32 surround;               /* audio_surround() when this stream was chosen */
     u32 ticks;
+    void *ep_mic;
+    ISOCH mic[UAC_MIC_SLOTS];
+    u16 mic_lengths[UAC_MIC_SLOTS][UAC_PACKETS_MAX];
+    u8 *mic_buf;                /* UAC_MIC_SLOTS x UAC_MIC_BUFFER */
+    u32 mic_room;               /* a data packet's bytes, the endpoint's largest */
+    u32 mic_bad_in_a_row;
+    u32 mic_sum, mic_count;     /* the 48 -> 16 kHz decimator's state */
 } UAC;
 
 /* Worker thread: buffers, then the first transfers; a step number, or 0. */
 u32  stream_start(UAC *u);
+
+/* Worker thread: the microphone's interface, rate, endpoint and first transfers, after the
+ * output is up (mic.c). Records why not in st->mic_step; a card plays without it. */
+void mic_start(UAC *u);
+
+/* Thread-only: one control transfer on the card's default endpoint (uac.c). */
+u32  uac_control(UAC *u, u32 type, u32 request, u32 value, u32 index, u32 length, u32 *actual);
 
 #endif /* XE_UAC_STREAM_H */

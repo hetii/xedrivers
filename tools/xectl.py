@@ -203,7 +203,10 @@ STRUCTS = {
     "uac_stats": ["version", "play_interface", "play_alternate", "play_bytes", "play_endpoint",
                   "play_max_packet", "play_sync", "feedback_endpoint", "transfers", "packets_ok",
                   "packets_late", "packets_bad", "last_status", "gave_up", "feedback_taken",
-                  "feedback_rate", "audio_open", "channels", "high_speed", "period"],
+                  "feedback_rate", "audio_open", "channels", "high_speed", "period", "mic_step",
+                  "mic_transfers", "mic_packets_ok", "mic_packets_bad", "mic_last_status",
+                  "mic_samples"],
+    "audio_mic_stats": ["samples", "overruns", "peak", "writes"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
@@ -1540,6 +1543,8 @@ def main(argv):
         prof(sym, float(rest[0]) if rest else 5.0)
     elif what == "audio":
         print(read_struct(sym, "audio_stats"))
+        if "audio_mic_stats" in sym:
+            print("mic", read_struct(sym, "audio_mic_stats"))
         for i in range(NET_MAX):
             one = read_struct(sym, "uac_stats", i)
             if one["version"]:

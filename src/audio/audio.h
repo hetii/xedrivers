@@ -51,4 +51,19 @@ typedef struct {
 
 extern volatile AUDIO_STATS audio_stats;
 
+/* The microphone (voice.c): 16 kHz mono, written by a card's capture (any IRQL up to
+ * DISPATCH), read by the voice chat. */
+void audio_mic_write(const s16 *samples, u32 count);
+u32  audio_mic_read(s16 *samples, u32 count);      /* how many it gave */
+u32  audio_mic_ready(void);
+
+typedef struct {
+    u32 samples;
+    u32 overruns;           /* samples dropped: nobody read them */
+    u32 peak;               /* of the last write, out of 32767 */
+    u32 ticks_alive;        /* writes */
+} AUDIO_MIC_STATS;
+
+extern volatile AUDIO_MIC_STATS audio_mic_stats;
+
 #endif /* XE_AUDIO_H */

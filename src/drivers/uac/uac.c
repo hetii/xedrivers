@@ -1,7 +1,8 @@
 /* USB Audio Class: any UAC1 or UAC2 device with a stereo output at 48 kHz plays the
  * console's sound. Chosen from the device's own descriptors (descriptors.c), not a list
  * of products. Full speed on the companion (OHCI) controllers and high speed on EHCI; see
- * stream.h for how the two differ. The microphone is not done yet.
+ * stream.h for how the two differ. The microphone, when the card has one, is captured
+ * beside it (mic.c).
  *
  * The kernel offers a composite device one interface at a time, having configured it
  * itself: we take its first AudioStreaming one, which does everything through the default
@@ -37,7 +38,7 @@ static UAC devices[NET_MAX];
  * before the worker starts the first. */
 static volatile u32 taken;
 
-static u32 control(UAC *u, u32 type, u32 request, u32 value, u32 index, u32 length, u32 *actual)
+u32 uac_control(UAC *u, u32 type, u32 request, u32 value, u32 index, u32 length, u32 *actual)
 {
     u8 setup[8];
 
@@ -63,18 +64,18 @@ static u32 set_rate(UAC *u)
         u->control[0] = (u8)UAC_RATE;
         u->control[1] = (u8)(UAC_RATE >> 8);
         u->control[2] = (u8)(UAC_RATE >> 16);
-        control(u, 0x22, 0x01, 0x0100, p->endpoint, 3, &actual);
+        uac_control(u, 0x22, 0x01, 0x0100, p->endpoint, 3, &actual);
         return 0;
     }
     if (!u->info.clock)
         return 1;
     for (i = 0; i < 4; i++)
         u->control[i] = (u8)(UAC_RATE >> (8 * i));
-    status = control(u, 0x21, 0x01, 0x0100, u->info.clock << 8 | u->info.control_interface, 4,
+    status = uac_control(u, 0x21, 0x01, 0x0100, u->info.clock << 8 | u->info.control_interface, 4,
                      &actual);
     if (!NT_SUCCESS(status))
         return 1;
-    status = control(u, 0xA1, 0x01, 0x0100, u->info.clock << 8 | u->info.control_interface, 4,
+    status = uac_control(u, 0xA1, 0x01, 0x0100, u->info.clock << 8 | u->info.control_interface, 4,
                      &actual);
     if (!NT_SUCCESS(status) || actual < 4)
         return 1;
@@ -99,7 +100,7 @@ static u32 uac_start(NET_DEV *nd)
     u->dev = dev;
     u->st = &uac_stats[dev->index];
     u->stopping = 0;
-    u->ep_play = u->ep_feedback = 0;
+    u->ep_play = u->ep_feedback = u->ep_mic = 0;
     nd->priv = u;
     if (!u->control)
         u->control = (u8 *)net_dma_scratch(CONTROL_BYTES);
@@ -107,13 +108,13 @@ static u32 uac_start(NET_DEV *nd)
         return STEP_MEMORY;
 
     /* The whole first configuration: its total length, then all of it. */
-    status = control(u, 0x80, 0x06, 0x0200, 0, 9, &actual);
+    status = uac_control(u, 0x80, 0x06, 0x0200, 0, 9, &actual);
     if (!NT_SUCCESS(status) || actual < 9)
         return STEP_CONFIG;
     total = u->control[2] | (u32)u->control[3] << 8;
     if (total > CONTROL_BYTES)
         total = CONTROL_BYTES;
-    status = control(u, 0x80, 0x06, 0x0200, 0, total, &actual);
+    status = uac_control(u, 0x80, 0x06, 0x0200, 0, total, &actual);
     if (!NT_SUCCESS(status) || actual < 9)
         return STEP_CONFIG;
     if (actual > total)
@@ -163,7 +164,7 @@ static u32 uac_start(NET_DEV *nd)
     u->st->play_sync = u->info.play.sync;
     u->st->feedback_endpoint = u->info.play.feedback;
 
-    status = control(u, 0x01, 0x0B, u->info.play.alternate, u->info.play.interface, 0, 0);
+    status = uac_control(u, 0x01, 0x0B, u->info.play.alternate, u->info.play.interface, 0, 0);
     if (!NT_SUCCESS(status))
         return STEP_INTERFACE;
     if (set_rate(u))
@@ -192,6 +193,10 @@ static u32 uac_start(NET_DEV *nd)
         audio_close();
         return STEP_STREAM;
     }
+    if (u->info.mic.found)
+        mic_start(u);
+    else
+        u->st->mic_step = 1;
     return 0;
 }
 
