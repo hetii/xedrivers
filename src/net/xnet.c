@@ -8,6 +8,7 @@
 #include "txq.h"
 #include "file.h"
 #include "thunk.h"
+#include "usb.h"
 
 volatile XNET_STATS xnet_stats;
 
@@ -56,6 +57,20 @@ typedef void (*RX_CALLBACK)(void *context, void *frame, u32 length, u32 interfac
 static u32 saved_xmit[2], saved_link[2];
 static u32 saved_flags;
 static void *title_user;
+
+/* xam calls the two hooks from its own threads, whose r14-r31 must come back whole: through
+ * the stubs (usb.h, USB_STUB). */
+void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length, void *cookie);
+u32 nic_link_state_hook(u32 device_flags);
+#if defined(__powerpc__)
+USB_ENTRY(nic_xmit_entry, nic_xmit_hook);
+USB_ENTRY(nic_link_state_entry, nic_link_state_hook);
+void nic_xmit_entry(void *user, u32 queue, void *frame, u32 length, void *cookie);
+u32 nic_link_state_entry(u32 device_flags);
+#else
+#define nic_xmit_entry nic_xmit_hook
+#define nic_link_state_entry nic_link_state_hook
+#endif
 
 /* The one title user already attached to the EMAC at boot: the first plausible
  * entry on g_NicEmac's list whose standard receive filter is set. */
@@ -170,7 +185,7 @@ u32 xnet_tick_stalled(void)
 
 /* xam -> NicXmit(user, queue, frame, length, cookie). Queue for the card when this
  * is our user and the card has a link; otherwise the kernel's own EMAC path. */
-static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
+USB_ENTERED void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
                           void *cookie)
 {
     u32 i;
@@ -201,7 +216,7 @@ static void nic_xmit_hook(void *user, u32 queue, void *frame, u32 length,
  * EMAC hands its frames to the title itself, so the link answer is all that was
  * missing; every change of the card's link is notified (link_changed), and xnet
  * asks again and runs DHCP on whichever port answers. */
-static u32 nic_link_state_hook(u32 device_flags)
+USB_ENTERED u32 nic_link_state_hook(u32 device_flags)
 {
     xnet_stats.link_polls++;
     if (bench_wired_hidden())
@@ -698,8 +713,8 @@ u32 xnet_enable(void)
     *flags = saved_flags | NIC_IFACE_USBENET;
     xnet_stats.flags_after = *flags;
 
-    thunk_set(THUNK_XMIT, (void *)nic_xmit_hook, saved_xmit);
-    thunk_set(THUNK_LINK_STATE, (void *)nic_link_state_hook, saved_link);
+    thunk_set(THUNK_XMIT, (void *)nic_xmit_entry, saved_xmit);
+    thunk_set(THUNK_LINK_STATE, (void *)nic_link_state_entry, saved_link);
     xnet_stats.patched = 2;
 
     net_rx = deliver;

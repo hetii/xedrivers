@@ -123,7 +123,7 @@ static u32 get32(u32 option, s32 *status)
 {
     u32 v = 0, n = 4, unsupported;
 
-    *status = get(&user, option, (u8 *)&v, &n, &unsupported);
+    *status = omni_get(&user, option, (u8 *)&v, &n, &unsupported);
     return v;
 }
 
@@ -147,13 +147,13 @@ int main(void)
     given.rx = k_rx;
     given.xmit_done = k_done;
     given.link_changed = k_link;
-    CHECK(attach(device, &given) == 0 && wl_omni_stats.attached);
+    CHECK(omni_attach(device, &given) == 0 && wl_omni_stats.attached);
 
     /* There, not connected; a scan asked for is started on the worker. */
     CHECK(get32(OPT_STATUS, &status) == 1 && status == 0);
-    CHECK(link_state() == LINK_DOWN);
+    CHECK(omni_link_state() == LINK_DOWN);
     n = 0;
-    CHECK(get(&user, OID_BSSID_LIST_SCAN, 0, &n, &unsupported) == 0);
+    CHECK(omni_get(&user, OID_BSSID_LIST_SCAN, 0, &n, &unsupported) == 0);
     wl_omni_tick();
     CHECK(scans == 1);
 
@@ -165,7 +165,7 @@ int main(void)
     scan_done(3);
     wl_omni_tick();
     n = sizeof(list_buffer);
-    CHECK(get(&user, OID_BSSID_LIST, list_buffer, &n, &unsupported) == 0);
+    CHECK(omni_get(&user, OID_BSSID_LIST, list_buffer, &n, &unsupported) == 0);
     CHECK(n == 4 + 3 * 244 && *(u32 *)list_buffer == 3);
     CHECK(*(u32 *)(list_buffer + 4) == 244 && list_buffer[4 + 4 + 5] == 1);
     CHECK(*(u32 *)(list_buffer + 4 + 12) == 4 && !memcmp(list_buffer + 4 + 16, "home", 4));
@@ -175,12 +175,12 @@ int main(void)
     scanning = 1;
     wl_omni_tick();
     n = sizeof(list_buffer);
-    get(&user, OID_BSSID_LIST, list_buffer, &n, &unsupported);
+    omni_get(&user, OID_BSSID_LIST, list_buffer, &n, &unsupported);
     CHECK(*(u32 *)list_buffer == 3);
     scan_done(3);
     wl_omni_tick();
     n = 100;                                    /* too small for one entry */
-    CHECK(get(&user, OID_BSSID_LIST, list_buffer, &n, &unsupported) == 0);
+    CHECK(omni_get(&user, OID_BSSID_LIST, list_buffer, &n, &unsupported) == 0);
     CHECK(*(u32 *)list_buffer == 0 && n == 4);
 
     /* The join, as the dashboard sends it: security, then the name. The
@@ -189,22 +189,22 @@ int main(void)
     *(u32 *)sec = 3;
     *(u32 *)(sec + 4) = 11;
     memcpy(sec + 8, "secret pass", 11);
-    CHECK(set(&user, OPT_SECURITY, sec, 72, &unsupported) == 0);
-    CHECK(set(&user, OPT_SECURITY, sec, 40, &unsupported) != 0);
+    CHECK(omni_set(&user, OPT_SECURITY, sec, 72, &unsupported) == 0);
+    CHECK(omni_set(&user, OPT_SECURITY, sec, 40, &unsupported) != 0);
     memset(ssid_set, 0, sizeof(ssid_set));
     *(u32 *)ssid_set = 4;
     memcpy(ssid_set + 4, "home", 4);
-    CHECK(set(&user, OID_SSID, ssid_set, 36, &unsupported) == 0);
+    CHECK(omni_set(&user, OID_SSID, ssid_set, 36, &unsupported) == 0);
     wl_omni_tick();
     CHECK(joins == 1 && joined_bss && joined_bss->bssid[5] == 2);
     CHECK(!strcmp(joined_pass, "secret pass"));
     n = 8;
-    CHECK(get(&user, OPT_SECURITY, sec, &n, &unsupported) == 0 && *(u32 *)sec == 3);
+    CHECK(omni_get(&user, OPT_SECURITY, sec, &n, &unsupported) == 0 && *(u32 *)sec == 3);
 
     /* The port opens: the kernel is told, and the dashboard sees it connected. */
     joined_state = 1;
     claimed->link(claimed->context, 1);
-    CHECK(link_changes >= 1 && link_state() == LINK_UP);
+    CHECK(link_changes >= 1 && omni_link_state() == LINK_UP);
     CHECK(get32(OPT_STATUS, &status) == (1 | 4 << 8));
     CHECK((s32)get32(OID_RSSI, &status) == -50);
     CHECK(get32(OPT_RATE, &status) == 72000000u);
@@ -220,14 +220,14 @@ int main(void)
     CHECK(received == 2 && received_dest == 4);
     callbacks.done = u_done;
     user.callbacks = &callbacks;
-    xmit(&user, 0, frame, sizeof(frame), (void *)0x1234);
+    omni_xmit(&user, 0, frame, sizeof(frame), (void *)0x1234);
     CHECK(sent == 1 && sent_length == sizeof(frame));
     CHECK(user_done == 1 && user_done_cookie == (void *)0x1234 && kernel_done == 1);
 
     /* Lost: frames are handed back unsent, and the network is joined again. */
     joined_state = 0;
     claimed->link(claimed->context, 0);
-    xmit(&user, 0, frame, sizeof(frame), (void *)0x5678);
+    omni_xmit(&user, 0, frame, sizeof(frame), (void *)0x5678);
     CHECK(sent == 1 && user_done == 2 && kernel_done == 2);
     for (i = 0; i < 250; i++)
         wl_omni_tick();
@@ -237,7 +237,7 @@ int main(void)
 
     /* A network not in the list is looked for once more, then given up. */
     memcpy(ssid_set + 4, "away", 4);
-    set(&user, OID_SSID, ssid_set, 36, &unsupported);
+    omni_set(&user, OID_SSID, ssid_set, 36, &unsupported);
     wl_omni_tick();
     CHECK(scans == 2 && joins == 2);
     scan_done(3);
@@ -245,7 +245,7 @@ int main(void)
     CHECK(joins == 2 && wl_omni_stats.missed == 1);
 
     /* Disconnect: left, and not joined again. */
-    CHECK(set(&user, OPT_DISCONNECT, 0, 0, &unsupported) == 0);
+    CHECK(omni_set(&user, OPT_DISCONNECT, 0, 0, &unsupported) == 0);
     wl_omni_tick();
     CHECK(leaves == 1);
     for (i = 0; i < 600; i++)
@@ -254,7 +254,7 @@ int main(void)
 
     /* An option not known is said so. The card gone: no adapter. */
     n = 4;
-    CHECK(get(&user, 0x0D010203u, frame, &n, &unsupported) != 0 && unsupported == 1);
+    CHECK(omni_get(&user, 0x0D010203u, frame, &n, &unsupported) != 0 && unsupported == 1);
     wl_omni_gone();
     CHECK(get32(OPT_STATUS, &status) == 0);
 

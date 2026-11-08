@@ -87,6 +87,15 @@ typedef struct {
             ".machine any\n")
 #endif
 
+/* A function of ours the kernel or a module calls, entered through such a stub: defines
+ * `entry`, which calls `fn` (global, marked USB_ENTERED). Give the kernel `entry`, never `fn`. */
+#if defined(__powerpc__)
+#define USB_ENTERED __attribute__((used))
+#define USB_ENTRY(entry, fn) USB_STUB(#entry, "lis 12, " #fn "@ha\n    addi 12, 12, " #fn "@l")
+#else
+#define USB_ENTERED
+#endif
+
 /* A DPC of ours, entered so that the thread it interrupts keeps its registers: see usb.c. */
 #if defined(__powerpc__)
 void usb_dpc_init(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *context);

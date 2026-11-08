@@ -28,6 +28,7 @@
 #include "omni.h"
 #include "txq.h"
 #include "wpa.h"
+#include "usb.h"
 
 #define NULL_SERVICES   0x80172118u
 #define NULL_GET        0x800D5528u
@@ -76,6 +77,27 @@ typedef void (*USER_DONE)(void *context, void *cookie);
 
 volatile WL_OMNI_STATS wl_omni_stats;
 
+/* xam and the kernel call the services from their own threads: through the stubs that keep
+ * the caller's r14-r31 whole (usb.h, USB_STUB). */
+#if defined(__powerpc__)
+USB_ENTRY(omni_attach_entry, omni_attach);
+extern char omni_attach_entry[];
+USB_ENTRY(omni_detach_entry, omni_detach);
+extern char omni_detach_entry[];
+USB_ENTRY(omni_xmit_entry, omni_xmit);
+extern char omni_xmit_entry[];
+USB_ENTRY(omni_get_entry, omni_get);
+extern char omni_get_entry[];
+USB_ENTRY(omni_set_entry, omni_set);
+extern char omni_set_entry[];
+USB_ENTRY(omni_link_state_entry, omni_link_state);
+extern char omni_link_state_entry[];
+USB_ENTRY(omni_finalize_entry, omni_finalize);
+extern char omni_finalize_entry[];
+#define ENTRY(n) n##_entry
+#else
+#define ENTRY(n) n
+#endif
 static u32 services[SLOTS];
 static u32 device[0x80];                /* the kernel's device object */
 static volatile ATTACH_INFO info;
@@ -135,7 +157,7 @@ static NET_TXQ txq = { .send = q_send, .space = q_space, .keep = q_keep,
                        .done = q_done, .dropped = &wl_omni_stats.tx_dropped,
                        .high = &wl_omni_stats.tx_high };
 
-static void xmit(void *user, u32 queue, void *frame, u32 length, void *cookie)
+USB_ENTERED void omni_xmit(void *user, u32 queue, void *frame, u32 length, void *cookie)
 {
     (void)queue;
     wl_omni_stats.tx++;
@@ -264,7 +286,7 @@ static u32 bssid_list(u8 *buffer, u32 length)
     return 4 + n * BSSID_ENTRY;
 }
 
-static s32 get(void *user, u32 option, u8 *buffer, u32 *length, u32 *unsupported)
+USB_ENTERED s32 omni_get(void *user, u32 option, u8 *buffer, u32 *length, u32 *unsupported)
 {
     u8 data[36];
     u32 i, n;
@@ -323,7 +345,7 @@ static s32 get(void *user, u32 option, u8 *buffer, u32 *length, u32 *unsupported
     return (s32)STATUS_NOT_HANDLED;
 }
 
-static s32 set(void *user, u32 option, u8 *buffer, u32 length, u32 *unsupported)
+USB_ENTERED s32 omni_set(void *user, u32 option, u8 *buffer, u32 length, u32 *unsupported)
 {
     u32 i, n;
 
@@ -368,14 +390,14 @@ static s32 set(void *user, u32 option, u8 *buffer, u32 length, u32 *unsupported)
     }
 }
 
-static u32 link_state(void)
+USB_ENTERED u32 omni_link_state(void)
 {
     return wl_omni_stats.link ? LINK_UP : LINK_DOWN;
 }
 
 /* --- the device's lifetime, as the kernel sees it -------------------------------- */
 
-static u32 attach(void *dev, const ATTACH_INFO *given)
+USB_ENTERED u32 omni_attach(void *dev, const ATTACH_INFO *given)
 {
     (void)dev;
     info.context = given->context;
@@ -387,7 +409,7 @@ static u32 attach(void *dev, const ATTACH_INFO *given)
     return 0;
 }
 
-static void detach(void *dev)
+USB_ENTERED void omni_detach(void *dev)
 {
     (void)dev;
     wl_omni_stats.attached = 0;
@@ -398,7 +420,7 @@ static void detach(void *dev)
     info.xmit_done = 0;
 }
 
-static void finalize(void *dev)
+USB_ENTERED void omni_finalize(void *dev)
 {
     (void)dev;
 }
@@ -418,13 +440,13 @@ static u32 register_device(void)
         return 0xBAD0;                  /* not the kernel these were read off */
     for (i = 0; i < SLOTS; i++)
         services[i] = empty[i];
-    services[1] = (u32)(unsigned long)attach;
-    services[2] = (u32)(unsigned long)detach;
-    services[4] = (u32)(unsigned long)xmit;
-    services[6] = (u32)(unsigned long)get;
-    services[7] = (u32)(unsigned long)set;
-    services[8] = (u32)(unsigned long)link_state;
-    services[13] = (u32)(unsigned long)finalize;
+    services[1] = (u32)(unsigned long)ENTRY(omni_attach);
+    services[2] = (u32)(unsigned long)ENTRY(omni_detach);
+    services[4] = (u32)(unsigned long)ENTRY(omni_xmit);
+    services[6] = (u32)(unsigned long)ENTRY(omni_get);
+    services[7] = (u32)(unsigned long)ENTRY(omni_set);
+    services[8] = (u32)(unsigned long)ENTRY(omni_link_state);
+    services[13] = (u32)(unsigned long)ENTRY(omni_finalize);
     for (i = 0; i < sizeof(device) / sizeof(device[0]); i++)
         device[i] = 0;
     device[2] = DEVICE_TYPE;

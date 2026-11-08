@@ -510,7 +510,7 @@ static int ours(const u8 *descriptor)
     return descriptor && client && client->match(0, descriptor);
 }
 
-static u32 match(const u8 *interfaceDescriptor, const u8 *deviceDescriptor,
+USB_ENTERED u32 usb_on_match(const u8 *interfaceDescriptor, const u8 *deviceDescriptor,
                  USBD_DRIVER_OBJECT *self)
 {
     (void)self;
@@ -528,7 +528,7 @@ static USB_DEV *slot_of(void *device)
     return 0;
 }
 
-static int add_device(void *device)
+USB_ENTERED int usb_on_add(void *device)
 {
     USB_DEV *dev;
     int status;
@@ -568,7 +568,7 @@ static int add_device(void *device)
     return 0;
 }
 
-static int remove_device(void *device)
+USB_ENTERED int usb_on_remove(void *device)
 {
     USB_DEV *dev = device ? slot_of(device) : 0;
 
@@ -587,6 +587,17 @@ static int remove_device(void *device)
     close_complete(&dev->close_urb, 0);
     return 0;
 }
+
+/* The driver object's three, which the kernel calls while it enumerates, in a DPC on whatever
+ * thread was running: through the stubs that keep that thread's registers (USB_STUB). */
+#if defined(__powerpc__)
+USB_ENTRY(usb_match_entry, usb_on_match);
+USB_ENTRY(usb_add_entry, usb_on_add);
+USB_ENTRY(usb_remove_entry, usb_on_remove);
+u32 usb_match_entry(const u8 *interfaceDescriptor, const u8 *deviceDescriptor, USBD_DRIVER_OBJECT *self);
+int usb_add_entry(void *device);
+int usb_remove_entry(void *device);
+#endif
 
 int usb_register(const USB_CLIENT *who)
 {
@@ -607,9 +618,15 @@ int usb_register(const USB_CLIENT *who)
     driver_object.ListEntry.Flink = 0;
     driver_object.ListEntry.Blink = 0;
     driver_object.Private = 0;
-    driver_object.AddDevice = add_device;
-    driver_object.RemoveDevice = remove_device;
-    driver_object.Match = match;
+#if defined(__powerpc__)
+    driver_object.AddDevice = usb_add_entry;
+    driver_object.RemoveDevice = usb_remove_entry;
+    driver_object.Match = usb_match_entry;
+#else
+    driver_object.AddDevice = usb_on_add;
+    driver_object.RemoveDevice = usb_on_remove;
+    driver_object.Match = usb_on_match;
+#endif
     driver_object.Notify = 0;
     return UsbdRegisterDriverObject(&driver_object);
 }
