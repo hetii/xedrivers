@@ -8,9 +8,23 @@
 #define AUDIO_FRAME_SAMPLES 256u        /* a channel's samples in a frame: ~5.33 ms at 48 kHz */
 #define AUDIO_CHANNELS      6u          /* planar, one channel after another */
 
+/* The channels of a frame, in this order (XAudio's 5.1). */
+#define AUDIO_FL  0u
+#define AUDIO_FR  1u
+#define AUDIO_C   2u
+#define AUDIO_LFE 3u
+#define AUDIO_SL  4u
+#define AUDIO_SR  5u
+
 /* The first two channels of a frame (6 x 256 floats) as interleaved s32 at full scale,
  * `volume` out of 256 applied. Clipped, never wrapped. Writes 2 x 256 values. */
 void pcm_from_frame(const float *frame, s32 *stereo, u32 volume);
+
+/* All of a frame mixed to two channels for a stereo card, as ITU-R BS.775:
+ * L = FL + 0.707 C + 0.707 SL, R = FR + 0.707 C + 0.707 SR, LFE left out. A game's
+ * dialogue is in C, which pcm_from_frame drops. Not scaled down: clipped instead, as the
+ * mix is what the game made and -6 dB is the default volume. */
+void pcm_stereo_downmix(const float *frame, s32 *stereo, u32 volume);
 
 /* `frames` of that to little-endian PCM of `bytes` per sample (2, 3 or 4), what USB
  * Audio wants. Writes frames x 2 x bytes. */

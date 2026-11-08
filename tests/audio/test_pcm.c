@@ -45,6 +45,22 @@ int main(void)
     pcm_to_packet(stereo, 1, out, 4);
     CHECK(out[3] == 0x40 && out[7] == 0xC0);
 
+    /* The downmix: centre and surrounds into both sides, LFE nowhere. */
+    memset(frame, 0, sizeof(frame));
+    frame[AUDIO_C * AUDIO_FRAME_SAMPLES] = 0.5f;
+    frame[AUDIO_LFE * AUDIO_FRAME_SAMPLES] = 0.9f;
+    frame[AUDIO_SL * AUDIO_FRAME_SAMPLES + 1] = 0.5f;
+    frame[AUDIO_FR * AUDIO_FRAME_SAMPLES + 2] = 0.9f;
+    frame[AUDIO_C * AUDIO_FRAME_SAMPLES + 2] = 0.9f;
+    pcm_stereo_downmix(frame, stereo, 256);
+    CHECK(stereo[0] == stereo[1]);                       /* centre: the same both sides */
+    CHECK(stereo[0] > 0x2D000000 && stereo[0] < 0x2E000000);   /* 0.354 of full scale */
+    CHECK(stereo[2] > 0x2D000000 && stereo[2] < 0x2E000000 && stereo[3] == 0);  /* SL: left only */
+    CHECK(stereo[5] == 0x7FFFFFFF);                      /* FR + C over full scale: clipped */
+    CHECK(stereo[4] > 0x50000000 && stereo[4] < 0x52000000);  /* C alone on the left */
+    pcm_stereo_downmix(frame, stereo, 128);
+    CHECK(stereo[0] > 0x16800000 && stereo[0] < 0x17000000);
+
     if (failures)
         return 1;
     printf("all pcm tests passed\n");

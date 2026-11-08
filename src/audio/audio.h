@@ -33,6 +33,8 @@ typedef struct {
     u32 underruns;          /* frames of silence given: none there */
     u32 volume;             /* out of 256, from audio_volume (0-100) in the ini */
     u32 callback_context;   /* processor << 8 | IRQL of the kernel's call */
+    u32 speaker_status;     /* XAudioGetSpeakerConfig at the last audio_open: what it returned */
+    u32 speaker_config;     /* and the word it gave */
 } AUDIO_STATS;
 
 extern volatile AUDIO_STATS audio_stats;

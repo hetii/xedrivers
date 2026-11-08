@@ -13,7 +13,7 @@
 
 #define RING_FRAMES     4096u           /* a power of two: ~85 ms */
 #define START_FRAMES    1024u           /* ~21 ms gathered before the first frame goes */
-#define DEFAULT_VOLUME  100u
+#define DEFAULT_VOLUME  50u             /* -6 dB: a USB card at 100 played louder than HDMI */
 #define POOL_TAG        0x6F647561u     /* "audo" */
 
 typedef struct {
@@ -23,6 +23,8 @@ typedef struct {
 
 extern s32 XAudioRegisterRenderDriverMECClient(MEC_CLIENT *client, void **handle);
 extern s32 XAudioCaptureRenderDriverFrame(void *handle, float *samples);
+/* Kernel 511. To be checked against the dashboard's setting before anything follows it. */
+extern s32 XAudioGetSpeakerConfig(u32 *config);
 extern void *ExAllocatePoolTypeWithTag(u32 bytes, u32 tag, u32 pool_type);
 
 volatile AUDIO_STATS audio_stats;
@@ -54,7 +56,7 @@ void audio_callback(void *context)
         audio_stats.overruns += AUDIO_FRAME_SAMPLES;
         return;                             /* the reader moves read_at: this frame goes */
     }
-    pcm_from_frame(frame, converted, audio_stats.volume);
+    pcm_stereo_downmix(frame, converted, audio_stats.volume);
     for (i = 0; i < AUDIO_FRAME_SAMPLES; i++) {
         u32 at = (w + i) & (RING_FRAMES - 1);
 
@@ -83,7 +85,11 @@ static u32 volume_setting(void)
 
 u32 audio_open(void)
 {
+    u32 speakers = 0;
+
     audio_stats.volume = volume_setting() * 256u / 100u;
+    audio_stats.speaker_status = (u32)XAudioGetSpeakerConfig(&speakers);
+    audio_stats.speaker_config = speakers;
     if (!ring) {
         ring = (s32 *)ExAllocatePoolTypeWithTag(RING_FRAMES * 2 * sizeof(s32), POOL_TAG, 2);
         if (!ring)

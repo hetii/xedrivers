@@ -286,7 +286,7 @@ tools/xectl.py set|get SYMBOL [VALUE]  # any 32-bit global of the plugin
 
 A USB sound card or headset plugged in plays what the console plays, from the first seconds of
 boot. The kernel's own outputs keep playing. High-speed devices are not supported yet, nor is
-the microphone. `audio_volume` in `xedrivers.ini` sets the level, 0-100, default 100.
+the microphone. `audio_volume` in `xedrivers.ini` sets the level, 0-100, default 50 (-6 dB).
 `tools/xectl.py audio` shows the counters. More in [uac.md](docs/drivers/uac.md).
 
 ## File servers

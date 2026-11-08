@@ -24,6 +24,22 @@ void pcm_from_frame(const float *frame, s32 *stereo, u32 volume)
     }
 }
 
+void pcm_stereo_downmix(const float *frame, s32 *stereo, u32 volume)
+{
+    const float k = 0.70710678f;
+    const float *fl = frame + AUDIO_FL * AUDIO_FRAME_SAMPLES, *fr = frame + AUDIO_FR * AUDIO_FRAME_SAMPLES;
+    const float *c = frame + AUDIO_C * AUDIO_FRAME_SAMPLES;
+    const float *sl = frame + AUDIO_SL * AUDIO_FRAME_SAMPLES, *sr = frame + AUDIO_SR * AUDIO_FRAME_SAMPLES;
+    u32 i;
+
+    for (i = 0; i < AUDIO_FRAME_SAMPLES; i++) {
+        float centre = k * c[i];
+
+        stereo[i * 2] = scale(fl[i] + centre + k * sl[i], volume);
+        stereo[i * 2 + 1] = scale(fr[i] + centre + k * sr[i], volume);
+    }
+}
+
 void pcm_to_packet(const s32 *stereo, u32 frames, u8 *out, u32 bytes)
 {
     u32 i;

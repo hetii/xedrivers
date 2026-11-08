@@ -26,7 +26,7 @@ How it works:
 - An asynchronous device's feedback endpoint sets the frames per packet (`pacer.h`).
 - 16 failed transfers in a row stop the stream (`gave_up`) so completions cannot chain.
 
-`audio_volume` in xedrivers.ini is 0-100, default 100. `tools/xectl.py audio` prints the counters.
+`audio_volume` in xedrivers.ini is 0-100, default 50 (-6 dB). `tools/xectl.py audio` prints the counters.
 
 ## Issues
 
