@@ -504,7 +504,7 @@ static void test_rfcomm_hfp(void)
     CHECK(rfcomm_fcs(ua, 3) == 0xD7);
     n = hfp_answer("AT+BRSF=959", 11, out, sizeof(out));
     CHECK(hfp_stats.hf_features == 959);
-    CHECK(n > 10 && !memcmp(out, "\r\n+BRSF: 256\r\n\r\nOK\r\n", n));
+    CHECK(n > 10 && !memcmp(out, "\r\n+BRSF: 768\r\n\r\nOK\r\n", n));
     n = hfp_answer("AT+CIND?", 8, out, sizeof(out));
     CHECK(!memcmp(out, "\r\n+CIND: 1,0,0,0,5,0,5\r\n\r\nOK\r\n", n));
     n = hfp_answer("AT+BAC=1,2", 10, out, sizeof(out));
@@ -553,7 +553,7 @@ static void test_sco(void)
     CHECK(up[0] == 50 && up[1] == 100 && up[2] == 150 && up[3] == 200 && up[5] == 300 && last == 300);
 
     /* two packets on handle 0x180, cut into 17-byte pieces with a byte of junk first */
-    sco_link(0x180);
+    sco_link(0x180, 0);
     for (i = 0; i < 2; i++) {
         u32 k, at = i * 51;
 
@@ -581,7 +581,44 @@ static void test_sco(void)
         CHECK(o[0] == 0x80 && o[1] == 0x01 && o[2] == 48 && o[3] == 0 && o[50] == 0);
         CHECK(sco_stats.packets_out == 1);
     }
-    sco_link(0);
+    sco_link(0, 0);
+
+    /* mSBC: two 60-byte units (H2 header, a frame of a 1 kHz tone, a pad) in SCO packets of
+     * 24 bytes, after 5 bytes of junk */
+    {
+        SBC e;
+        s16 tone[120];
+        u8 units[120], p[27];
+        u32 k, at;
+
+        sbc_init_msbc(&e);
+        CHECK(sbc_samples(&e) == 120 && sbc_frame_length(&e) == 57);
+        for (i = 0; i < 2; i++) {
+            for (k = 0; k < 120; k++)
+                tone[k] = (s16)(k % 16 < 8 ? 8000 : -8000);
+            units[i * 60] = 0x01;
+            units[i * 60 + 1] = i ? 0x38 : 0x08;
+            CHECK(sbc_encode(&e, tone, units + i * 60 + 2) == 57 && units[i * 60 + 2] == 0xAD);
+            units[i * 60 + 59] = 0;
+        }
+        sco_link(0x181, 1);
+        memset((void *)&sco_stats, 0, sizeof(sco_stats));
+        p[0] = 0x81; p[1] = 0x01; p[2] = 5;
+        for (k = 0; k < 5; k++)
+            p[3 + k] = 0x77;
+        bt_sco_take(p, 8);
+        for (at = 0; at < 120; at += 24) {
+            p[0] = 0x81; p[1] = 0x01; p[2] = 24;
+            for (k = 0; k < 24; k++)
+                p[3 + k] = units[at + k];
+            bt_sco_take(p, 27);
+        }
+        CHECK(sco_stats.packets_in == 0);           /* decoded on the worker, not here */
+        sco_tick();
+        CHECK(sco_stats.packets_in == 2 && sco_stats.samples_in == 240 && sco_stats.bad_frames == 0);
+        CHECK(sco_stats.peak_in > 5000);
+        sco_link(0, 0);
+    }
 }
 
 int main(void)

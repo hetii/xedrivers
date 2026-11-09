@@ -69,7 +69,7 @@ static const u8 hfp_profile[]  = { 0x35, 0x08, 0x35, 0x06, 0x19, 0x11, 0x1E, 0x0
 static const u8 hfp_name[]     = { 0x25, 0x0D, 'V', 'o', 'i', 'c', 'e', ' ', 'G', 'a', 't', 'e',
                                    'w', 'a', 'y' };
 static const u8 hfp_network[]  = { 0x08, 0x01 };
-static const u8 hfp_features[] = { 0x09, 0x00, 0x00 };
+static const u8 hfp_features[] = { 0x09, 0x00, 0x20 };          /* wideband speech */
 
 static const ATTRIBUTE hfp_attributes[] = {
     { 0x0000, sizeof(hfp_handle), hfp_handle },

@@ -30,7 +30,9 @@ typedef struct {
     u32 mode;                           /* SBC_MONO .. SBC_JOINT */
     u32 allocation;
     u32 bitpool;                        /* 2..250 (mono, dual: up to 16 x subbands) */
+    u32 msbc;                           /* mSBC's frame: header 0xAD 0 0, the rest fixed */
     float x[2][80];                     /* the analysis filter's history, per channel */
+    float v[2][160];                    /* the synthesis filter's, for decoding */
 } SBC;
 
 void sbc_init(SBC *s, u32 rate, u32 blocks, u32 mode, u32 allocation, u32 bitpool);
@@ -44,5 +46,14 @@ u32  sbc_frame_length(const SBC *s);
 /* One frame of `pcm` (interleaved, one or two channels as the mode says, sbc_samples each)
  * into `out`; returns its length. */
 u32  sbc_encode(SBC *s, const s16 *pcm, u8 *out);
+
+/* mSBC (HFP's wideband voice): 16 kHz mono, 15 blocks, loudness, bitpool 26; 57-byte frames
+ * of 120 samples. */
+void sbc_init_msbc(SBC *s);
+
+/* One frame from `in` (`n` bytes) into `pcm` (interleaved); the parameters are the frame's
+ * own, written into `s`. Returns the samples per channel, 0 for a frame that does not parse
+ * or whose CRC is wrong. */
+u32  sbc_decode(SBC *s, const u8 *in, u32 n, s16 *pcm);
 
 #endif /* XE_SBC_H */

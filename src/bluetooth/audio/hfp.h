@@ -24,6 +24,7 @@ typedef struct {
     u32 sco_handle;
     u32 sco_air;                /* the air mode it gave: 2 CVSD, 3 transparent */
     u32 sco_transport;          /* what starting its data in the transport gave */
+    u32 codec;                  /* 1 CVSD, 2 mSBC (AT+BCS) */
 } HFP_STATS;
 
 extern volatile HFP_STATS hfp_stats;

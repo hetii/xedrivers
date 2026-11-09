@@ -20,7 +20,8 @@ typedef struct {
     /* Receive ACL data, or not: only while a link is up. A pending bulk IN on the shared
      * EHCI halved an RTL8822BU's throughput beside it (2026-11-09). Thread-only. */
     void (*acl_receive)(void *ctx, u32 on);
-    /* The voice link's data (SCO) moving, or not; 0 if it will. Thread-only. The transport
+    /* The voice link's data (SCO) moving on interface setting `on` (1 mSBC, 2 16-bit CVSD),
+     * or not (0); 0 if it will. Thread-only. The transport
      * calls bt_sco_take and bt_sco_fill (audio/sco.h) at DISPATCH_LEVEL while it does. */
     u32 (*sco)(void *ctx, u32 on);
 } BT_TRANSPORT;

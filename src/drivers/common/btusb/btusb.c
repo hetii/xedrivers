@@ -257,10 +257,11 @@ static u32 sco(void *ctx, u32 on)
     if (b->sco_running)
         return 0;
     b->st->sco_starts++;
-    if (!btusb_find_sco(btusb_config, btusb_config_length, b->eps.interface + 1, BTUSB_SCO_ALT,
+    b->sco_alt = on;                    /* the setting: 1 mSBC, 2 16-bit CVSD */
+    if (!btusb_find_sco(btusb_config, btusb_config_length, b->eps.interface + 1, b->sco_alt,
                         &b->sco_in_ep, &b->sco_out_ep, &b->sco_max))
         return b->st->sco_step = 1;
-    setup[2] = BTUSB_SCO_ALT;
+    setup[2] = (u8)b->sco_alt;
     setup[4] = (u8)(b->eps.interface + 1);
     if (!NT_SUCCESS(usb_control(b->dev, setup, b->cmd_buf, 0, 0, 1000)))
         return b->st->sco_step = 2;
@@ -268,9 +269,14 @@ static u32 sco(void *ctx, u32 on)
      * endpoint opened at interval 1 as the kernel takes it (as uac does); full: 4 frames */
     b->sco_packets = hs ? 32 : 4;
     b->sco_period = hs ? 8 : 1;
-    if (!b->ep_sco_in) {
-        b->ep_sco_in = usb_open(b->dev, USB_TYPE_ISOCH, b->sco_in_ep, b->sco_max, 1);
-        b->ep_sco_out = usb_open(b->dev, USB_TYPE_ISOCH, b->sco_out_ep, b->sco_max, 1);
+    if (!b->ep_sco_in || b->sco_open_max != b->sco_max) {
+        /* the endpoints are opened at their largest of all settings: a smaller packet is
+         * asked per request */
+        if (!b->ep_sco_in) {
+            b->ep_sco_in = usb_open(b->dev, USB_TYPE_ISOCH, b->sco_in_ep, 49, 1);
+            b->ep_sco_out = usb_open(b->dev, USB_TYPE_ISOCH, b->sco_out_ep, 49, 1);
+        }
+        b->sco_open_max = b->sco_max;
     }
     if (!b->ep_sco_in || !b->ep_sco_out)
         return b->st->sco_step = 3;

@@ -308,14 +308,20 @@ u32 sbc_encode(SBC *s, const s16 *pcm, u8 *out)
     w.at = 0;
     w.crc = 0x0F;
     w.counting = 0;
-    put(&w, 0x9C, 8);
-    w.counting = 1;
-    put(&w, s->rate, 2);
-    put(&w, s->blocks / 4 - 1, 2);
-    put(&w, s->mode, 2);
-    put(&w, s->allocation, 1);
-    put(&w, 1, 1);                      /* 8 subbands */
-    put(&w, s->bitpool, 8);
+    if (s->msbc) {
+        put(&w, 0xAD, 8);               /* the rest of the header is reserved, 0 */
+        w.counting = 1;
+        put(&w, 0, 16);
+    } else {
+        put(&w, 0x9C, 8);
+        w.counting = 1;
+        put(&w, s->rate, 2);
+        put(&w, s->blocks / 4 - 1, 2);
+        put(&w, s->mode, 2);
+        put(&w, s->allocation, 1);
+        put(&w, 1, 1);                  /* 8 subbands */
+        put(&w, s->bitpool, 8);
+    }
     w.counting = 0;
     w.at += 8;                          /* the CRC, written at the end */
     w.counting = 1;
@@ -344,4 +350,164 @@ u32 sbc_encode(SBC *s, const s16 *pcm, u8 *out)
                 put(&w, q, bits[ch][i]);
             }
     return length;
+}
+
+void sbc_init_msbc(SBC *s)
+{
+    sbc_init(s, SBC_RATE_16000, 15, SBC_MONO, SBC_LOUDNESS, 26);
+    s->msbc = 1;
+}
+
+/* --- decoding --------------------------------------------------------------------------- */
+
+typedef struct {
+    const u8 *in;
+    u32 n;
+    u32 at;                             /* bits read */
+    u32 crc;
+    u32 counting;
+} READER;
+
+static u32 get(READER *r, u32 bits)
+{
+    u32 v = 0;
+
+    while (bits--) {
+        u32 bit = r->at >> 3 < r->n ? (r->in[r->at >> 3] >> (7 - (r->at & 7))) & 1u : 0;
+
+        if (r->counting) {
+            u32 top = ((r->crc >> 7) ^ bit) & 1u;
+
+            r->crc = (r->crc << 1) & 0xFFu;
+            if (top)
+                r->crc ^= 0x1Du;
+        }
+        v = v << 1 | bit;
+        r->at++;
+    }
+    return v;
+}
+
+/* N[k][i] = cos((i + 0.5)(k + 4) pi / 8): the synthesis matrix. */
+static float synthesis_matrix[16][8];
+static u32 synthesis_ready;
+
+static void synthesise(float *v, const float *sb, s16 *out, u32 step)
+{
+    float u[80];
+    u32 i, j, k;
+
+    for (i = 159; i >= 16; i--)
+        v[i] = v[i - 16];
+    for (k = 0; k < 16; k++) {
+        float sum = 0;
+
+        for (i = 0; i < 8; i++)
+            sum += synthesis_matrix[k][i] * sb[i];
+        v[k] = sum;
+    }
+    for (i = 0; i < 5; i++)
+        for (j = 0; j < 8; j++) {
+            u[i * 16 + j] = v[i * 32 + j];
+            u[i * 16 + 8 + j] = v[i * 32 + 24 + j];
+        }
+    for (j = 0; j < 8; j++) {
+        float x = 0;
+        s32 q;
+
+        for (i = 0; i < 10; i++)
+            x += u[j + 8 * i] * window[j + 8 * i] * -8.0f;
+        q = (s32)(x >= 0 ? x + 0.5f : x - 0.5f);
+        out[j * step] = (s16)(q > 32767 ? 32767 : q < -32768 ? -32768 : q);
+    }
+}
+
+u32 sbc_decode(SBC *s, const u8 *in, u32 n, s16 *pcm)
+{
+    static float sb[16][2][8];
+    u32 sf[2][8], bits[2][8], join = 0, ch, i, b, channels, crc, length;
+    READER r;
+
+    if (!synthesis_ready) {
+        for (b = 0; b < 16; b++)
+            for (i = 0; i < 8; i++)
+                synthesis_matrix[b][i] = cosine((i + 0.5) * ((double)b + 4) *
+                                                3.14159265358979323846 / 8);
+        synthesis_ready = 1;
+    }
+    if (n < 4)
+        return 0;
+    r.in = in;
+    r.n = n;
+    r.at = 8;
+    r.crc = 0x0F;
+    r.counting = 1;
+    if (in[0] == 0xAD) {
+        get(&r, 16);
+        s->rate = SBC_RATE_16000;
+        s->blocks = 15;
+        s->mode = SBC_MONO;
+        s->allocation = SBC_LOUDNESS;
+        s->bitpool = 26;
+        s->msbc = 1;
+    } else if (in[0] == 0x9C) {
+        s->rate = get(&r, 2);
+        s->blocks = 4 * (get(&r, 2) + 1);
+        s->mode = get(&r, 2);
+        s->allocation = get(&r, 1);
+        if (!get(&r, 1))
+            return 0;                   /* 4 subbands: not decoded here */
+        s->bitpool = get(&r, 8);
+        s->msbc = 0;
+    } else {
+        return 0;
+    }
+    r.counting = 0;
+    crc = get(&r, 8);
+    r.counting = 1;
+    length = sbc_frame_length(s);
+    if (length > n)
+        return 0;
+    channels = s->mode == SBC_MONO ? 1 : 2;
+    if (s->mode == SBC_JOINT)
+        join = get(&r, 8);
+    for (ch = 0; ch < channels; ch++)
+        for (i = 0; i < 8; i++)
+            sf[ch][i] = get(&r, 4);
+    r.counting = 0;
+    if ((r.crc & 0xFFu) != crc)
+        return 0;
+    if (s->mode == SBC_STEREO || s->mode == SBC_JOINT) {
+        allocate(s, 2, sf, bits, 0);
+    } else {
+        for (ch = 0; ch < channels; ch++)
+            allocate(s, 1, sf, bits, ch);
+    }
+    for (b = 0; b < s->blocks; b++)
+        for (ch = 0; ch < channels; ch++)
+            for (i = 0; i < 8; i++) {
+                if (!bits[ch][i]) {
+                    sb[b][ch][i] = 0;
+                    continue;
+                }
+                {
+                    u32 levels = (1u << bits[ch][i]) - 1, q = get(&r, bits[ch][i]);
+                    float scale = (float)(2u << sf[ch][i]);
+
+                    sb[b][ch][i] = scale * ((2.0f * (float)q + 1.0f) / (float)levels - 1.0f);
+                }
+            }
+    if (s->mode == SBC_JOINT)
+        for (b = 0; b < s->blocks; b++)
+            for (i = 0; i < 7; i++)
+                if (join & (1u << (7 - i))) {
+                    float m = sb[b][0][i], d = sb[b][1][i];
+
+                    sb[b][0][i] = m + d;
+                    sb[b][1][i] = m - d;
+                }
+    for (b = 0; b < s->blocks; b++)
+        for (ch = 0; ch < channels; ch++)
+            synthesise(s->v[ch], sb[b][ch], pcm + b * 8 * channels + ch, channels);
+    return s->blocks * 8;
 }

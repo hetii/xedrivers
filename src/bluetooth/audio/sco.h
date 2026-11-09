@@ -10,6 +10,7 @@
 #include "host.h"
 
 #define SCO_PAYLOAD 48u         /* bytes of PCM a packet: 24 samples, 3 ms */
+#define SCO_MSBC_PAYLOAD 24u    /* bytes of mSBC units a packet: 9 bytes a ms carry 24 + 3 */
 
 typedef struct {
     u32 packets_in;
@@ -21,12 +22,14 @@ typedef struct {
     u32 out_overruns;
     u32 peak_in;                /* of the last packet, out of 32767 */
     u32 handle;
+    u32 bad_frames;             /* mSBC frames that did not decode */
+    u32 wideband;
 } SCO_STATS;
 
 extern volatile SCO_STATS sco_stats;
 
-/* The link is up on `handle` (0 when it went); worker thread. */
-void sco_link(u32 handle);
+/* The link is up on `handle` (0 when it went), CVSD or mSBC (`wideband`); worker thread. */
+void sco_link(u32 handle, u32 wideband);
 
 /* The transport's side, at DISPATCH_LEVEL: bytes in as they came, and `n` bytes to send. */
 void bt_sco_take(const u8 *data, u32 n);

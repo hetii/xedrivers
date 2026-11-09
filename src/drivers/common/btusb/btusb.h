@@ -67,7 +67,7 @@ typedef struct BTUSB {
     BT_TRANSPORT transport;
     /* the voice link: interface eps.interface + 1, isochronous */
     void *ep_sco_in, *ep_sco_out;
-    u32 sco_alt, sco_max, sco_in_ep, sco_out_ep;
+    u32 sco_alt, sco_max, sco_in_ep, sco_out_ep, sco_open_max;
     volatile u32 sco_running;
     u32 sco_packets, sco_period;    /* per request; data in every period-th (HS: 1 ms of 8) */
     ISOCH sco_in[BTUSB_SCO_SLOTS], sco_out[BTUSB_SCO_SLOTS];
