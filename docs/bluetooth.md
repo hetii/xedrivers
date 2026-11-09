@@ -19,7 +19,11 @@ Bluetooth half). Goal: headphones with microphone (A2DP, HFP), later pads (HID).
     src/bluetooth/audio/a2dp.c  AVDTP both roles, the SBC choice, RTP stream paced by the time base
     later: audio/{rfcomm,hfp}.c, hid/, le/
 
-Events are queued from the USB completion and taken on the worker (`bt_tick`).
+Events are queued from the USB completion and taken on the worker (`bt_tick`). The ACL bulk
+IN is asked for only while a link is up: queued from the start (before the HCI reset), it
+halved an RTL8822BU's throughput on the same EHCI (180/194 -> 67/94 Mbit/s, TCP x4 out/in),
+link or not; asked for at the first link it costs nothing measurable, A2DP streaming
+included (179.9/198.7). `bluetooth = off` in the ini leaves the controller alone.
 
 ## Bring-up
 
@@ -52,6 +56,13 @@ answered as SEID 1 taking any SBC configuration (bitpool up to 76).
     xectl.py bt disconnect N     (cmd 42)
 
 ## Status
+
+Stage 3 (2026-11-09): A2DP to the PC's AX200 as the sink: SDP answered, AVDTP both roles,
+48 kHz joint stereo bitpool 58 (387 kbit/s), RTP of 5 frames a packet, no missed credits;
+the test tone in both channels, no gaps with a USB card playing at the same time. After a
+reboot the PC reconnected by itself with the key from the ini. Open: HFP (RFCOMM, SCO over
+the isochronous interface, mSBC/CVSD), a real headset, BlueZ refuses Just Works
+re-pairing of a device it has a key for (JustWorksRepairing = never) -- hence keys kept.
 
 Stage 2 (2026-11-09): paired with the PC's AX200 (BlueZ: Paired, Bonded), connected again
 with the kept key (encrypted, no pairing), L2CAP echo both ways. SBC decoded by gst
