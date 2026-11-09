@@ -148,9 +148,30 @@ static u32 owned(void)
     return 0;
 }
 
+/* Whether the USB processor runs threads at all. Once the screen is dimmed it does not: a
+ * thread moved there does not run again until a pad is touched -- not even to return from
+ * KeSetAffinityThread (2026-11-09: an AIC8800 reset in a dim left the worker inside it for
+ * good). A thread of its own there counts while it is let run; a bring-up goes over only
+ * when it has counted lately, and stays on WORKER_PROCESSOR otherwise. */
+static volatile u32 pulse;
+
+static void pulse_thread(void *parameter)
+{
+    s64 interval = -100 * 10000;                /* 100 ms */
+
+    (void)parameter;
+    run_on(USB_PROCESSOR);
+    for (;;) {
+        KeDelayExecutionThread(0, 0, &interval);
+        pulse++;
+    }
+}
+
+#define PULSE_TICKS 25                          /* 500 ms of the worker without a count */
+
 static void worker(void *parameter)
 {
-    u32 tick, what, i;
+    u32 tick, what, i, pulse_seen = 0, pulse_tick = 0;
 
     (void)parameter;
     away_from_the_usb_processor();
@@ -174,6 +195,10 @@ static void worker(void *parameter)
                 xe_state.claim_found++;
         }
 
+        if (pulse != pulse_seen) {
+            pulse_seen = pulse;
+            pulse_tick = tick;
+        }
         for (i = 0; i < USB_MAX_DEVICES; i++) {
             USB_DEV *dev = &usb_devs[i];
 
@@ -189,8 +214,13 @@ static void worker(void *parameter)
                  * bring-up's seconds. The scan's channel changes later are the
                  * same kind of burst: usb_spin keeps the wake from being sent.
                  * 2026-10-29: 0 stops in 60 boots, from 5 in about 100. */
+                if (tick - pulse_tick > PULSE_TICKS) {
+                    usb_stats.bring_ups_dimmed++;   /* the USB processor runs no threads */
+                    net_bring_up(dev);
+                    continue;
+                }
                 run_on(USB_PROCESSOR);
-                usb_spin_waits(1);      /* a bring-up in a dim does not wait there */
+                usb_spin_waits(1);      /* a dim that starts now does not stop it there */
                 net_bring_up(dev);
                 usb_spin_waits(0);
                 away_from_the_usb_processor();
@@ -229,5 +259,6 @@ int DllMain(void *instance, u32 reason, void *reserved)
     file_set_plugin(instance);
     net_register();
     ExCreateThread(&thread, 0, 0, 0, (void *)worker, 0, 2);
+    ExCreateThread(&thread, 0, 0, 0, (void *)pulse_thread, 0, 2);
     return 1;
 }

@@ -204,6 +204,7 @@ typedef struct {
     u32 nak_reload_set;     /* high-speed bulk endpoints given NAK_RELOAD (usb_open) */
     u32 nak_reload_skipped; /* bulk endpoints whose handle did not read as an EHCI QH */
     u32 spin_bring_ups;     /* bring-ups whose waits spun (usb_spin_waits) */
+    u32 bring_ups_dimmed;   /* bring-ups left on the worker's processor (main.c, pulse) */
 } USB_STATS;
 
 extern volatile USB_STATS usb_stats;
