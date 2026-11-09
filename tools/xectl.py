@@ -203,7 +203,7 @@ STRUCTS = {
                   "rcvbuf_result", "flight_samples", "flight_kb_sum", "flight_max",
                   "fh0", "fh1", "fh2", "fh3", "fh4", "fh5", "fh6", "fh7", "flight_resent",
                   "thread_failures", "thread_status"],
-    "wl_bridge_stats": ["scans", "joins", "missed", "secured"],
+    "wl_bridge_stats": ["scans", "joins", "missed", "secured", "rejoins"],
     "wl_omni_stats": ["registered", "attached", "present", "link", "gets", "sets",
                       "unknown_gets", "unknown_sets", "last_unknown", "scans", "joins",
                       "missed", "leaves", "rejoins", "rx", "tx", "tx_dropped", "tx_high",
@@ -636,8 +636,11 @@ def status(sym):
                   w["gtk_len"], w["last_key_info"], w["group_rekeys"]))
     if "wl_bridge_stats" in sym:
         b = read_struct(sym, "wl_bridge_stats")
-        print("bridge   auto scans=%d joins=%d missed=%d secured=%d" % (
-            b["scans"], b["joins"], b["missed"], b["secured"]))
+        hand = (struct.unpack(">I", read(sym["net_console_mac_handovers"], 4))[0]
+                if "net_console_mac_handovers" in sym else 0)
+        print("bridge   auto scans=%d joins=%d missed=%d secured=%d rejoins=%d | console "
+              "address handed over %d times" % (b["scans"], b["joins"], b["missed"],
+                                                 b["secured"], b["rejoins"], hand))
     if "wl_omni_stats" in sym:
         o = read_struct(sym, "wl_omni_stats")
         if o["registered"]:

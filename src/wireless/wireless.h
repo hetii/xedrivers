@@ -135,6 +135,8 @@ typedef struct {
     u32 wait;               /* worker ticks until the next automatic attempt */
     u32 scanned;            /* a scan of the automatic join is under way */
     u32 off;                /* left by command: no automatic join until asked */
+    NET_DEV *nd;            /* the card's device, 0 in tests */
+    const u8 *joined_as;    /* the address net_join_mac gave for the last join */
 } WL_BRIDGE;
 
 typedef struct WL_LINK WL_LINK;

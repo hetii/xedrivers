@@ -34,6 +34,7 @@ static u32 keys_waiting;
 u32 wpa_apply(void) { u32 w = keys_waiting; keys_waiting = 0; return w; }
 
 const WL_MODE wl_omni_mode;            /* not this test's (omni.c) */
+const u8 *net_join_mac(NET_DEV *nd) { return nd->mac; }  /* the tests run without a device */
 
 /* --- the card -------------------------------------------------------------------- */
 

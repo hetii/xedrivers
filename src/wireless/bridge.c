@@ -11,6 +11,7 @@
 
 #include "bridge.h"
 #include "wpa.h"
+#include "net.h"
 
 #define RETRY_TICKS 250             /* 5 s of 20 ms worker ticks */
 
@@ -22,6 +23,7 @@ void wl_bridge_start(WL_BRIDGE *b, const WL_CARD *card)
     b->wait = 0;
     b->scanned = 0;
     b->off = 0;
+    b->joined_as = 0;
 }
 
 void wl_bridge_tick(WL_BRIDGE *b, const WL_CARD *card)
@@ -32,6 +34,17 @@ void wl_bridge_tick(WL_BRIDGE *b, const WL_CARD *card)
     if (wpa_apply())
         return;
     state = card->state(card->context);
+    /* Joined on an address that is no longer this card's to use, or on its own while the
+     * console's has come free (net.c hands it over when its card went without a link):
+     * leave, and the loop joins again on the right one. */
+    if ((state & WL_CARD_JOINED) && b->nd && b->joined_as &&
+        b->joined_as != net_join_mac(b->nd)) {
+        wl_bridge_stats.rejoins++;
+        b->joined_as = 0;
+        card->leave(card->context);
+        b->wait = 0;
+        return;
+    }
     if ((state & (WL_CARD_JOINED | WL_CARD_SCANNING)) || b->off || !wl_config.count)
         return;
     if (b->wait) {
@@ -57,6 +70,8 @@ void wl_bridge_tick(WL_BRIDGE *b, const WL_CARD *card)
         return;
     }
     wl_bridge_stats.joins++;
+    if (b->nd)
+        b->joined_as = net_join_mac(b->nd);    /* what the driver's join takes too */
     card->join(card->context, &wl_bss[pick], (const char *)wl_config.pass,
                wl_config.pass_len);
 }
@@ -80,8 +95,8 @@ u32 wl_bridge_leave(WL_BRIDGE *b, const WL_CARD *card)
 
 static void mode_start(WL_LINK *l, NET_DEV *nd)
 {
-    (void)nd;
     wl_bridge_start(&l->bridge, l->card);
+    l->bridge.nd = nd;
 }
 
 static void mode_tick(WL_LINK *l)

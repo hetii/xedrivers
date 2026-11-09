@@ -151,6 +151,7 @@ extern volatile u32 net_console_mac_known;
  * off, round and round (2026-11-09, an RTL8822BU and an AIC8800 in the console at once). The
  * others join on their own, and the uplink is the one on the console's (net.c, better). */
 const u8 *net_join_mac(struct NET_DEV *nd);
+extern volatile u32 net_console_mac_handovers;  /* times it was taken from a card without link */
 
 /* Ask the console for its own address, before any device is brought up: a card
  * that has to carry it (a Wi-Fi station associates on it) cannot wait for xnet to

@@ -100,6 +100,37 @@ static u32 socket_rank(const NET_DEV *nd)
 
 /* 1 if `a` should be the uplink rather than `b` (both with a link up). */
 static NET_DEV *console_mac_owner;
+volatile u32 net_console_mac_handovers;
+static u32 owner_unlinked;              /* worker ticks the owner has gone without a link */
+
+/* The console's address goes to another card when its card has had no link for 30 s while
+ * another wireless card has one, on its own address, which xnet cannot use (2026-11-09: the
+ * RTL8822BU did not join after a boot, the AIC8800 did, and the console was unreachable).
+ * The cards' bridge loops see the change and join again (bridge.c). */
+#define OWNER_UNLINKED_TICKS 1500
+
+static void owner_watch(void)
+{
+    u32 i;
+
+    if (!console_mac_owner || console_mac_owner->st->link) {
+        owner_unlinked = 0;
+        return;
+    }
+    if (++owner_unlinked < OWNER_UNLINKED_TICKS)
+        return;
+    for (i = 0; i < NET_MAX; i++) {
+        NET_DEV *nd = &net_devs[i];
+
+        if (nd != console_mac_owner && nd->drv && nd->drv->kind == XE_KIND_WIFI &&
+            nd->st->ready && nd->st->link) {
+            console_mac_owner = 0;
+            owner_unlinked = 0;
+            net_console_mac_handovers++;
+            return;
+        }
+    }
+}
 
 const u8 *net_join_mac(NET_DEV *nd)
 {
@@ -490,6 +521,7 @@ void net_tick(void)
         if (nd->drv && nd->drv->tick && nd->st->ready)
             nd->drv->tick(nd);
     }
+    owner_watch();
     if (xnet_tick_stalled() && uplink()) {
         bench_event(3, (u32)(uplink() - net_devs), xnet_stats.xq_stall_depth, 0);
         net_link_report(uplink(), 0);

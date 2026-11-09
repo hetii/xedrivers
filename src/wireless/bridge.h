@@ -13,6 +13,7 @@ typedef struct {
     u32 joins;              /* joins it asked for */
     u32 missed;             /* scans that did not see the configured network */
     u32 secured;            /* ... or saw it secured with nothing this joins */
+    u32 rejoins;            /* left to join again on another address (net_join_mac) */
 } WL_BRIDGE_STATS;
 
 extern volatile WL_BRIDGE_STATS wl_bridge_stats;
