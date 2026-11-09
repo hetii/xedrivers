@@ -60,6 +60,7 @@ static u32 send_frame(volatile BT_CONN *c, u32 cid, const u8 *a, u32 na, const u
 
     if (na + nb > FRAME_MAX - 4 || c->state < BT_CONN_UP)
         return 1;
+    bt_wake_link(c);                    /* asleep (sniff): wake it, the frame goes all the same */
     put16(out, na + nb);
     put16(out + 2, cid);
     for (i = 0; i < na; i++)

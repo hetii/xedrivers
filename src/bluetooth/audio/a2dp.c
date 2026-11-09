@@ -60,6 +60,9 @@ static u32 sequence, timestamp, last_tb, rate_hz;
 static u32 per_tick;                    /* samples per time-base tick, x 2^32 */
 static u64 owed_fp;                     /* samples owed since the start, x 2^32 */
 static u64 samples_sent;
+#if XE_AUDIO
+static u32 played_at_start;
+#endif
 static u32 pending;                     /* bytes of `packet` still to go */
 static u32 quiet_ticks, down_gap;
 static u8 packet[1024];
@@ -79,6 +82,13 @@ static u32 bitrate(u32 rate, u32 mode, u32 blocks, u32 bitpool)
 
     sbc_init(&s, rate, blocks, mode, SBC_LOUDNESS, bitpool);
     return sbc_frame_length(&s) * 8u * rates_hz[rate] / (blocks * 8u);   /* < 2^28 */
+}
+
+static u32 limit_kbps;
+
+void a2dp_link_limit(u32 kbps)
+{
+    limit_kbps = kbps;
 }
 
 u32 a2dp_choose(const SBC_CAPS *sink, u32 min_bitpool, u32 max_bitpool, SBC_CAPS *out,
@@ -112,6 +122,9 @@ u32 a2dp_choose(const SBC_CAPS *sink, u32 min_bitpool, u32 max_bitpool, SBC_CAPS
             continue;
         if ((mode == SBC_MONO || mode == SBC_DUAL) && p > 128)
             p = 128;                    /* 16 x subbands */
+        while (limit_kbps && p > min_bitpool && bitrate(best_rate, mode, blocks, p) >
+               limit_kbps * 1000)
+            p--;                        /* what the link carries */
         r = bitrate(best_rate, mode, blocks, p);
         /* mono is a last resort; of the rest the most bits, joint over stereo when equal */
         if (mode == SBC_MONO && best)
@@ -586,12 +599,14 @@ static void media_closed(L2CAP_CHANNEL *ch, u32 was_open)
 
 /* Incoming on PSM 0x19: the first channel of a link is signalling, the next media. */
 static u32 lead_wait;                   /* ticks the headset's signalling channel was idle */
+static void limit_for(volatile BT_CONN *c);
 
 static void avdtp_open(L2CAP_CHANNEL *ch)
 {
     if (!signalling || signalling->state != L2CAP_OPEN) {
         signalling = ch;
         link = ch->conn;
+        limit_for(link);
         a2dp_stats.role_initiator = 0;
         a2dp_stats.state = A2DP_SIGNALLING;
         lead_wait = 0;
@@ -622,8 +637,17 @@ void a2dp_init(void)
     l2cap_listen(PSM_AVDTP, &incoming_user, 0);
 }
 
+/* No fixed limit by the link's features: an EDR dongle a metre away (Edimax, 2M+3M) could
+ * not carry 804 kbit/s either -- what a link carries is measured while it plays. */
+static void limit_for(volatile BT_CONN *c)
+{
+    (void)c;
+    a2dp_link_limit(0);
+}
+
 void a2dp_connect(volatile BT_CONN *c)
 {
+    limit_for(c);
     if (signalling)
         return;                         /* one headset at a time */
     link = c;
@@ -732,9 +756,17 @@ void a2dp_tick(void)
 #if defined(__powerpc__)
     __asm__ volatile("mftb %0" : "=r"(now));
 #endif
+#if XE_AUDIO
+    /* paced by the console's audio clock, not the time base: the time base is ~49.875 MHz,
+     * not the 50 assumed, and a stream sent by it ran 0.28% slow -- the headset heard it as
+     * the pitch wandering, the capture's reader fell a ring behind and skipped */
+    (void)now;
+    owed = (u64)(audio_frames_played() - played_at_start);
+#else
     owed_fp += (u64)(now - last_tb) * per_tick;
     last_tb = now;
     owed = owed_fp >> 32;
+#endif
     per = sbc_samples(&sbc) * a2dp_stats.frames_per_packet;
     if (owed > samples_sent + rate_hz / 5) {        /* 200 ms behind: start over from now */
         a2dp_stats.late += (u32)(owed - samples_sent);

@@ -196,13 +196,15 @@ void bench_audio_frame(float *frame)
 
     if (!audio_test_tone)
         return;
+    /* 2: the two front channels only (1 kHz left, 2 kHz right), as tools' tri.wav on a PC */
     for (c = 0; c < 6; c++) {
         u32 period = 48u / (c + 1);
 
         for (i = 0; i < 256; i++) {
             float x = (float)((tone_phase + i) % period) / (float)period;
 
-            frame[c * 256 + i] = 0.25f * (x < 0.5f ? 4.0f * x - 1.0f : 3.0f - 4.0f * x);
+            frame[c * 256 + i] = audio_test_tone == 2 && c >= 2 ? 0.0f :
+                                 0.25f * (x < 0.5f ? 4.0f * x - 1.0f : 3.0f - 4.0f * x);
         }
     }
     tone_phase += 256;

@@ -54,6 +54,9 @@ extern volatile A2DP_STATS a2dp_stats;
 u32  a2dp_choose(const SBC_CAPS *sink, u32 min_bitpool, u32 max_bitpool, SBC_CAPS *out,
                  u32 *bitpool);
 
+/* The most bits a second the link is asked to carry, 0 for no limit (the default). */
+void a2dp_link_limit(u32 kbps);
+
 void a2dp_init(void);
 void a2dp_connect(volatile BT_CONN *c);     /* a paired headset's link is secure */
 void a2dp_gone(volatile BT_CONN *c);

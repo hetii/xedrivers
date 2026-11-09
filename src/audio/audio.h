@@ -39,6 +39,10 @@ void audio_close(u32 reader);
  * Nothing is given until a little has gathered, so that the first frames do not run dry. */
 void audio_read(u32 reader, s32 *out, u32 frames);
 
+/* Frames the console has played since it started: the clock a stream that is not driven by a
+ * device's own (a Bluetooth headset) is paced by. */
+u32  audio_frames_played(void);
+
 typedef struct {
     u32 open_status;        /* of the registration */
     u32 readers;

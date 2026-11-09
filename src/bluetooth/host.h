@@ -26,6 +26,10 @@
 #define HCI_USER_CONFIRMATION_REPLY HCI_OP(0x01, 0x002C)
 #define HCI_SETUP_SYNC          HCI_OP(0x01, 0x0028)
 #define HCI_READ_TX_POWER       HCI_OP(0x03, 0x002D)
+#define HCI_SWITCH_ROLE         HCI_OP(0x02, 0x000B)
+#define HCI_READ_REMOTE_FEATURES HCI_OP(0x01, 0x001B)
+#define HCI_WRITE_LINK_POLICY   HCI_OP(0x02, 0x000D)
+#define HCI_EXIT_SNIFF          HCI_OP(0x02, 0x0004)
 #define HCI_READ_RSSI           HCI_OP(0x05, 0x0005)
 #define HCI_ACCEPT_SYNC         HCI_OP(0x01, 0x0029)
 #define HCI_RESET               HCI_OP(0x03, 0x0003)
@@ -52,6 +56,9 @@
 #define HCI_EV_IO_CAPABILITY_REQUEST 0x31u
 #define HCI_EV_USER_CONFIRMATION_REQUEST 0x33u
 #define HCI_EV_SYNC_COMPLETE        0x2Cu
+#define HCI_EV_ROLE_CHANGE          0x12u
+#define HCI_EV_REMOTE_FEATURES      0x0Bu
+#define HCI_EV_MODE_CHANGE          0x14u
 #define HCI_EV_COMMAND_COMPLETE     0x0Eu
 #define HCI_EV_COMMAND_STATUS       0x0Fu
 #define HCI_EV_INQUIRY_RESULT_RSSI  0x22u
@@ -91,6 +98,13 @@ typedef struct {
     u32 encrypted;
     u32 connects;
     u32 last_status;            /* of the last event about it */
+    u32 role;                   /* ours: 0 central (master), 1 peripheral */
+    u32 role_switches;
+    u32 edr;                    /* its LMP features: bit 0 EDR 2 Mbit/s, bit 1 3 Mbit/s,
+                                 * bit 7 read */
+    u32 mode;                   /* 0 active, 1 hold, 2 sniff (Mode Change) */
+    u32 sniff_exits;            /* Exit_Sniff_Mode asked, data waiting */
+    u32 exiting;                /* asked, the Mode Change not back yet */
 } BT_CONN;
 
 typedef struct {
@@ -122,6 +136,11 @@ void bt_load_keys(void);
 u32  bt_save_keys(void);                /* 0 if written */
 
 /* --- ACL (hci.c) ---------------------------------------------------------------------- */
+
+/* Data is waiting for link `c`: if the device has put it to sleep (sniff), wake it, as Linux
+ * does before every send -- in sniff a headset gave the stream a slot every few hundred ms
+ * (027570: waits, bursts, 2 s gaps; the same card under Linux played through two walls). */
+void bt_wake_link(volatile BT_CONN *c);
 
 /* One ACL packet, whole, to link `handle`: `data` is the L2CAP frame. 0 if sent (there was
  * a credit). */

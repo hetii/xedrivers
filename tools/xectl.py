@@ -375,14 +375,20 @@ def bt_conns(sym):
             u["sco_starts"], u["sco_step"], u["sco_in_requests"], u["sco_in_bytes"],
             u["sco_in_bad"], u["sco_out_requests"], u["sco_last_status"],
             read_struct(sym, "sco_stats")))
-    raw = read(sym["bt_conns"], 4 * 8 * 4)
+    raw = read(sym["bt_conns"], 4 * 14 * 4)
     for i in range(4):
-        one = raw[i * 32:(i + 1) * 32]
-        state, handle, called, enc, connects, status = struct.unpack(">6I", one[8:32])
+        one = raw[i * 56:(i + 1) * 56]
+        state, handle, called, enc, connects, status, role, switches, edr, mode, exits, _ = \
+            struct.unpack(">12I", one[8:56])
         if state:
-            print("  conn %d %s %s handle=%#x %s enc=%d connects=%d status=%#x" % (
-                i, one[:6].hex(":"), BT_CONN_STATES.get(state, state), handle,
-                "out" if called else "in", enc, connects, status))
+            print("  conn %d %s %s handle=%#x %s enc=%d connects=%d status=%#x role=%s "
+                  "switches=%d" % (i, one[:6].hex(":"), BT_CONN_STATES.get(state, state), handle,
+                                   "out" if called else "in", enc, connects, status,
+                                   "central" if role == 0 else "peripheral", switches)
+                  + (" edr=%s" % ({0: "none", 1: "2M", 3: "2M+3M", 2: "3M"}[edr & 3]
+                                  if edr & 0x80 else "?"))
+                  + " mode=%s sniff_exits=%d" % ({0: "active", 1: "hold", 2: "sniff"}.get(mode, mode),
+                                                 exits))
     keys = read(sym["bt_keys"], 8 * 32)
     for i in range(8):
         one = keys[i * 32:(i + 1) * 32]

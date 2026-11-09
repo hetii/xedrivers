@@ -156,6 +156,11 @@ u32 audio_open(u32 reader, u32 layout)
     return 0;
 }
 
+u32 audio_frames_played(void)
+{
+    return write_at;
+}
+
 void audio_close(u32 reader)
 {
     u32 i, any = 0;

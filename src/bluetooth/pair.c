@@ -83,6 +83,20 @@ static volatile BT_CONN *conn_new(const u8 *address)
     return 0;
 }
 
+void bt_wake_link(volatile BT_CONN *c)
+{
+    u8 p[2];
+
+    if (!c || c->mode == 0 || c->exiting || c->state < BT_CONN_UP)
+        return;
+    p[0] = (u8)c->handle;
+    p[1] = (u8)(c->handle >> 8);
+    if (!hci_queue(HCI_EXIT_SNIFF, p, 2)) {
+        c->exiting = 1;
+        c->sniff_exits++;
+    }
+}
+
 volatile BT_KEY *bt_key_for(const u8 *address)
 {
     u32 i;
@@ -248,9 +262,13 @@ void bt_pair_event(const u8 *e, u32 length)
         c = conn_new(address);
         for (i = 0; i < 6; i++)
             p[i] = e[2 + i];
-        p[6] = 0x01;                            /* stay peripheral: the headset leads */
-        if (c)
+        /* become central: as a source we are to send when we have data, and a headset that
+         * leads polls its source rarely (027570 as central: A2DP packets waited, in bursts) */
+        p[6] = 0x00;
+        if (c) {
+            c->role = 1;                        /* peripheral until a Role Change says not */
             hci_queue(HCI_ACCEPT_CONNECTION, p, 7);
+        }
         break;
     case HCI_EV_CONNECTION_COMPLETE:            /* status, handle, address, type, enc */
         if (length < 2 + 11)
@@ -268,7 +286,19 @@ void bt_pair_event(const u8 *e, u32 length)
         c->handle = (u32)(e[3] | (e[4] & 0x0F) << 8);
         c->state = BT_CONN_UP;
         c->connects++;
+        c->role = c->we_called ? 0 : c->role;   /* the pager is central; Role Change says */
         bt_stats.connections++;
+        {
+            u8 q[4];
+
+            q[0] = (u8)c->handle;
+            q[1] = (u8)(c->handle >> 8);
+            q[2] = 0x05;                        /* role switch and sniff allowed, as Linux; sniff
+                                                 * is left whenever data waits (bt_wake_link) */
+            q[3] = 0x00;
+            hci_queue(HCI_WRITE_LINK_POLICY, q, 4);
+            hci_queue(HCI_READ_REMOTE_FEATURES, q, 2);     /* EDR or not: A2DP's bitrate */
+        }
         if (c->we_called)
             ask_auth(c);                        /* pairs, or proves the key we have */
         break;
@@ -280,6 +310,33 @@ void bt_pair_event(const u8 *e, u32 length)
             c->last_status = e[5];
             c->state = BT_CONN_FREE;
             bt_l2cap_gone(c);
+        }
+        break;
+    case HCI_EV_MODE_CHANGE:                    /* status, handle, mode, interval */
+        if (length < 2 + 6)
+            return;
+        c = bt_conn_by_handle((u32)(e[3] | (e[4] & 0x0F) << 8));
+        if (c) {
+            c->exiting = 0;
+            if (!e[2])
+                c->mode = e[5];
+        }
+        break;
+    case HCI_EV_REMOTE_FEATURES:                /* status, handle, 8 bytes of LMP features */
+        if (length < 2 + 11)
+            return;
+        c = bt_conn_by_handle((u32)(e[3] | (e[4] & 0x0F) << 8));
+        if (c && !e[2])
+            c->edr = 0x80u | ((e[5 + 3] >> 1) & 3u);  /* bits 25, 26: EDR ACL 2 and 3 Mbit/s */
+        break;
+    case HCI_EV_ROLE_CHANGE:                    /* status, address, new role */
+        if (length < 2 + 8)
+            return;
+        flip(address, e + 3);
+        c = bt_conn_by_address(address);
+        if (c && !e[2]) {
+            c->role = e[9];
+            c->role_switches++;
         }
         break;
     case HCI_EV_LINK_KEY_REQUEST:               /* address */
@@ -347,7 +404,8 @@ void bt_pair_event(const u8 *e, u32 length)
         }
         ask_encryption(c);
         break;
-    case HCI_EV_ENCRYPTION_CHANGE:              /* status, handle, on */
+    case HCI_EV_ENCRYPTION_CHANGE:              /* status, handle, on -- and if still the
+                                                 * peripheral, ask to lead (Switch_Role) */
         if (length < 2 + 4)
             return;
         c = bt_conn_by_handle((u32)(e[3] | (e[4] & 0x0F) << 8));
@@ -357,6 +415,12 @@ void bt_pair_event(const u8 *e, u32 length)
         if (!e[2] && e[5]) {
             c->state = BT_CONN_SECURE;
             c->encrypted = 1;
+            if (c->role == 1) {
+                for (i = 0; i < 6; i++)
+                    p[5 - i] = c->address[i];
+                p[6] = 0x00;                    /* central */
+                hci_queue(HCI_SWITCH_ROLE, p, 7);
+            }
             bt_l2cap_ready(c);
         }
         break;

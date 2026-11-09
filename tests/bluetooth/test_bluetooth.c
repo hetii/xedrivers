@@ -32,15 +32,15 @@ u32   file_setting(const char *n, const char *k, char *o, u32 s) { (void)n; (voi
 u32   bt_save_keys(void) { return 0; }
 
 /* A transport that keeps what was sent. */
-static u8 sent[16][64];
-static u32 sent_length[16], sent_count;
+static u8 sent[64][64];
+static u32 sent_length[64], sent_count;
 
 static u32 take_command(void *ctx, const u8 *p, u32 n)
 {
     u32 i;
 
     (void)ctx;
-    if (sent_count < 16) {
+    if (sent_count < 64) {
         for (i = 0; i < n && i < 64; i++)
             sent[sent_count][i] = p[i];
         sent_length[sent_count++] = n;
@@ -231,6 +231,10 @@ static void test_connect_and_pair(void)
     e[11] = 1;
     event(e, 13);
     CHECK(bt_conns[0].state == BT_CONN_AUTH && bt_conns[0].handle == 0x0B);
+    CHECK(last_opcode() == 0x080D);                     /* link policy: role switch, sniff */
+    complete_ok(0x080D);
+    CHECK(last_opcode() == 0x041B);                     /* its features (EDR) */
+    { static const u8 s[] = { 0x0F, 4, 0, 1, 0x1B, 0x04 }; event(s, sizeof(s)); }
     CHECK(last_opcode() == 0x0411);
     { static const u8 s[] = { 0x0F, 4, 0, 1, 0x11, 0x04 }; event(s, sizeof(s)); }
 
