@@ -99,10 +99,24 @@ static u32 socket_rank(const NET_DEV *nd)
 }
 
 /* 1 if `a` should be the uplink rather than `b` (both with a link up). */
+static NET_DEV *console_mac_owner;
+
+const u8 *net_join_mac(NET_DEV *nd)
+{
+    if (!net_console_mac_known)
+        return nd->mac;
+    if (!console_mac_owner || console_mac_owner == nd)
+        console_mac_owner = nd;
+    return console_mac_owner == nd ? net_console_mac : nd->mac;
+}
+
 static u32 better(const NET_DEV *a, const NET_DEV *b, const NET_DEV *current)
 {
     if (a->drv->kind != b->drv->kind)
         return a->drv->kind > b->drv->kind;
+    /* two wireless cards: xnet sends from the console's address, which only one joined on */
+    if (a->drv->kind == XE_KIND_WIFI && (a == console_mac_owner) != (b == console_mac_owner))
+        return a == console_mac_owner;
     if (a->st->speed_mbps != b->st->speed_mbps)
         return a->st->speed_mbps > b->st->speed_mbps;
     if (a == current || b == current)
@@ -343,6 +357,8 @@ static void net_detached(USB_DEV *dev)
     if (!nd)
         return;
     nd->st->ready = 0;
+    if (console_mac_owner == nd)
+        console_mac_owner = 0;          /* the next card to join takes it */
     mem_sync();
     if (nd->drv)
         nd->drv->detached(nd);

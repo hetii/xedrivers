@@ -198,9 +198,7 @@ static u32 add_if(AIC *a, const u8 *mac)
  * failed. */
 static const u8 *join_mac(AIC *a)
 {
-    if (net_console_mac_known)
-        return net_console_mac;
-    return a->nd->mac;
+    return net_join_mac(a->nd);         /* the console's, unless another card has it */
 }
 
 static u32 fail(AIC *a, u32 step, u32 status)

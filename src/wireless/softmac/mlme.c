@@ -217,7 +217,7 @@ static u32 card_leave(void *context)
  * same reason as aic_wifi.c's join_mac), else the card's own. */
 static void choose_own(WL_STA *s)
 {
-    const u8 *mac = net_console_mac_known ? net_console_mac : s->nd->mac;
+    const u8 *mac = net_join_mac(s->nd);     /* the console's, unless another card has it */
     u32 i;
 
     for (i = 0; i < 6; i++)

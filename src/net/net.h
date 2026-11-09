@@ -146,6 +146,12 @@ extern u8 net_mac[ETH_ALEN];        /* the uplink's own address */
 extern u8 net_console_mac[ETH_ALEN];
 extern volatile u32 net_console_mac_known;
 
+/* The address a wireless card is to join on. The console's goes to one card only -- the first
+ * to ask, until it leaves: two stations on one address at one access point push each other
+ * off, round and round (2026-11-09, an RTL8822BU and an AIC8800 in the console at once). The
+ * others join on their own, and the uplink is the one on the console's (net.c, better). */
+const u8 *net_join_mac(struct NET_DEV *nd);
+
 /* Ask the console for its own address, before any device is brought up: a card
  * that has to carry it (a Wi-Fi station associates on it) cannot wait for xnet to
  * send its first frame. Thread-only; what it found is in net_state. */
