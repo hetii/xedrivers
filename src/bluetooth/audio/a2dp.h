@@ -15,6 +15,8 @@
 #define A2DP_OPEN        6u     /* configured, the media channel there, not started */
 #define A2DP_STARTING    7u
 #define A2DP_STREAMING   8u
+#define A2DP_RECONF_CAPS 9u     /* the sink configured it: asking what else it takes */
+#define A2DP_RECONFIGURING 10u
 
 /* The SBC codec information element, four bytes (A2DP 4.3.2). */
 typedef struct {
@@ -40,6 +42,8 @@ typedef struct {
     u32 bitpool_now;            /* following the radio (a2dp.c, bitpool_tick) */
     u32 bitpool_lowest;
     u32 bitpool_downs;
+    u32 reconfigured;           /* the sink's choice replaced by a better one */
+    u32 led_for_sink;           /* the sink opened signalling and waited: we led */
 } A2DP_STATS;
 
 extern volatile A2DP_STATS a2dp_stats;

@@ -12,8 +12,14 @@
 #include "usb.h"
 #include "bench.h"
 
-#define RING_FRAMES     4096u           /* a power of two: ~85 ms */
+#define RING_FRAMES     16384u          /* a power of two: ~341 ms */
 #define START_FRAMES    1024u           /* ~21 ms gathered before the first frame goes */
+
+/* What a reader gathers first, and keeps when it fell a ring behind. A card reads from its
+ * transfers' completions every few ms; the Bluetooth readers from the worker, which can be
+ * 100 ms late now and then: with 85 ms of ring and 21 ms gathered, a headset heard 285 ms of
+ * silence and lost 317 ms every 10 s (027570, 2026-11-10). */
+static const u32 start_frames[AUDIO_READERS] = { START_FRAMES, 6144u, 4096u };
 #define DEFAULT_VOLUME  50u             /* -6 dB: a USB card at 100 played louder than HDMI */
 #define POOL_TAG        0x6F647561u     /* "audo" */
 
@@ -170,12 +176,12 @@ void audio_read(u32 reader, s32 *out, u32 frames)
     u32 channels = rd->layout == AUDIO_STEREO ? 2 : 6;
 
     if (w - r > RING_FRAMES - AUDIO_FRAME_SAMPLES) {    /* a ring behind: skip ahead */
-        audio_stats.overruns += w - r - START_FRAMES;
-        r = w - START_FRAMES;
+        audio_stats.overruns += w - r - start_frames[reader];
+        r = w - start_frames[reader];
     }
     have = w - r;
     if (!rd->started) {
-        if (have < START_FRAMES)
+        if (have < start_frames[reader])
             have = 0;
         else
             rd->started = 1;

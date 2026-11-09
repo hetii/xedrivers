@@ -18,7 +18,7 @@ void bt_profiles_init(void)
 /* A link we made goes on to the audio stream. One the device made is left to it for 3 s (a
  * headset opens AVDTP itself, after asking SDP); then, if it has not, we do: 027570
  * reconnecting by itself opened HFP and AVRCP but not A2DP. */
-#define A2DP_WAIT_TICKS 150
+#define A2DP_WAIT_TICKS 500             /* 10 s: the headset usually leads, given time */
 
 static volatile BT_CONN *waiting;
 static u32 waited;

@@ -160,20 +160,21 @@ static void acl_ask(BTUSB *b)
     usb_submit(&b->acl_urb);
 }
 
-static void acl_receive(void *ctx, u32 on)
+static u32 acl_receive(void *ctx, u32 on)
 {
     BTUSB *b = (BTUSB *)ctx;
 
     if (on && !b->acl_receiving && b->running) {
-        if (!usb_wait_idle(&b->acl_urb, 100))
-            return;                     /* the last one not back yet: next tick */
+        if (b->acl_urb.Busy)
+            return 1;                   /* the last one not back yet: next tick, no waiting */
         b->acl_receiving = 1;
         b->acl_have = 0;
         acl_ask(b);
-    } else if (!on && b->acl_receiving) {
-        b->acl_receiving = 0;
-        usb_cancel(&b->acl_urb);
     }
+    /* Off is not done: a request taken back by usb_cancel did not come back, and its Busy kept
+     * ACL closed for the next link (a reconnect heard nothing). Once asked for, after the HCI
+     * reset, it stays out: what cost the RTL8822BU was the request queued before the reset. */
+    return 0;
 }
 
 /* --- the voice link (SCO) over the isochronous interface ------------------------------ */

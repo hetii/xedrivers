@@ -177,11 +177,12 @@ STRUCTS = {
                  "acl_slots", "inquiries", "found", "queued", "queue_full", "incoming",
                  "connections", "connect_failures", "pairings", "auth_failures",
                  "keys_loaded", "acl_received", "acl_sent", "acl_dropped",
-                 "keys_saved", "keys_save_failed"],
+                 "keys_saved", "keys_save_failed", "tx_power", "tx_power_max", "rssi",
+                 "radio_reads"],
     "a2dp_stats": ["state", "role_initiator", "remote_seid", "rate", "mode", "blocks", "bitpool",
                    "allocation", "caps", "caps_bitpool", "frame_length", "frames_per_packet",
                    "packets", "frames", "send_failures", "late", "rejects", "last_reject",
-                   "starts", "media_mtu", "bitpool_now", "bitpool_lowest", "bitpool_downs"],
+                   "starts", "media_mtu", "bitpool_now", "bitpool_lowest", "bitpool_downs", "reconfigured", "led_for_sink"],
     "sdp_stats": ["requests", "errors", "continued"],
     "rfcomm_stats": ["frames_in", "frames_out", "bad_fcs", "sessions", "dlcs_opened", "refused",
                      "no_credit", "last_control"],
@@ -344,11 +345,11 @@ def bt_conns(sym):
         a = read_struct(sym, "a2dp_stats")
         modes = {0: "mono", 1: "dual", 2: "stereo", 3: "joint"}
         states = ["idle", "signalling", "discovering", "capabilities", "configuring",
-                  "opening", "open", "starting", "streaming"]
+                  "opening", "open", "starting", "streaming", "reconf-caps", "reconfiguring"]
         rate = a["frame_length"] * 8 * a["rate"] // (a["blocks"] * 8) if a["blocks"] else 0
         print("  a2dp %s %s seid=%d | SBC %d Hz %s blocks=%d bitpool=%d %s = %d kbit/s, "
               "frame %d B x %d/packet (mtu %d) | sink caps %04x bitpool %d-%d | packets=%d "
-              "frames=%d waited=%d late=%d rejects=%d last=%#x starts=%d | bitpool now %d lowest %d downs %d" % (
+              "frames=%d waited=%d late=%d rejects=%d last=%#x starts=%d | bitpool now %d lowest %d downs %d reconfigured %d" % (
                   states[a["state"]] if a["state"] < len(states) else a["state"],
                   "out" if a["role_initiator"] else "in", a["remote_seid"], a["rate"],
                   modes.get(a["mode"], a["mode"]), a["blocks"], a["bitpool"],
@@ -356,7 +357,7 @@ def bt_conns(sym):
                   a["frame_length"], a["frames_per_packet"], a["media_mtu"], a["caps"],
                   a["caps_bitpool"] >> 8, a["caps_bitpool"] & 255, a["packets"], a["frames"],
                   a["send_failures"], a["late"], a["rejects"], a["last_reject"], a["starts"],
-                  a["bitpool_now"], a["bitpool_lowest"], a["bitpool_downs"]))
+                  a["bitpool_now"], a["bitpool_lowest"], a["bitpool_downs"], a["reconfigured"]))
         print("  sdp", read_struct(sym, "sdp_stats"))
     if "hfp_stats" in sym:
         h = read_struct(sym, "hfp_stats")
@@ -407,6 +408,15 @@ def bt(sym, rest):
             st = command(sym, 41, int(rest[1]))
         print("connect: %#x" % st[0])
         time.sleep(float(rest[2]) if len(rest) > 2 else 8)
+    elif rest and rest[0] == "radio":
+        print("radio: %#x" % command(sym, 44, int(rest[1]) if len(rest) > 1 else 0)[0])
+        time.sleep(2)
+        b = read_struct(sym, "bt_stats")
+        sg = lambda v: v - (1 << 32) if v & 0x80000000 else v
+        print("our transmit power %d dBm (max %d), RSSI of the device %d dB from the golden "
+              "range, reads %d" % (sg(b["tx_power"]), sg(b["tx_power_max"]), sg(b["rssi"]),
+                                   b["radio_reads"]))
+        return
     elif rest and rest[0] == "sco":
         print("sco: %#x" % command(sym, 43)[0])
         time.sleep(4)

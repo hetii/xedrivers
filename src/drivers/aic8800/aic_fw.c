@@ -156,6 +156,21 @@ static u32 unpack_info(AIC *a, u32 type, u8 *pairs, u32 count, void *context)
     return 1;
 }
 
+static u32 bt_txpwr(u32 linux_value)
+{
+    char v[16];
+    u32 n = file_setting("xedrivers.ini", "bt_txpwr", v, sizeof(v)), i, x = 0;
+
+    if (n < 3 || v[0] != '0' || (v[1] | 0x20) != 'x')
+        return linux_value;
+    for (i = 2; i < n; i++) {
+        char c = v[i];
+
+        x = x << 4 | (u32)(c >= '0' && c <= '9' ? c - '0' : (c | 0x20) - 'a' + 10);
+    }
+    return x;
+}
+
 /* aicbt_patch_table_load: every pair written; the PINF section only its four base
  * pairs (unpack trims its length); the BT mode section with the driver's values in
  * the odd words; the version text skipped; 100 ms after the power-on section. */
@@ -177,7 +192,10 @@ static u32 load_section(AIC *a, u32 type, u8 *pairs, u32 count, void *context)
         aic_put32(pairs + 11 * 4, 1500000);     /* uart baud */
         aic_put32(pairs + 13 * 4, 1);           /* uart flow control */
         aic_put32(pairs + 15 * 4, 0);           /* low power mode off */
-        aic_put32(pairs + 17 * 4, 0x6F2F);      /* tx power level, 8800D80 */
+        /* Bluetooth's transmit power (0x201FE0): 0x6F2F as Linux writes it (usbmon,
+         * load-8d80.txt), over the table's 0x5F2F7F2F; bt_txpwr = 0x... in the ini to try
+         * others. */
+        aic_put32(pairs + 17 * 4, bt_txpwr(0x6F2F));
     }
     for (i = 0; i < count; i++) {
         status = aic_mem_write(a, aic_le32(pairs + i * 8), aic_le32(pairs + i * 8 + 4));

@@ -51,6 +51,10 @@ static L2CAP_CHANNEL *signalling, *media;
 static u32 label;
 static SBC_CAPS config;                 /* what is configured */
 static u32 config_bitpool;
+static SBC_CAPS pending_config;         /* asked for by RECONFIGURE */
+static u32 pending_bitpool;
+static void reconfigure_from(const u8 *p, u32 n);
+static void start_now(void);
 static SBC sbc;
 static u32 sequence, timestamp, last_tb, rate_hz;
 static u32 per_tick;                    /* samples per time-base tick, x 2^32 */
@@ -217,24 +221,38 @@ static void start_stream(void)
 }
 
 /* The sink's endpoints: the first audio sink not in use. */
+/* The sink's free audio endpoints, from DISCOVER: each asked in turn until one takes SBC (a
+ * PC's PipeWire lists one per codec, AAC or LDAC first). */
+static u8 candidates[16];
+static u32 candidate_count, candidate_at;
+
+static void ask_next_candidate(void)
+{
+    u8 q;
+
+    if (candidate_at >= candidate_count) {
+        a2dp_stats.state = A2DP_IDLE;   /* none takes SBC */
+        return;
+    }
+    a2dp_stats.remote_seid = candidates[candidate_at++];
+    a2dp_stats.state = A2DP_CAPABILITIES;
+    q = (u8)(a2dp_stats.remote_seid << 2);
+    command(SIG_GET_ALL_CAPS, &q, 1);
+}
+
 static void discovered(const u8 *p, u32 n)
 {
     u32 i;
 
-    for (i = 0; i + 2 <= n; i += 2) {
+    candidate_count = candidate_at = 0;
+    for (i = 0; i + 2 <= n && candidate_count < sizeof(candidates); i += 2) {
         u32 seid = p[i] >> 2, in_use = (p[i] >> 1) & 1u, media_type = p[i + 1] >> 4,
             sink = (p[i + 1] >> 3) & 1u;
 
-        if (!in_use && media_type == 0 && sink) {
-            u8 q = (u8)(seid << 2);
-
-            a2dp_stats.remote_seid = seid;
-            a2dp_stats.state = A2DP_CAPABILITIES;
-            command(SIG_GET_ALL_CAPS, &q, 1);
-            return;
-        }
+        if (!in_use && media_type == 0 && sink)
+            candidates[candidate_count++] = (u8)seid;
     }
-    a2dp_stats.state = A2DP_IDLE;       /* no free sink: nothing to do */
+    ask_next_candidate();
 }
 
 /* Its capabilities: the SBC element among them, and our configuration from it. */
@@ -286,7 +304,7 @@ static void capabilities(const u8 *p, u32 n)
         }
         at += 2 + len;
     }
-    a2dp_stats.state = A2DP_IDLE;
+    ask_next_candidate();               /* not SBC here: the next endpoint */
 }
 
 static void media_open(L2CAP_CHANNEL *ch);
@@ -306,6 +324,16 @@ static void accepted(u32 signal, const u8 *p, u32 n)
     case SIG_GET_CAPS:
         if (a2dp_stats.state == A2DP_CAPABILITIES)
             capabilities(p, n);
+        else if (a2dp_stats.state == A2DP_RECONF_CAPS)
+            reconfigure_from(p, n);
+        break;
+    case SIG_RECONFIGURE:
+        if (a2dp_stats.state == A2DP_RECONFIGURING) {
+            config = pending_config;
+            config_bitpool = pending_bitpool;
+            a2dp_stats.reconfigured++;
+            start_now();
+        }
         break;
     case SIG_SET_CONFIG:
         a2dp_stats.state = A2DP_OPENING;
@@ -335,6 +363,10 @@ static void rejected(u32 signal, const u8 *p, u32 n)
 
     a2dp_stats.rejects++;
     a2dp_stats.last_reject = signal << 8 | (n ? p[n - 1] : 0);
+    if (a2dp_stats.state == A2DP_RECONF_CAPS || a2dp_stats.state == A2DP_RECONFIGURING) {
+        start_now();                    /* as the sink configured it, then */
+        return;
+    }
     if (signal == SIG_GET_ALL_CAPS && a2dp_stats.state == A2DP_CAPABILITIES) {
         command(SIG_GET_CAPS, &q, 1);   /* an AVDTP 1.2 sink */
         return;
@@ -439,6 +471,10 @@ static void signalling_open(L2CAP_CHANNEL *ch)
 {
     if (!ch->ctx)                       /* the headset opened it: it leads */
         return;
+    if (ch != signalling) {             /* the headset's came first: ours is not needed */
+        l2cap_close(ch);
+        return;
+    }
     a2dp_stats.state = A2DP_DISCOVERING;
     command(SIG_DISCOVER, 0, 0);
 }
@@ -463,11 +499,78 @@ static void media_open(L2CAP_CHANNEL *ch)
 
     media = ch;
     if (a2dp_stats.state == A2DP_OPENING && a2dp_stats.remote_seid) {
+        if (!a2dp_stats.role_initiator) {
+            /* the sink chose (027570: joint 38, though it takes dual 38): see what it takes,
+             * and reconfigure to the best before the start */
+            a2dp_stats.state = A2DP_RECONF_CAPS;
+            command(SIG_GET_ALL_CAPS, &q, 1);
+            return;
+        }
         a2dp_stats.state = A2DP_STARTING;
         command(SIG_START, &q, 1);
     } else {
         a2dp_stats.state = A2DP_OPEN;
     }
+}
+
+static void start_now(void)
+{
+    u8 q = (u8)(a2dp_stats.remote_seid << 2);
+
+    a2dp_stats.state = A2DP_STARTING;
+    command(SIG_START, &q, 1);
+}
+
+/* The sink's capabilities, as the sink had configured the stream: a better configuration
+ * there is replaced by RECONFIGURE (the codec only), else the stream starts as it is. */
+static void reconfigure_from(const u8 *p, u32 n)
+{
+    u32 at = 0;
+
+    while (at + 2 <= n) {
+        u32 cat = p[at], len = p[at + 1];
+
+        if (at + 2 + len > n)
+            break;
+        if (cat == CAT_MEDIA_CODEC && len >= 6 && (p[at + 2] >> 4) == 0 && p[at + 3] == 0) {
+            SBC_CAPS sink, chosen;
+            u32 bp, now, better;
+            u8 r[9];
+
+            sink.b[0] = p[at + 4];
+            sink.b[1] = p[at + 5];
+            a2dp_stats.caps_seen[0] = (u32)(p[at + 4] << 8 | p[at + 5]);
+            a2dp_stats.caps_seen[1] = (u32)(p[at + 6] << 8 | p[at + 7]);
+            if (!a2dp_choose(&sink, p[at + 6] < 2 ? 2 : p[at + 6], p[at + 7], &chosen, &bp))
+                break;
+            {
+                u32 rate, mode, blocks, alloc;
+
+                read_config(&config, &rate, &mode, &blocks, &alloc);
+                now = bitrate(rate, mode, blocks, config_bitpool);
+                read_config(&chosen, &rate, &mode, &blocks, &alloc);
+                better = bitrate(rate, mode, blocks, bp);
+            }
+            if (better <= now)
+                break;
+            pending_config = chosen;
+            pending_bitpool = bp;
+            r[0] = (u8)(a2dp_stats.remote_seid << 2);
+            r[1] = CAT_MEDIA_CODEC;
+            r[2] = 6;
+            r[3] = 0x00;
+            r[4] = 0x00;
+            r[5] = chosen.b[0];
+            r[6] = chosen.b[1];
+            r[7] = chosen.b[2];
+            r[8] = chosen.b[3];
+            a2dp_stats.state = A2DP_RECONFIGURING;
+            command(SIG_RECONFIGURE, r, 9);
+            return;
+        }
+        at += 2 + len;
+    }
+    start_now();
 }
 
 static void media_closed(L2CAP_CHANNEL *ch, u32 was_open)
@@ -482,6 +585,8 @@ static void media_closed(L2CAP_CHANNEL *ch, u32 was_open)
 }
 
 /* Incoming on PSM 0x19: the first channel of a link is signalling, the next media. */
+static u32 lead_wait;                   /* ticks the headset's signalling channel was idle */
+
 static void avdtp_open(L2CAP_CHANNEL *ch)
 {
     if (!signalling || signalling->state != L2CAP_OPEN) {
@@ -489,6 +594,7 @@ static void avdtp_open(L2CAP_CHANNEL *ch)
         link = ch->conn;
         a2dp_stats.role_initiator = 0;
         a2dp_stats.state = A2DP_SIGNALLING;
+        lead_wait = 0;
         return;
     }
     media_open(ch);
@@ -611,6 +717,16 @@ void a2dp_tick(void)
     u32 now = 0, per, waited = 0;
     u64 owed;
 
+    /* the headset opened signalling and then waited for us (027570 did, its channel and ours
+     * crossing): after 5 s we lead on its channel */
+    if (a2dp_stats.state == A2DP_SIGNALLING && !a2dp_stats.role_initiator && signalling &&
+        signalling->state == L2CAP_OPEN && ++lead_wait >= 250) {
+        a2dp_stats.role_initiator = 1;
+        a2dp_stats.state = A2DP_DISCOVERING;
+        a2dp_stats.led_for_sink++;
+        command(SIG_DISCOVER, 0, 0);
+        return;
+    }
     if (a2dp_stats.state != A2DP_STREAMING || !media)
         return;
 #if defined(__powerpc__)

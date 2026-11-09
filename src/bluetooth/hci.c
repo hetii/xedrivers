@@ -270,6 +270,22 @@ u32 bt_command(u32 what, volatile u32 *args)
         }
         args[5] = bt_connect(address);
         return 1;
+    case BT_CMD_RADIO:
+        if (args[1] < BT_CONN_MAX && bt_conns[args[1]].state >= BT_CONN_UP) {
+            u8 p[3];
+
+            p[0] = (u8)bt_conns[args[1]].handle;
+            p[1] = (u8)(bt_conns[args[1]].handle >> 8);
+            p[2] = 0;                                   /* current */
+            hci_queue(HCI_READ_TX_POWER, p, 3);
+            p[2] = 1;                                   /* maximum */
+            hci_queue(HCI_READ_TX_POWER, p, 3);
+            hci_queue(HCI_READ_RSSI, p, 2);
+            args[5] = 0;
+        } else {
+            args[5] = 1;
+        }
+        return 1;
     case BT_CMD_SCO:
         args[5] = bt_profiles_command(what);
         return 1;
@@ -370,6 +386,17 @@ static void complete(u32 opcode, u32 status, const u8 *r, u32 n)
     if (opcode == HCI_READ_BD_ADDR && !status && n >= 6) {
         for (i = 0; i < 6; i++)
             ((volatile u8 *)bt_stats.address)[i] = r[5 - i];
+    } else if (opcode == HCI_READ_TX_POWER && !status && n >= 3) {
+        static u32 which;
+
+        if (which++ & 1)
+            bt_stats.tx_power_max = (s8)r[2];
+        else
+            bt_stats.tx_power = (s8)r[2];
+        bt_stats.radio_reads++;
+    } else if (opcode == HCI_READ_RSSI && !status && n >= 3) {
+        bt_stats.rssi = (s8)r[2];
+        bt_stats.radio_reads++;
     } else if (opcode == HCI_READ_BUFFER_SIZE && !status && n >= 7) {
         bt_stats.acl_mtu = r[0] | (u32)r[1] << 8;
         bt_stats.acl_slots = r[3] | (u32)r[4] << 8;
@@ -471,10 +498,11 @@ void bt_tick(void)
 
         for (i = 0; i < BT_CONN_MAX; i++)
             links += bt_conns[i].state != BT_CONN_FREE;
-        if ((links != 0) != acl_on && transport->acl_receive) {
+        /* asked again every tick until done: a request still coming back from a cancel
+         * left the ACL closed for good (a headset's link up, nothing heard from it) */
+        if ((links != 0) != acl_on && transport->acl_receive &&
+            !transport->acl_receive(transport->ctx, links != 0))
             acl_on = links != 0;
-            transport->acl_receive(transport->ctx, acl_on);
-        }
     }
     if (bt_keys_changed && keys_loaded)
         bt_save_keys();

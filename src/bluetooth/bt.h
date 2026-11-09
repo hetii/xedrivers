@@ -19,7 +19,7 @@ typedef struct {
     u32 (*acl)(void *ctx, const u8 *packet, u32 length);       /* an ACL data packet */
     /* Receive ACL data, or not: only while a link is up. A pending bulk IN on the shared
      * EHCI halved an RTL8822BU's throughput beside it (2026-11-09). Thread-only. */
-    void (*acl_receive)(void *ctx, u32 on);
+    u32 (*acl_receive)(void *ctx, u32 on);      /* 0 if done; else asked again next tick */
     /* The voice link's data (SCO) moving on interface setting `on` (1 mSBC, 2 16-bit CVSD),
      * or not (0); 0 if it will. Thread-only. The transport
      * calls bt_sco_take and bt_sco_fill (audio/sco.h) at DISPATCH_LEVEL while it does. */
@@ -39,6 +39,7 @@ void bt_tick(void);
 #define BT_CMD_CONNECT    41u   /* [1] index in bt_found, or [1] [2] the address */
 #define BT_CMD_DISCONNECT 42u   /* [1] index in bt_conns */
 #define BT_CMD_SCO        43u   /* the voice link up again (HFP) */
+#define BT_CMD_RADIO      44u   /* [1] index in bt_conns: read its RSSI and our transmit power */
 u32 bt_command(u32 what, volatile u32 *args);
 
 #define BT_FOUND_MAX 16u
@@ -80,6 +81,10 @@ typedef struct {
     u32 acl_dropped;            /* the ACL queue was full */
     u32 keys_saved;             /* xedrivers.ini written with the bt_pair lines */
     u32 keys_save_failed;
+    s32 tx_power;               /* dBm, Read_Transmit_Power_Level (current), on BT_CMD_RADIO */
+    s32 tx_power_max;
+    s32 rssi;                   /* dB from the golden range, Read_RSSI */
+    u32 radio_reads;
 } BT_STATS;
 
 extern volatile BT_STATS bt_stats;

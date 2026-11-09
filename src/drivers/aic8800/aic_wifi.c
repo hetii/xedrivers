@@ -15,6 +15,7 @@
  */
 
 #include "aic.h"
+#include "file.h"
 #include "wireless.h"
 
 #define TASK_MM     0u
@@ -493,6 +494,15 @@ u32 aic_wifi_start(AIC *a)
     a->link.card = &a->card;
     a->link.mode = wl_mode_pick();
     a->link.mode->start(&a->link, a->nd);
+    {
+        /* aic_wifi = off in the ini: the card's Wi-Fi left idle -- no scans, no joins -- so
+         * its radio is Bluetooth's (the two share it) */
+        char v[8];
+
+        if (a->link.mode == &wl_bridge_mode &&
+            file_setting("xedrivers.ini", "aic_wifi", v, sizeof(v)) && v[0] == 'o' && v[1] == 'f')
+            a->link.bridge.off = 1;
+    }
     status = aic_wifi_scan(a);
     if (!NT_SUCCESS(status))
         return fail(a, AIC_STEP_WIFI_SCAN, status);
