@@ -284,7 +284,7 @@ $(BUILD)/test_ax88178: tests/drivers/ax88178/test_ax88178.c src/drivers/ax88178/
 SERVERS_HOST := $(wildcard tests/servers/common/*.c) src/servers/common/srv_keep.c
 $(BUILD)/test_pcm: tests/audio/test_pcm.c src/audio/pcm.c src/audio/pcm.h
 	@mkdir -p $(BUILD)
-	$(HOST_CC) -I src/audio -o $@ tests/audio/test_pcm.c src/audio/pcm.c
+	$(HOST_CC) -I src/audio -o $@ tests/audio/test_pcm.c src/audio/pcm.c -lm
 
 $(BUILD)/test_descriptors: tests/drivers/uac/test_descriptors.c src/drivers/uac/descriptors.c \
                            src/drivers/uac/descriptors.h src/drivers/uac/pacer.h

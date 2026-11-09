@@ -38,4 +38,19 @@ void pcm_stereo_in_six(const float *frame, s32 *six, u32 volume);
  * 4), what USB Audio wants. Writes samples x bytes. */
 void pcm_to_packet(const s32 *values, u32 samples, u8 *out, u32 bytes);
 
+/* 48 kHz to 16 kHz for the voice chat: a 63-tap low-pass (Blackman-windowed sinc at 6.9 kHz,
+ * -1 dB at 6 kHz, -24 dB at 8, under -70 dB from 9) then every third sample. Integers only, as
+ * it runs in the capture's completion. Input at 24-bit scale (+-2^23), output 16-bit, rounded
+ * and clipped. */
+#define PCM_DECIMATE_TAPS 63u
+
+typedef struct {
+    s32 history[64];        /* the last 63 inputs, a ring */
+    u32 at;
+    u32 phase;
+} PCM_DECIMATOR;
+
+/* `count` inputs in, up to count / 3 + 1 outputs to `out`; returns how many. */
+u32 pcm_decimate3(PCM_DECIMATOR *d, const s32 *in, u32 count, s16 *out);
+
 #endif /* XE_AUDIO_PCM_H */

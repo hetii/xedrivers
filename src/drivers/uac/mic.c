@@ -1,7 +1,9 @@
 /* The card's microphone: an isochronous IN stream beside the output, brought to 16 kHz mono,
  * what the console's voice chat takes (XHV, through audio_mic_write). Same transfers as the
  * output (stream.h): 4 ms each, full speed a frame a packet, high speed a microframe a
- * packet with only every period-th asked for. Two transfers out at once; each completion
+ * packet with only every period-th asked for. The chat's format is fixed, 16 kHz mono 16-bit;
+ * up to it nothing is thrown away: the card's best setting, all its channels, 24 bits through
+ * a proper low-pass. Two transfers out at once; each completion
  * takes what came and asks again.
  *
  * Packets come back at the offsets their asked-for lengths give, each with its own actual
@@ -10,6 +12,7 @@
 
 #include "stream.h"
 #include "audio.h"
+#include "pcm.h"
 
 #define STATUS_UNDERRUN     0xC0050003u
 #define BAD_IN_A_ROW        16u
@@ -20,26 +23,30 @@
 #define MIC_STEP_BUFFER     5u
 #define MIC_STEP_FORMAT     6u
 
-/* One packet's frames: channel 0 of each, its top 16 bits, three at a time averaged to one
- * (48 to 16 kHz; a box filter, as usb-audio-x360's, enough for speech). */
+/* One packet's frames: the channels averaged, each sample at 24-bit scale (a 16-bit card's
+ * moved up), then 48 to 16 kHz through the decimator (pcm.c). */
 static void take(UAC *u, const u8 *data, u32 length)
 {
     const UAC_STREAM *m = &u->info.mic;
-    u32 frame = m->channels * m->bytes, n = length / frame, i;
-    s16 out[UAC_MIC_BUFFER / 6];
-    u32 made = 0;
+    u32 frame = m->channels * m->bytes, n = length / frame, i, c;
+    s32 mono[512];                          /* a packet: at most 1023 bytes, 511 frames */
+    s16 out[512 / 3 + 2];                   /* on the DPC's stack: keep it small */
+    u32 made;
 
+    if (n > sizeof(mono) / sizeof(mono[0]))
+        n = sizeof(mono) / sizeof(mono[0]);
     for (i = 0; i < n; i++) {
-        const u8 *s = data + i * frame;
-        s32 v = (s16)(s[m->bytes - 1] << 8 | s[m->bytes - 2]);
+        s32 sum = 0;
 
-        u->mic_sum += (u32)v;
-        if (++u->mic_count == 3) {
-            out[made++] = (s16)((s32)u->mic_sum / 3);
-            u->mic_sum = 0;
-            u->mic_count = 0;
+        for (c = 0; c < m->channels; c++) {
+            const u8 *s = data + i * frame + c * m->bytes + m->bytes - 1;   /* the top byte */
+            s32 v = (s32)((u32)s[0] << 24 | (u32)s[-1] << 16 | (m->bytes > 2 ? (u32)s[-2] << 8 : 0));
+
+            sum += v >> 8;                  /* 24-bit scale: room for 8 channels */
         }
+        mono[i] = sum / (s32)m->channels;
     }
+    made = pcm_decimate3(&u->mic_filter, mono, n, out);
     if (made) {
         audio_mic_write(out, made);
         u->st->mic_samples += made;
@@ -111,7 +118,13 @@ void mic_start(UAC *u)
     u32 slot, need;
 
     u->mic_bad_in_a_row = 0;
-    u->mic_sum = u->mic_count = 0;
+    {
+        u8 *p = (u8 *)&u->mic_filter;
+        u32 k;
+
+        for (k = 0; k < sizeof(u->mic_filter); k++)
+            p[k] = 0;
+    }
     if (m->bytes < 2 || m->channels < 1) {
         u->st->mic_step = MIC_STEP_FORMAT;
         return;

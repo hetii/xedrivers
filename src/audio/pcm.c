@@ -63,6 +63,34 @@ void pcm_stereo_in_six(const float *frame, s32 *six, u32 volume)
     }
 }
 
+static const s16 decimate_taps[PCM_DECIMATE_TAPS] = {
+    0,0,1,1,-4,-10,-9,7,30,38,7,-56,-101,-68,57,195,211,25,-280,-458,-274,259,788,802,47,-1134,-1840,-1106,1401,4987,8157,9422,8157,4987,1401,-1106,-1840,-1134,47,802,788,259,-274,-458,-280,25,211,195,57,-68,-101,-56,7,38,30,7,-9,-10,-4,1,1,0,0
+};
+
+u32 pcm_decimate3(PCM_DECIMATOR *d, const s32 *in, u32 count, s16 *out)
+{
+    u32 i, k, made = 0;
+
+    for (i = 0; i < count; i++) {
+        d->history[d->at] = in[i];
+        d->at = (d->at + 1) & 63u;
+        if (++d->phase < 3)
+            continue;
+        d->phase = 0;
+        {
+            s64 acc = 0;
+            s32 v;
+
+            /* the taps are symmetric: newest to oldest is oldest to newest */
+            for (k = 0; k < PCM_DECIMATE_TAPS; k++)
+                acc += (s64)d->history[(d->at - 1 - k) & 63u] * decimate_taps[k];
+            v = (s32)((acc + (1 << 22)) >> 23);     /* Q15 taps, 24-bit to 16-bit */
+            out[made++] = (s16)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+        }
+    }
+    return made;
+}
+
 void pcm_to_packet(const s32 *values, u32 samples, u8 *out, u32 bytes)
 {
     u32 i;

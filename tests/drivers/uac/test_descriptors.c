@@ -77,7 +77,7 @@ int main(void)
 {
     UAC_INFO i;
 
-    CHECK(uac_parse(uac1, sizeof(uac1), &i));
+    CHECK(uac_parse(uac1, sizeof(uac1), &i, 0));
     CHECK(i.version == 1 && i.control_interface == 0);
     CHECK(i.play.found && i.play.interface == 1 && i.play.alternate == 1);
     CHECK(i.play.channels == 2 && i.play.bytes == 2 && i.play.bits == 16);
@@ -85,22 +85,22 @@ int main(void)
     CHECK(i.play.sync == UAC_SYNC_ADAPTIVE && !i.play.feedback && i.play.rate_listed);
     CHECK(i.mic.found && i.mic.interface == 2 && i.mic.channels == 1 && i.mic.endpoint == 0x82);
 
-    CHECK(uac_parse(uac1_async, sizeof(uac1_async), &i));
-    CHECK(i.play.alternate == 2 && i.play.bytes == 2);       /* 16 bits preferred */
+    CHECK(uac_parse(uac1_async, sizeof(uac1_async), &i, 0));
+    CHECK(i.play.alternate == 1 && i.play.bytes == 3 && i.play.bits == 24);  /* 24 bits preferred */
     CHECK(i.play.sync == UAC_SYNC_ASYNC);
     CHECK(i.play.feedback == 0x81 && i.play.feedback_max_packet == 3);
     CHECK(!i.mic.found);                                     /* the feedback is no microphone */
 
-    CHECK(uac_parse(uac2, sizeof(uac2), &i));
+    CHECK(uac_parse(uac2, sizeof(uac2), &i, 0));
     CHECK(i.version == 2 && i.clock == 5);
     CHECK(i.play.found && i.play.channels == 2 && i.play.bytes == 4 && i.play.bits == 24);
     CHECK(i.play.sync == UAC_SYNC_ASYNC && i.play.feedback == 0x83);
     CHECK(i.play.terminal == 2);
 
-    CHECK(uac_parse(surround, sizeof(surround), &i));
+    CHECK(uac_parse(surround, sizeof(surround), &i, 0));
     CHECK(!i.play.found && i.play6.found && i.play6.channels == 6 && i.play6.max_packet == 588);
-    CHECK(!uac_parse(cut, sizeof(cut), &i));
-    CHECK(!uac_parse(cut, 0, &i));
+    CHECK(!uac_parse(cut, sizeof(cut), &i, 0));
+    CHECK(!uac_parse(cut, 0, &i, 0));
 
     {
         UAC_PACER p;

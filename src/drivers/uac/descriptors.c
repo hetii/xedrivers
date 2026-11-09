@@ -74,11 +74,26 @@ static u32 better(const UAC_STREAM *a, const UAC_STREAM *kept)
         return 1;
     if (a->rate_listed != kept->rate_listed)
         return a->rate_listed > kept->rate_listed;
+    if (a->bits != kept->bits)
+        return a->bits > kept->bits;        /* the console mixes in floats: more bits keep more */
     return a->bytes < kept->bytes;
 }
 
+u32 uac_packet_frames(const UAC_STREAM *s, u32 high_speed)
+{
+    u32 frames;
+
+    if (!high_speed)
+        frames = UAC_RATE / 1000u;
+    else if (s->interval >= 1 && s->interval <= 4)
+        frames = UAC_RATE / 8000u << (s->interval - 1);
+    else
+        return 0;
+    return frames + (s->sync == UAC_SYNC_ASYNC);
+}
+
 /* The setting just read, kept if it can be used and beats what there is. */
-static void finish_alt(ALT *a, UAC_INFO *out)
+static void finish_alt(ALT *a, UAC_INFO *out, u32 high_speed)
 {
     UAC_STREAM *to;
 
@@ -100,10 +115,12 @@ static void finish_alt(ALT *a, UAC_INFO *out)
         else
             return;
     }
-    /* Whether a packet is large enough depends on the speed, known at bring-up: here only
-     * the least any speed needs, a microframe's 6 frames. */
-    if (a->s.max_packet < (UAC_RATE / 8000u) * a->s.channels * a->s.bytes)
-        return;
+    {   /* a packet's frames must fit the endpoint at this speed */
+        u32 frames = uac_packet_frames(&a->s, high_speed);
+
+        if (!frames || a->s.max_packet < frames * a->s.channels * a->s.bytes)
+            return;
+    }
     if (better(&a->s, to)) {
         const u32 *from = (const u32 *)&a->s;
         u32 *into = (u32 *)to, i;
@@ -140,7 +157,7 @@ static void endpoint(ALT *a, const u8 *d, u32 n)
         a->synch_address = d[8];            /* UAC1's longer endpoint descriptor */
 }
 
-u32 uac_parse(const u8 *config, u32 length, UAC_INFO *out)
+u32 uac_parse(const u8 *config, u32 length, UAC_INFO *out, u32 high_speed)
 {
     u32 at = 0, i, in_streaming = 0, in_control = 0;
     ALT a;
@@ -158,7 +175,7 @@ u32 uac_parse(const u8 *config, u32 length, UAC_INFO *out)
             break;
         if (d[1] == DT_INTERFACE && n >= 9) {
             if (in_streaming)
-                finish_alt(&a, out);
+                finish_alt(&a, out, high_speed);
             for (i = 0; i < sizeof(a); i++)
                 ((u8 *)&a)[i] = 0;
             in_control = d[5] == CLASS_AUDIO && d[6] == SUB_CONTROL;
@@ -198,6 +215,6 @@ u32 uac_parse(const u8 *config, u32 length, UAC_INFO *out)
         at += n;
     }
     if (in_streaming)
-        finish_alt(&a, out);
+        finish_alt(&a, out, high_speed);
     return out->version && (out->play.found || out->play6.found || out->mic.found);
 }

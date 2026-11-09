@@ -9,7 +9,7 @@ The stream came back by itself after each of 3 device resets, and through cards 
 Listened to in games on the PCM2706 and two other DACs: like HDMI, voice included, since the 5.1 mix.
 
 What it takes: a full-speed device on a companion (OHCI) controller or a high-speed one on EHCI, with a stereo
-or 5.1 PCM output at 48 kHz, 16, 24 or 32 bits, adaptive, synchronous or asynchronous with explicit feedback.
+or 5.1 PCM output at 48 kHz, 16, 24 or 32 bits (the most bits the card has that fit the speed), adaptive, synchronous or asynchronous with explicit feedback.
 
 What it refuses:
 
@@ -56,8 +56,9 @@ read about every 3 s; a change resets the card, which then chooses again.
 
 ## Microphone
 
-A card's microphone (`mic.c`) is captured beside its output, channel 0 averaged three to one
-into 16 kHz mono, and offered to the console's voice chat (`src/audio/voice.c`, after
+A card's microphone (`mic.c`) is captured beside its output in its best setting, all channels
+averaged at 24-bit scale, then brought to 16 kHz mono through a 63-tap low-pass (pcm.c:
+-1 dB at 6 kHz, under -70 dB from 9), the chat's fixed format, and offered to the console's voice chat (`src/audio/voice.c`, after
 usb-audio-x360): XamVoiceHeadsetPresent, XamVoiceSubmitPacket and XamVoiceGetBatteryStatus are
 entered through ours first (`src/core/detour.c`), the title's microphone requests are answered
 from the capture as 16 kHz PCM, and player 0's voice route is pointed at a virtual headset

@@ -7,6 +7,7 @@
 #include "descriptors.h"
 #include "net.h"
 #include "pacer.h"
+#include "pcm.h"
 #include "usb.h"
 
 /* A transfer is 4 ms either way: 4 packets at full speed (a frame each), 32 at high speed
@@ -79,7 +80,7 @@ typedef struct UAC {
     u8 *mic_buf;                /* UAC_MIC_SLOTS x UAC_MIC_BUFFER */
     u32 mic_room;               /* a data packet's bytes, the endpoint's largest */
     u32 mic_bad_in_a_row;
-    u32 mic_sum, mic_count;     /* the 48 -> 16 kHz decimator's state */
+    PCM_DECIMATOR mic_filter;   /* 48 -> 16 kHz */
 } UAC;
 
 /* Worker thread: buffers, then the first transfers; a step number, or 0. */

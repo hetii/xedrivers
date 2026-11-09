@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <math.h>
 
 #include "pcm.h"
 
@@ -71,6 +73,31 @@ int main(void)
     pcm_stereo_in_six(frame, six, 256);
     CHECK(six[6] > 0x2D000000 && six[6 + AUDIO_C] == 0 && six[6 + AUDIO_SR] == 0);
     CHECK(six[6 + 1] > -0x100 && six[6 + 1] < 0x100);   /* C and SR cancel on the right */
+
+    /* The decimator: a tone below 6 kHz passes at its level, one above 9 kHz is gone, and
+     * 48000 in make 16000 out. */
+    {
+        static PCM_DECIMATOR d;
+        static s32 in[4800];
+        static s16 out[2000];
+        u32 n, k, f;
+
+        for (f = 0; f < 2; f++) {
+            u32 hz = f ? 10000 : 1000, made, peak = 0;
+
+            memset(&d, 0, sizeof(d));
+            for (k = 0; k < 4800; k++)
+                in[k] = (s32)(4194304.0 * sin(2 * 3.14159265358979 * hz * k / 48000.0));
+            made = pcm_decimate3(&d, in, 4800, out);
+            CHECK(made == 1600);
+            for (n = 100; n < made; n++)                 /* past the filter's start */
+                peak = (u32)abs(out[n]) > peak ? (u32)abs(out[n]) : peak;
+            if (!f)
+                CHECK(peak > 16000 && peak < 16500);      /* 2^22 / 2^8 = 16384 */
+            else
+                CHECK(peak < 16);                         /* -60 dB and more */
+        }
+    }
 
     if (failures)
         return 1;

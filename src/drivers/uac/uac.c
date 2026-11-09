@@ -25,7 +25,6 @@
 #define STEP_ENDPOINT   8u
 #define STEP_AUDIO      9u
 #define STEP_STREAM     10u
-#define STEP_PACKET     11u     /* the endpoint's packets too small for a packet's frames */
 
 #define CONTROL_BYTES   1024u
 #define CONTROL_MS      1000u
@@ -94,7 +93,7 @@ static u32 uac_start(NET_DEV *nd)
 {
     USB_DEV *dev = nd->usb;
     UAC *u = &devices[dev->index];
-    u32 status, actual = 0, total, layout;
+    u32 status, actual = 0, total, layout, high_speed;
 
     u->nd = nd;
     u->dev = dev;
@@ -119,7 +118,14 @@ static u32 uac_start(NET_DEV *nd)
         return STEP_CONFIG;
     if (actual > total)
         actual = total;
-    if (!uac_parse(u->control, actual, &u->info) || (!u->info.play.found && !u->info.play6.found))
+    /* The speed (node byte 8 bits 5-6 0x40, xerunner: usb-node-layout@1) before the parse,
+     * which keeps the best setting that fits it. A full-speed device behind a high-speed hub
+     * would need split transactions (0x800ddab0), not read: refused. */
+    high_speed = !USB_ON_COMPANION(dev);
+    if (high_speed && (dev->where & 0x60u) != 0x40u)
+        return STEP_SPEED;
+    if (!uac_parse(u->control, actual, &u->info, high_speed) ||
+        (!u->info.play.found && !u->info.play6.found))
         return STEP_NOTHING;
     /* 5.1 to a 5.1 card when the dashboard asks for it; otherwise the stereo mix, on the stereo
      * output if there is one. From here on info.play is the output in use. */
@@ -131,27 +137,18 @@ static u32 uac_start(NET_DEV *nd)
     }
     u->st->channels = u->info.play.channels;
 
-    /* The speed: a full-speed device on a companion controller, a high-speed one on EHCI
-     * (node byte 8 bits 5-6 0x40, xerunner: usb-node-layout@1). A full-speed device behind
-     * a high-speed hub would need split transactions (0x800ddab0), not read: refused. */
-    if (USB_ON_COMPANION(dev)) {
+    if (!high_speed) {
         u->packets = UAC_FS_PACKETS;
         u->period = 1;
         u->feedback_period = 1;
         u->frames_nominal = UAC_RATE / 1000u;
-    } else if ((dev->where & 0x60u) == 0x40u && u->info.play.interval >= 1 &&
-               u->info.play.interval <= 4) {
+    } else {
         u->packets = UAC_HS_PACKETS;
         u->period = 1u << (u->info.play.interval - 1);
         u->feedback_period = u->info.play.feedback_interval >= 1 &&
             u->info.play.feedback_interval <= 4 ? 1u << (u->info.play.feedback_interval - 1) : 8u;
         u->frames_nominal = UAC_RATE / 8000u * u->period;
-    } else {
-        return STEP_SPEED;
     }
-    if (u->info.play.max_packet < (u->frames_nominal + (u->info.play.sync == UAC_SYNC_ASYNC)) *
-                                  u->info.play.channels * u->info.play.bytes)
-        return STEP_PACKET;
     u->st->high_speed = u->packets == UAC_HS_PACKETS;
     u->st->period = u->period;
 

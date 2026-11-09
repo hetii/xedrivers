@@ -46,8 +46,15 @@ typedef struct {
     UAC_STREAM mic;
 } UAC_INFO;
 
-/* Read a whole configuration descriptor. 1 if there is anything usable in it. */
-u32 uac_parse(const u8 *config, u32 length, UAC_INFO *out);
+/* Read a whole configuration descriptor, for a device at high speed (`high_speed`) or full.
+ * Of a stream's settings the best one that fits the speed is kept: the rate listed, then the
+ * most bits, then the fewest bytes for them. 1 if there is anything usable. */
+u32 uac_parse(const u8 *config, u32 length, UAC_INFO *out, u32 high_speed);
+
+/* A data packet's frames at UAC_RATE for a setting at that speed: 48 a frame at full speed,
+ * 6 a microframe times the interval at high speed; one more for an asynchronous one, which may
+ * ask for it. 0 for an interval past 8 microframes. */
+u32 uac_packet_frames(const UAC_STREAM *s, u32 high_speed);
 
 
 #endif /* XE_UAC_DESCRIPTORS_H */
