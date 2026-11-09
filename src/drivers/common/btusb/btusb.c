@@ -3,6 +3,7 @@
  */
 
 #include "btusb.h"
+#include "sco.h"
 
 #define DT_CONFIG       2u
 #define DT_INTERFACE    4u
@@ -11,8 +12,11 @@
 #define EP_BULK         2u
 #define EP_INTERRUPT    3u
 #define CONFIG_MAX      1024u
+#define STATUS_UNDERRUN 0xC0050003u     /* an isochronous IN packet shorter than asked: fine */
 
 volatile BTUSB_STATS btusb_stats;
+u8 btusb_config[512];                   /* the device's configuration, as read (xectl) */
+u32 btusb_config_length;
 
 u32 btusb_find(const u8 *c, u32 length, BTUSB_EPS *e)
 {
@@ -50,6 +54,31 @@ u32 btusb_find(const u8 *c, u32 length, BTUSB_EPS *e)
         at += n;
     }
     return found && e->event && e->acl_in && e->acl_out;
+}
+
+u32 btusb_find_sco(const u8 *c, u32 length, u32 iface, u32 alt, u32 *in, u32 *out, u32 *max)
+{
+    u32 at = 0, here = 0;
+
+    *in = *out = *max = 0;
+    while (at + 2 <= length) {
+        const u8 *d = c + at;
+        u32 n = d[0];
+
+        if (n < 2 || at + n > length)
+            break;
+        if (d[1] == DT_INTERFACE && n >= 9)
+            here = d[2] == iface && d[3] == alt;
+        else if (d[1] == DT_ENDPOINT && n >= 7 && here && (d[3] & 3u) == 1u) {
+            if (d[2] & EP_IN)
+                *in = d[2];
+            else
+                *out = d[2];
+            *max = (d[4] | (u32)d[5] << 8) & 0x7FFu;
+        }
+        at += n;
+    }
+    return *in && *out && *max;
 }
 
 /* --- receiving ------------------------------------------------------------------------- */
@@ -145,6 +174,131 @@ static void acl_receive(void *ctx, u32 on)
         b->acl_receiving = 0;
         usb_cancel(&b->acl_urb);
     }
+}
+
+/* --- the voice link (SCO) over the isochronous interface ------------------------------ */
+
+static void sco_in_ask(BTUSB *b, u32 slot)
+{
+    ISOCH *t = &b->sco_in[slot];
+    u32 i;
+
+    for (i = 0; i < b->sco_packets; i++)
+        b->sco_in_len[slot][i] = i % b->sco_period != b->sco_period - 1 ? 0 : (u16)b->sco_max;
+    t->Length = b->sco_packets / b->sco_period * b->sco_max;
+    usb_isoch(b->dev, t, b->sco_in_len[slot]);
+}
+
+static void sco_in_done(ISOCH *t, u32 *statuses, u16 *lengths)
+{
+    BTUSB *b = (BTUSB *)t->Owner;
+    u32 slot = (u32)(t - b->sco_in), i, at = 0;
+    const u8 *base = (const u8 *)t->Buffer;
+
+    b->st->sco_in_requests++;
+    for (i = 0; statuses && lengths && i < b->sco_packets; i++) {
+        u32 asked = b->sco_in_len[slot][i];
+
+        if (!asked)
+            continue;
+        if ((statuses[i] == 0 || statuses[i] == STATUS_UNDERRUN) && lengths[i] <= asked) {
+            if (lengths[i]) {
+                b->st->sco_in_bytes += lengths[i];
+                bt_sco_take(base + at, lengths[i]);
+            }
+        } else {
+            b->st->sco_in_bad++;
+            b->st->sco_last_status = statuses[i];
+        }
+        at += asked;
+    }
+    if (b->sco_running && b->running && b->dev->active)
+        sco_in_ask(b, slot);
+}
+
+static void sco_out_send(BTUSB *b, u32 slot)
+{
+    ISOCH *t = &b->sco_out[slot];
+    u32 i, at = 0;
+
+    for (i = 0; i < b->sco_packets; i++) {
+        u32 n = i % b->sco_period != b->sco_period - 1 ? 0 : b->sco_max;
+
+        b->sco_out_len[slot][i] = (u16)n;
+        if (n)
+            bt_sco_fill((u8 *)t->Buffer + at, n);
+        at += n;
+    }
+    t->Length = at;
+    usb_isoch(b->dev, t, b->sco_out_len[slot]);
+}
+
+static void sco_out_done(ISOCH *t, u32 *statuses, u16 *lengths)
+{
+    BTUSB *b = (BTUSB *)t->Owner;
+
+    (void)statuses;
+    (void)lengths;
+    b->st->sco_out_requests++;
+    if (b->sco_running && b->running && b->dev->active)
+        sco_out_send(b, (u32)(t - b->sco_out));
+}
+
+static u32 sco(void *ctx, u32 on)
+{
+    BTUSB *b = (BTUSB *)ctx;
+    u8 setup[8] = { 0x01, 0x0B, 0, 0, 0, 0, 0, 0 };     /* SET_INTERFACE */
+    u32 slot, room, hs = !USB_ON_COMPANION(b->dev);
+
+    if (!on) {
+        b->sco_running = 0;
+        return 0;
+    }
+    if (b->sco_running)
+        return 0;
+    b->st->sco_starts++;
+    if (!btusb_find_sco(btusb_config, btusb_config_length, b->eps.interface + 1, BTUSB_SCO_ALT,
+                        &b->sco_in_ep, &b->sco_out_ep, &b->sco_max))
+        return b->st->sco_step = 1;
+    setup[2] = BTUSB_SCO_ALT;
+    setup[4] = (u8)(b->eps.interface + 1);
+    if (!NT_SUCCESS(usb_control(b->dev, setup, b->cmd_buf, 0, 0, 1000)))
+        return b->st->sco_step = 2;
+    /* high speed: 32 microframes a request, data in every 8th (bInterval 4: 1 ms), the
+     * endpoint opened at interval 1 as the kernel takes it (as uac does); full: 4 frames */
+    b->sco_packets = hs ? 32 : 4;
+    b->sco_period = hs ? 8 : 1;
+    if (!b->ep_sco_in) {
+        b->ep_sco_in = usb_open(b->dev, USB_TYPE_ISOCH, b->sco_in_ep, b->sco_max, 1);
+        b->ep_sco_out = usb_open(b->dev, USB_TYPE_ISOCH, b->sco_out_ep, b->sco_max, 1);
+    }
+    if (!b->ep_sco_in || !b->ep_sco_out)
+        return b->st->sco_step = 3;
+    room = 4 * b->sco_max;
+    if (!b->sco_buf)
+        b->sco_buf = (u8 *)MmAllocatePhysicalMemory(2, 2 * BTUSB_SCO_SLOTS * room, 4);
+    if (!b->sco_buf)
+        return b->st->sco_step = 4;
+    b->sco_running = 1;
+    mem_sync();
+    for (slot = 0; slot < BTUSB_SCO_SLOTS; slot++) {
+        ISOCH *in = &b->sco_in[slot], *out = &b->sco_out[slot];
+
+        in->Context = in->Endpoint = b->ep_sco_in;
+        in->Done = sco_in_done;
+        in->Buffer = b->sco_buf + slot * room;
+        in->PacketCount = (u8)b->sco_packets;
+        in->Owner = b;
+        out->Context = out->Endpoint = b->ep_sco_out;
+        out->Done = sco_out_done;
+        out->Buffer = b->sco_buf + (BTUSB_SCO_SLOTS + slot) * room;
+        out->PacketCount = (u8)b->sco_packets;
+        out->Owner = b;
+        sco_in_ask(b, slot);
+        sco_out_send(b, slot);
+    }
+    b->st->sco_step = 0;
+    return 0;
 }
 
 /* --- sending --------------------------------------------------------------------------- */
@@ -248,6 +402,11 @@ static u32 start(BTUSB *b, USB_DEV *dev, const u8 *taken)
     setup[7] = (u8)(total >> 8);
     if (!NT_SUCCESS(usb_control(dev, setup, block, total, &actual, 1000)) || actual < 9)
         return BTUSB_START_CONFIG;
+    btusb_config_length = actual > total ? total : actual;
+    if (btusb_config_length > sizeof(btusb_config))
+        btusb_config_length = sizeof(btusb_config);
+    for (s = 0; s < btusb_config_length; s++)
+        btusb_config[s] = block[s];
     if (!btusb_find(block, actual > total ? total : actual, &b->eps))
         return BTUSB_START_NOT_HCI;
     b->st->interface = b->eps.interface;
@@ -272,6 +431,7 @@ static u32 start(BTUSB *b, USB_DEV *dev, const u8 *taken)
     b->transport.command = send_command;
     b->transport.acl = send_acl;
     b->transport.acl_receive = acl_receive;
+    b->transport.sco = sco;
     b->acl_receiving = 0;
     b->running = 1;
     mem_sync();
@@ -283,6 +443,7 @@ static u32 start(BTUSB *b, USB_DEV *dev, const u8 *taken)
 
 void btusb_stop(BTUSB *b)
 {
+    b->sco_running = 0;
     b->running = 0;
     b->acl_receiving = 0;
     mem_sync();

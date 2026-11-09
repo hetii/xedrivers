@@ -14,6 +14,8 @@
 #define BTUSB_EVENT_MAX 260u        /* an event: 2 header bytes and up to 255 */
 #define BTUSB_ACL_MAX   1028u       /* an ACL packet: 4 header bytes and up to 1024 */
 #define BTUSB_OUT       4u          /* ACL packets on their way out at once */
+#define BTUSB_SCO_SLOTS 3u          /* isochronous requests out each way */
+#define BTUSB_SCO_ALT   2u          /* one 16-bit voice channel: 17 bytes a millisecond */
 
 /* Where the HCI interface's endpoints are, from the configuration descriptor. */
 typedef struct {
@@ -35,6 +37,11 @@ typedef struct {
     u32 start_status;           /* of the last btusb_start */
     u32 interface;              /* what btusb_find found there */
     u32 ep_event, ep_acl_in, ep_acl_out, acl_max;
+    u32 sco_starts;
+    u32 sco_step;               /* why the last start failed: 1 alt, 2 interface, 3 endpoint, 4 memory */
+    u32 sco_in_requests, sco_in_bytes, sco_in_bad;
+    u32 sco_out_requests;
+    u32 sco_last_status;
 } BTUSB_STATS;
 
 typedef struct BTUSB {
@@ -58,9 +65,22 @@ typedef struct BTUSB {
     volatile u32 out_busy[BTUSB_OUT];
     u8 *cmd_buf;
     BT_TRANSPORT transport;
+    /* the voice link: interface eps.interface + 1, isochronous */
+    void *ep_sco_in, *ep_sco_out;
+    u32 sco_alt, sco_max, sco_in_ep, sco_out_ep;
+    volatile u32 sco_running;
+    u32 sco_packets, sco_period;    /* per request; data in every period-th (HS: 1 ms of 8) */
+    ISOCH sco_in[BTUSB_SCO_SLOTS], sco_out[BTUSB_SCO_SLOTS];
+    u16 sco_in_len[BTUSB_SCO_SLOTS][32], sco_out_len[BTUSB_SCO_SLOTS][32];
+    u8 *sco_buf;                    /* DMA: in slots, then out slots */
 } BTUSB;
 
 extern volatile BTUSB_STATS btusb_stats;
+
+/* Pure (tests/bluetooth): the voice interface's setting `alt` (interface `iface`): its
+ * isochronous endpoints and their packet size. 1 if found. */
+u32  btusb_find_sco(const u8 *config, u32 length, u32 iface, u32 alt, u32 *in, u32 *out,
+                    u32 *max_packet);
 
 /* Pure (tests/bluetooth): the HCI interface in a configuration descriptor. 1 if found. */
 u32  btusb_find(const u8 *config, u32 length, BTUSB_EPS *eps);

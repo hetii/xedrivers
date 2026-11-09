@@ -20,7 +20,8 @@
 /* Who reads: each has its own place in the rings, so they play at once. */
 #define AUDIO_READER_CARD      0u   /* a USB card (uac) */
 #define AUDIO_READER_BLUETOOTH 1u   /* an A2DP headset */
-#define AUDIO_READERS          2u
+#define AUDIO_READER_VOICE     2u   /* a hands-free headset's earpiece (SCO) */
+#define AUDIO_READERS          3u
 
 /* Worker thread, PASSIVE_LEVEL: start hearing the console, as `reader`, in one of the
  * layouts above; 0, or what failed. */

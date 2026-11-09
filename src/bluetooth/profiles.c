@@ -3,6 +3,7 @@
 
 #include "host.h"
 #include "a2dp.h"
+#include "hfp.h"
 
 void sdp_init(void);
 
@@ -10,6 +11,7 @@ void bt_profiles_init(void)
 {
     sdp_init();
     a2dp_init();
+    hfp_init();
 }
 
 /* A link we made goes on to the audio stream; one the device made is left to it (a headset
@@ -23,9 +25,22 @@ void bt_profiles_ready(volatile BT_CONN *c)
 void bt_profiles_gone(volatile BT_CONN *c)
 {
     a2dp_gone(c);
+    hfp_gone(c);
 }
 
 void bt_profiles_tick(void)
 {
     a2dp_tick();
+    hfp_tick();
+}
+
+void bt_profiles_event(const u8 *e, u32 length)
+{
+    hfp_sco_event(e, length);
+}
+
+u32 bt_profiles_command(u32 what)
+{
+    (void)what;
+    return hfp_voice();
 }

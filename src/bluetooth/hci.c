@@ -138,6 +138,13 @@ void bt_detach(void)
 
 /* --- commands ------------------------------------------------------------------------- */
 
+u32 hci_sco(u32 on)
+{
+    if (!transport || !transport->sco)
+        return 1;
+    return transport->sco(transport->ctx, on);
+}
+
 u32 hci_send(u32 opcode, const u8 *params, u32 length)
 {
     u32 i;
@@ -262,6 +269,9 @@ u32 bt_command(u32 what, volatile u32 *args)
             address[5] = (u8)args[2];
         }
         args[5] = bt_connect(address);
+        return 1;
+    case BT_CMD_SCO:
+        args[5] = bt_profiles_command(what);
         return 1;
     case BT_CMD_DISCONNECT:
         args[5] = args[1] < BT_CONN_MAX ? bt_disconnect(&bt_conns[args[1]]) : 2;
@@ -424,6 +434,7 @@ static void take(const u8 *e, u32 length)
         break;
     default:
         bt_pair_event(e, length);
+        bt_profiles_event(e, length);
         break;
     }
 }

@@ -233,8 +233,18 @@ void bt_pair_event(const u8 *e, u32 length)
             return;
         flip(address, e + 2);
         bt_stats.incoming++;
-        if (e[2 + 9] != 1)                      /* SCO and eSCO: later, hfp.c */
+        if (e[2 + 9] != 1) {                    /* SCO, eSCO: CVSD from linear PCM, as hfp.c */
+            static const u8 sync[15] = { 0x40, 0x1F, 0, 0, 0x40, 0x1F, 0, 0,
+                                         0xFF, 0xFF, 0x60, 0x00, 0xFF, 0xFF, 0x03 };
+            u8 q[21];
+
+            for (i = 0; i < 6; i++)
+                q[i] = e[2 + i];
+            for (i = 0; i < 15; i++)
+                q[6 + i] = sync[i];
+            hci_queue(HCI_ACCEPT_SYNC, q, 21);
             return;
+        }
         c = conn_new(address);
         for (i = 0; i < 6; i++)
             p[i] = e[2 + i];

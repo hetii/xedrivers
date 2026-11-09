@@ -27,8 +27,8 @@
 typedef struct USB_DEV {
     void         *device;           /* the kernel's device node, while we own it */
     void         *control;          /* default endpoint */
-    void         *ep[8];            /* opened by the driver, closed in reverse: a
-                                     * Wi-Fi and Bluetooth combo needs seven */
+    void         *ep[12];           /* opened by the driver, closed in reverse: a
+                                     * Wi-Fi and Bluetooth combo needs nine with voice */
     u32           ep_count;
     volatile u32  active;           /* cleared the moment removal starts */
     volatile u32  generation;       /* grows with every AddDevice on this slot */

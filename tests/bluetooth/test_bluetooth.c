@@ -8,6 +8,8 @@
 #include "host.h"
 #include "sbc.h"
 #include "a2dp.h"
+#include "hfp.h"
+#include "sco.h"
 
 static int failures;
 
@@ -17,6 +19,7 @@ static int failures;
 void  usb_prepare(URB *u, USB_DEV *d, void *e, URB_COMPLETION f, void *b, u32 l, const u8 *s)
 { (void)u; (void)d; (void)e; (void)f; (void)b; (void)l; (void)s; }
 void  usb_submit(URB *u) { (void)u; }
+void  usb_isoch(USB_DEV *d, ISOCH *r, u16 *l) { (void)d; (void)r; (void)l; }
 void  usb_cancel(URB *u) { (void)u; }
 u32   usb_wait_idle(URB *u, u32 t) { (void)u; (void)t; return 1; }
 void  usb_wake(void) { }
@@ -60,7 +63,7 @@ static u32 take_acl(void *ctx, const u8 *p, u32 n)
     return 0;
 }
 
-static const BT_TRANSPORT fake = { 0, take_command, take_acl, 0 };
+static const BT_TRANSPORT fake = { 0, take_command, take_acl, 0, 0 };
 
 static void event(const u8 *e, u32 n)
 {
@@ -365,7 +368,7 @@ static void test_l2cap_incoming(void)
     CHECK(r[8] == 0x09 && r[9] == 3 && r[12] == 'h' && r[13] == 'i');
 
     /* a PSM nobody listens on is refused */
-    { static const u8 s[] = { 0x02, 4, 4, 0, 0x03, 0, 0x42, 0 }; acl(1, s, sizeof(s)); }
+    { static const u8 s[] = { 0x02, 4, 4, 0, 0x05, 0, 0x42, 0 }; acl(1, s, sizeof(s)); }
     r = acl_sent[acl_sent_count - 1];
     CHECK(r[8] == 0x03 && r[16] == 2);
 
@@ -490,6 +493,97 @@ static void test_sdp(void)
     bt_detach();
 }
 
+/* RFCOMM's FCS on frames as BlueZ sends them, and HFP's answers. */
+static void test_rfcomm_hfp(void)
+{
+    static const u8 sabm[] = { 0x03, 0x3F, 0x01 }, ua[] = { 0x03, 0x73, 0x01 };
+    char out[256];
+    u32 n;
+
+    CHECK(rfcomm_fcs(sabm, 3) == 0x1C);
+    CHECK(rfcomm_fcs(ua, 3) == 0xD7);
+    n = hfp_answer("AT+BRSF=959", 11, out, sizeof(out));
+    CHECK(hfp_stats.hf_features == 959);
+    CHECK(n > 10 && !memcmp(out, "\r\n+BRSF: 256\r\n\r\nOK\r\n", n));
+    n = hfp_answer("AT+CIND?", 8, out, sizeof(out));
+    CHECK(!memcmp(out, "\r\n+CIND: 1,0,0,0,5,0,5\r\n\r\nOK\r\n", n));
+    n = hfp_answer("AT+BAC=1,2", 10, out, sizeof(out));
+    CHECK(hfp_stats.codecs == 6 && !memcmp(out, "\r\nOK\r\n", n));
+    n = hfp_answer("at+cmer=3,0,0,1", 15, out, sizeof(out));
+    CHECK(hfp_stats.state == 2);
+    n = hfp_answer("AT+FOO", 6, out, sizeof(out));
+    CHECK(!memcmp(out, "\r\nERROR\r\n", n) && hfp_stats.unknown == 1);
+}
+
+/* The AIC8800D80's configuration as the console read it (2026-11-09): HCI on interface 0,
+ * the voice interface 1 with settings 0-5, the Wi-Fi's vendor interface 2. */
+static const u8 aic8800[] = {
+    0x09, 0x02, 0xde, 0x00, 0x03, 0x01, 0x00, 0xa0, 0xfa,
+    0x08, 0x0b, 0x00, 0x02, 0xe0, 0x01, 0x01, 0x05,
+    0x09, 0x04, 0x00, 0x00, 0x03, 0xe0, 0x01, 0x01, 0x06,
+    0x07, 0x05, 0x83, 0x03, 0x40, 0x00, 0x04,
+    0x07, 0x05, 0x84, 0x02, 0x00, 0x02, 0x00,
+    0x07, 0x05, 0x04, 0x02, 0x00, 0x02, 0x00,
+    0x09, 0x04, 0x01, 0x00, 0x02, 0xe0, 0x01, 0x01, 0x06,
+    0x07, 0x05, 0x85, 0x01, 0x00, 0x00, 0x04,
+    0x07, 0x05, 0x05, 0x01, 0x00, 0x00, 0x04,
+    0x09, 0x04, 0x01, 0x01, 0x02, 0xe0, 0x01, 0x01, 0x06,
+    0x07, 0x05, 0x85, 0x01, 0x09, 0x00, 0x04,
+    0x07, 0x05, 0x05, 0x01, 0x09, 0x00, 0x04,
+    0x09, 0x04, 0x01, 0x02, 0x02, 0xe0, 0x01, 0x01, 0x06,
+    0x07, 0x05, 0x85, 0x01, 0x11, 0x00, 0x04,
+    0x07, 0x05, 0x05, 0x01, 0x11, 0x00, 0x04,
+};
+
+static void test_sco(void)
+{
+    BTUSB_EPS e;
+    u32 in, out, max;
+    s16 a[3] = { 100, 200, 300 }, up[6], last = 0;
+    u8 pkt[3 + 48 + 3 + 48];
+    u32 i;
+
+    CHECK(btusb_find(aic8800, sizeof(aic8800), &e) && e.event == 0x83 && e.acl_in == 0x84 &&
+          e.acl_out == 0x04 && e.acl_max == 512);
+    CHECK(btusb_find_sco(aic8800, sizeof(aic8800), 1, 2, &in, &out, &max));
+    CHECK(in == 0x85 && out == 0x05 && max == 17);
+    CHECK(btusb_find_sco(aic8800, sizeof(aic8800), 1, 1, &in, &out, &max) && max == 9);
+    CHECK(!btusb_find_sco(aic8800, sizeof(aic8800), 1, 0, &in, &out, &max));
+    sco_up(a, 3, up, &last);
+    CHECK(up[0] == 50 && up[1] == 100 && up[2] == 150 && up[3] == 200 && up[5] == 300 && last == 300);
+
+    /* two packets on handle 0x180, cut into 17-byte pieces with a byte of junk first */
+    sco_link(0x180);
+    for (i = 0; i < 2; i++) {
+        u32 k, at = i * 51;
+
+        pkt[at] = 0x80; pkt[at + 1] = 0x01; pkt[at + 2] = 48;
+        for (k = 0; k < 24; k++) {
+            pkt[at + 3 + 2 * k] = (u8)(k * 100);
+            pkt[at + 4 + 2 * k] = (u8)((k * 100) >> 8);
+        }
+    }
+    {
+        static const u8 junk = 0x55;
+
+        bt_sco_take(&junk, 1);
+    }
+    for (i = 0; i < sizeof(pkt); i += 17)
+        bt_sco_take(pkt + i, sizeof(pkt) - i < 17 ? sizeof(pkt) - i : 17);
+    CHECK(sco_stats.packets_in == 2 && sco_stats.samples_in == 48 && sco_stats.peak_in == 2300);
+    CHECK(sco_stats.bad_headers >= 1);
+
+    /* out: silence until enough has gathered, in whole packets with our header */
+    {
+        u8 o[51];
+
+        bt_sco_fill(o, 51);
+        CHECK(o[0] == 0x80 && o[1] == 0x01 && o[2] == 48 && o[3] == 0 && o[50] == 0);
+        CHECK(sco_stats.packets_out == 1);
+    }
+    sco_link(0);
+}
+
 int main(void)
 {
     test_find();
@@ -501,6 +595,8 @@ int main(void)
     test_sbc();
     test_a2dp_choose();
     test_sdp();
+    test_rfcomm_hfp();
+    test_sco();
     if (failures) {
         printf("bluetooth: %d failed\n", failures);
         return 1;

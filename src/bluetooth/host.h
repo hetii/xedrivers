@@ -24,6 +24,8 @@
 #define HCI_SET_ENCRYPTION      HCI_OP(0x01, 0x0013)
 #define HCI_IO_CAPABILITY_REPLY HCI_OP(0x01, 0x002B)
 #define HCI_USER_CONFIRMATION_REPLY HCI_OP(0x01, 0x002C)
+#define HCI_SETUP_SYNC          HCI_OP(0x01, 0x0028)
+#define HCI_ACCEPT_SYNC         HCI_OP(0x01, 0x0029)
 #define HCI_RESET               HCI_OP(0x03, 0x0003)
 #define HCI_SET_EVENT_MASK      HCI_OP(0x03, 0x0001)
 #define HCI_WRITE_LOCAL_NAME    HCI_OP(0x03, 0x0013)
@@ -47,6 +49,7 @@
 #define HCI_EV_LINK_KEY_NOTIFICATION 0x18u
 #define HCI_EV_IO_CAPABILITY_REQUEST 0x31u
 #define HCI_EV_USER_CONFIRMATION_REQUEST 0x33u
+#define HCI_EV_SYNC_COMPLETE        0x2Cu
 #define HCI_EV_COMMAND_COMPLETE     0x0Eu
 #define HCI_EV_COMMAND_STATUS       0x0Fu
 #define HCI_EV_INQUIRY_RESULT_RSSI  0x22u
@@ -54,6 +57,9 @@
 
 /* Send one command now (the controller has a slot): `params` of `length`. 0 if sent. */
 u32  hci_send(u32 opcode, const u8 *params, u32 length);
+
+/* The transport's voice data on or off (BT_TRANSPORT.sco); 0 if done. */
+u32  hci_sco(u32 on);
 
 /* Send it when the controller has a slot, in order. 0 if queued. */
 u32  hci_queue(u32 opcode, const u8 *params, u32 length);
@@ -186,6 +192,8 @@ void bt_profiles_init(void);           /* a controller attached */
 void bt_profiles_ready(volatile BT_CONN *c);
 void bt_profiles_gone(volatile BT_CONN *c);
 void bt_profiles_tick(void);
+void bt_profiles_event(const u8 *event, u32 length);  /* events the profiles want too */
+u32  bt_profiles_command(u32 what);                   /* bt.h BT_CMD_SCO */
 
 typedef struct {
     u32 requests;

@@ -183,13 +183,21 @@ STRUCTS = {
                    "packets", "frames", "send_failures", "late", "rejects", "last_reject",
                    "starts", "media_mtu"],
     "sdp_stats": ["requests", "errors", "continued"],
+    "rfcomm_stats": ["frames_in", "frames_out", "bad_fcs", "sessions", "dlcs_opened", "refused",
+                     "no_credit", "last_control"],
+    "sco_stats": ["packets_in", "packets_out", "bad_headers", "samples_in", "samples_out",
+                  "out_underruns", "out_overruns", "peak_in", "handle"],
+    "hfp_stats": ["state", "hf_features", "commands", "unknown", "last_unknown0",
+                  "last_unknown1", "codecs", "speaker_gain", "mic_gain", "sco_asked",
+                  "sco_status", "sco_handle", "sco_air", "sco_transport"],
     "l2cap_stats": ["frames_in", "frames_out", "signals_in", "signals_out", "send_failures",
                     "incoming", "refused", "opened", "rejected", "echo_asked", "echo_answered",
                     "no_channel", "no_channel_in", "too_long"],
     "btusb_stats": ["started", "events", "event_errors", "acl_in_packets", "acl_out_packets",
                     "acl_out_full", "commands", "command_errors", "last_error",
                     "start_status", "interface", "ep_event", "ep_acl_in", "ep_acl_out",
-                    "acl_max"],
+                    "acl_max", "sco_starts", "sco_step", "sco_in_requests", "sco_in_bytes",
+                    "sco_in_bad", "sco_out_requests", "sco_last_status"],
     "wl_stats": ["scans", "scans_done", "results", "bad_frames", "table_full",
                  "bss_count", "last_scan_status"],
     "file_stats": ["opens", "found", "last_status", "read_errors",
@@ -347,6 +355,21 @@ def bt_conns(sym):
                   a["caps_bitpool"] >> 8, a["caps_bitpool"] & 255, a["packets"], a["frames"],
                   a["send_failures"], a["late"], a["rejects"], a["last_reject"], a["starts"]))
         print("  sdp", read_struct(sym, "sdp_stats"))
+    if "hfp_stats" in sym:
+        h = read_struct(sym, "hfp_stats")
+        unk = struct.pack(">II", h["last_unknown0"], h["last_unknown1"]).split(b"\0")[0]
+        print("  hfp %s hf_features=%#x commands=%d unknown=%d (%s) codecs=%#x gains=%d/%d | "
+              "sco asked=%d status=%#x handle=%#x air=%d" % (
+                  ["none", "rfcomm", "service-level", "audio"][min(h["state"], 3)],
+                  h["hf_features"], h["commands"], h["unknown"], unk.decode("latin1"),
+                  h["codecs"], h["speaker_gain"], h["mic_gain"], h["sco_asked"],
+                  h["sco_status"], h["sco_handle"], h["sco_air"]))
+        print("  rfcomm", read_struct(sym, "rfcomm_stats"))
+        u = read_struct(sym, "btusb_stats")
+        print("  sco usb starts=%d step=%d in req=%d bytes=%d bad=%d out req=%d last=%#x | %s" % (
+            u["sco_starts"], u["sco_step"], u["sco_in_requests"], u["sco_in_bytes"],
+            u["sco_in_bad"], u["sco_out_requests"], u["sco_last_status"],
+            read_struct(sym, "sco_stats")))
     raw = read(sym["bt_conns"], 4 * 8 * 4)
     for i in range(4):
         one = raw[i * 32:(i + 1) * 32]
@@ -380,6 +403,9 @@ def bt(sym, rest):
             st = command(sym, 41, int(rest[1]))
         print("connect: %#x" % st[0])
         time.sleep(float(rest[2]) if len(rest) > 2 else 8)
+    elif rest and rest[0] == "sco":
+        print("sco: %#x" % command(sym, 43)[0])
+        time.sleep(4)
     elif rest and rest[0] == "disconnect":
         print("disconnect: %#x" % command(sym, 42, int(rest[1]))[0])
         time.sleep(2)

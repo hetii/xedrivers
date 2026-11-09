@@ -59,8 +59,33 @@ static const ATTRIBUTE a2dp_attributes[] = {
 };
 static const u16 a2dp_uuids[] = { 0x110A, 0x0100, 0x0019, 0x1002, 0x110D };
 
+/* Hands-free audio gateway: RFCOMM channel 1 (audio/hfp.h), HFP 1.8. */
+static const u8 hfp_handle[]   = { 0x0A, 0x00, 0x01, 0x00, 0x02 };
+static const u8 hfp_class[]    = { 0x35, 0x06, 0x19, 0x11, 0x1F, 0x19, 0x12, 0x03 };
+static const u8 hfp_protocol[] = { 0x35, 0x0C,
+                                   0x35, 0x03, 0x19, 0x01, 0x00,
+                                   0x35, 0x05, 0x19, 0x00, 0x03, 0x08, 0x01 };
+static const u8 hfp_profile[]  = { 0x35, 0x08, 0x35, 0x06, 0x19, 0x11, 0x1E, 0x09, 0x01, 0x08 };
+static const u8 hfp_name[]     = { 0x25, 0x0D, 'V', 'o', 'i', 'c', 'e', ' ', 'G', 'a', 't', 'e',
+                                   'w', 'a', 'y' };
+static const u8 hfp_network[]  = { 0x08, 0x01 };
+static const u8 hfp_features[] = { 0x09, 0x00, 0x00 };
+
+static const ATTRIBUTE hfp_attributes[] = {
+    { 0x0000, sizeof(hfp_handle), hfp_handle },
+    { 0x0001, sizeof(hfp_class), hfp_class },
+    { 0x0004, sizeof(hfp_protocol), hfp_protocol },
+    { 0x0005, sizeof(a2dp_browse), a2dp_browse },
+    { 0x0009, sizeof(hfp_profile), hfp_profile },
+    { 0x0100, sizeof(hfp_name), hfp_name },
+    { 0x0301, sizeof(hfp_network), hfp_network },
+    { 0x0311, sizeof(hfp_features), hfp_features },
+};
+static const u16 hfp_uuids[] = { 0x111F, 0x1203, 0x0100, 0x0003, 0x1002, 0x111E };
+
 static const RECORD records[] = {
     { 0x00010001u, a2dp_uuids, 5, a2dp_attributes, 7 },
+    { 0x00010002u, hfp_uuids, 6, hfp_attributes, 8 },
 };
 #define RECORDS (sizeof(records) / sizeof(records[0]))
 
