@@ -331,6 +331,7 @@ static void joined(WL_STA *s)
         s->last_seq_ctrl[i] = 0xFFFF;
     wl_sta_ba_reset(s);
     s->hw->set_link(s->hw->context, &s->link);
+    net_speed_report(s->nd, wl_link_mbps(&s->link));    /* as set up, not what goes through */
     s->st->joins++;
     step_to(s, WL_STA_JOINED);
     if (!s->secured) {

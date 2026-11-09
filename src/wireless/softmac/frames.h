@@ -47,4 +47,7 @@ void wl_parse_ap(const u8 *ies, u32 length, WL_AP_IES *ap);
 /* The link the station uses with that AP. */
 void wl_link_from_ap(const WL_BSS *bss, const WL_AP_IES *ap, WL_LINK_INFO *link);
 
+/* The link's rate as set up, Mbit/s: what the station reports as its speed. */
+u32 wl_link_mbps(const WL_LINK_INFO *link);
+
 #endif /* XE_WL_FRAMES_H */

@@ -299,6 +299,25 @@ void wl_parse_ap(const u8 *ies, u32 length, WL_AP_IES *ap)
     }
 }
 
+/* The rate the link was set up with: what we offer (VHT_MCS_MAP, HT MCS 0-15) and what the
+ * AP takes, at the width and guard interval settled on (wl_phy_mbps). Legacy: 54. */
+u32 wl_link_mbps(const WL_LINK_INFO *link)
+{
+    u32 streams = 0, mcs;
+
+    if (link->vht) {
+        mcs = wl_vht_best(VHT_MCS_MAP, link->vht_mcs_map, &streams);
+        if (streams)
+            return wl_phy_mbps(link->bw, streams, mcs, link->sgi);
+    }
+    if (link->ht) {
+        mcs = wl_ht_best(0xFFFF, link->ht_mcs, &streams);
+        if (streams)
+            return wl_phy_mbps(link->bw > 1 ? 1 : link->bw, streams, mcs, link->sgi);
+    }
+    return 54;
+}
+
 /* The link the station will use: 80 MHz when the AP runs VHT at 80, else 40 when
  * it has a secondary channel, else 20; rtw88's RTW_SC_* for where the primary sits
  * in it (1 upper/2 lower of 40; at 80 also 3 upmost and 4 lowest). */

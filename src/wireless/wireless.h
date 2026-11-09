@@ -167,4 +167,15 @@ extern const WL_MODE wl_omni_mode;      /* omni.c */
 /* The mode the settings name. After wl_load_config. */
 const WL_MODE *wl_mode_pick(void);
 
+/* rate.c, pure: the rate a link was set up with, Mbit/s rounded down -- the speed a
+ * driver reports (net_speed_report), as an access point shows it for the station, not
+ * what goes through. `bw` 0 20 MHz, 1 40, 2 80, 3 160; `sgi` the short guard interval.
+ * 866 for VHT 80 MHz, two streams, MCS 9, short GI. */
+u32 wl_phy_mbps(u32 bw, u32 streams, u32 mcs, u32 sgi);
+
+/* The highest MCS both sides take and on how many streams: from two VHT MCS maps (2 bits a
+ * stream, 3 none), or from two HT MCS bitmaps (MCS 0-31, eight a stream). */
+u32 wl_vht_best(u32 ours, u32 theirs, u32 *streams);
+u32 wl_ht_best(u32 ours, u32 theirs, u32 *streams);
+
 #endif /* XE_WIRELESS_H */

@@ -243,6 +243,35 @@ static u32 wpa_install_key(void *context, u32 pairwise, u32 index, const u8 *key
 
 /* The handshake is over: the firmware may let ordinary traffic through, and only
  * then is the link up as far as the network layer is concerned. */
+/* The rate the association was set up with (wl_phy_mbps): the width the firmware settled on
+ * (PHY_CHNL_BW_*: 0 20 MHz, 1 40, 2 80, 3 160), and from both sides' capabilities the
+ * streams, the highest MCS and the short guard interval. 0 when it cannot be told. */
+static u32 link_mbps(u32 width, const u32 *ht_info, const u32 *ht_mcs, const u32 *vht_info,
+                     const u32 *vht_map)
+{
+    u32 streams = 0, mcs, sgi;
+
+    if (width > 3)
+        width = 2;                      /* 80+80: counted as 80 */
+    if (vht_info[0] && vht_info[1]) {
+        mcs = wl_vht_best(vht_map[0], vht_map[1], &streams);
+        sgi = width == 2 ? vht_info[0] & vht_info[1] & 0x20u
+            : width == 3 ? vht_info[0] & vht_info[1] & 0x40u
+            : ht_info[0] & ht_info[1] & (width ? 0x40u : 0x20u);
+        if (streams)
+            return wl_phy_mbps(width, streams, mcs, sgi != 0);
+    }
+    if (ht_info[0] && ht_info[1]) {
+        if (width > 1)
+            width = 1;
+        mcs = wl_ht_best(ht_mcs[0], ht_mcs[1], &streams);
+        sgi = ht_info[0] & ht_info[1] & (width ? 0x40u : 0x20u);
+        if (streams)
+            return wl_phy_mbps(width, streams, mcs, sgi != 0);
+    }
+    return 0;
+}
+
 static void wpa_port_ready(void *context, u32 ok)
 {
     AIC *a = (AIC *)context;
@@ -255,7 +284,7 @@ static void wpa_port_ready(void *context, u32 ok)
                                       CFM(ME_SET_CONTROL_PORT_REQ));
     }
     mem_sync();
-    net_speed_report(a->nd, 65);
+    net_speed_report(a->nd, a->link_mbps);
     net_link_report(a->nd, ok);
 }
 
@@ -314,25 +343,41 @@ static u32 wifi_ind(AIC *a, u32 id, const u8 *p, u32 length)
             a->st->aid = (u32)(p[820] | p[821] << 8);
             a->st->join_freq = (u32)(p[824] | p[825] << 8);
         }
+        a->link_mbps = 0;
         if (length >= 832) {
-            u32 req = (u32)(p[14] | p[15] << 8), rsp = (u32)(p[16] | p[17] << 8);
+            u32 req = (u32)(p[14] | p[15] << 8), rsp = (u32)(p[16] | p[17] << 8), side;
             const u8 *ie = p + 20, *end;
+            /* [0] what we asked for, [1] what the AP answered: the HT capability word and
+             * MCS 0-31, the VHT capability word and receive MCS map */
+            u32 ht_info[2] = { 0, 0 }, ht_mcs[2] = { 0, 0 }, vht_info[2] = { 0, 0 };
+            u32 vht_map[2] = { 0xFFFF, 0xFFFF };
 
             a->st->join_width = p[826];
             a->st->join_center1 = (u32)(p[828] | p[829] << 8);
             /* The association request's elements, then the response's. */
             if (req + rsp <= 800) {
-                for (end = ie + req; ie + 2 <= end && ie + 2 + ie[1] <= end; ie += 2 + ie[1]) {
-                    if (ie[0] == 45 && ie[1] >= 2)
-                        a->st->assoc_ht_cap = (u32)(ie[2] | ie[3] << 8);
-                    if (ie[0] == 191 && ie[1] >= 4)
-                        a->st->assoc_vht_cap = (u32)(ie[2] | ie[3] << 8 | ie[4] << 16 |
-                                                     (u32)ie[5] << 24);
+                for (side = 0; side < 2; side++) {
+                    for (end = p + 20 + req + (side ? rsp : 0); ie + 2 <= end &&
+                         ie + 2 + ie[1] <= end; ie += 2 + ie[1]) {
+                        if (ie[0] == 45 && ie[1] >= 7) {
+                            ht_info[side] = (u32)(ie[2] | ie[3] << 8);
+                            ht_mcs[side] = (u32)(ie[5] | ie[6] << 8 | ie[7] << 16 |
+                                                 (u32)ie[8] << 24);
+                        }
+                        if (ie[0] == 191 && ie[1] >= 6) {
+                            vht_info[side] = (u32)(ie[2] | ie[3] << 8 | ie[4] << 16 |
+                                                   (u32)ie[5] << 24);
+                            vht_map[side] = (u32)(ie[6] | ie[7] << 8);
+                        }
+                        if (side && ie[0] == 192 && ie[1] >= 3)
+                            a->st->ap_vht_oper = (u32)(ie[2] | ie[3] << 8 | ie[4] << 16);
+                    }
+                    ie = end;
                 }
-                for (end = p + 20 + req + rsp; ie + 2 <= end && ie + 2 + ie[1] <= end;
-                     ie += 2 + ie[1])
-                    if (ie[0] == 192 && ie[1] >= 3)
-                        a->st->ap_vht_oper = (u32)(ie[2] | ie[3] << 8 | ie[4] << 16);
+                a->st->assoc_ht_cap = ht_info[0];
+                a->st->assoc_vht_cap = vht_info[0];
+                a->link_mbps = link_mbps(a->st->join_width, ht_info, ht_mcs, vht_info,
+                                         vht_map);
             }
         }
         aic_data_rejoin(a);
@@ -354,7 +399,7 @@ static u32 wifi_ind(AIC *a, u32 id, const u8 *p, u32 length)
         }
         /* The speed the dashboard shows is cosmetic here; what matters is that
          * the link is up, so xnet runs DHCP on it. */
-        net_speed_report(a->nd, 65);
+        net_speed_report(a->nd, a->link_mbps);
         net_link_report(a->nd, 1);
         return 1;
     case SM_DISCONNECT_IND:

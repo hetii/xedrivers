@@ -271,6 +271,7 @@ typedef struct AIC {
     WL_LINK link;               /* which way it serves, and that mode's state */
     u32 secured;                /* this join runs the handshake before the link */
     u8 bssid[6];                /* the access point joined, for the EAPOL header */
+    u32 link_mbps;              /* the association's rate as set up (net_speed_report) */
     u8 *eapol_buf;              /* DMA, one frame to send */
 } AIC;
 
