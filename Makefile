@@ -230,7 +230,7 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
       $(BUILD)/test_asix $(BUILD)/test_ax88179 $(BUILD)/test_ax88178 $(BUILD)/test_nfs \
       $(BUILD)/test_ftp $(BUILD)/test_pcm $(BUILD)/test_descriptors $(BUILD)/test_bluetooth \
       $(BUILD)/test_aic $(BUILD)/test_wpa $(BUILD)/test_reorder \
-      $(BUILD)/test_bridge $(BUILD)/test_omni $(BUILD)/test_rate
+      $(BUILD)/test_bridge $(BUILD)/test_omni $(BUILD)/test_rate $(BUILD)/test_txq
 	@$(BUILD)/test_cdc
 	@$(BUILD)/test_stack
 	@$(BUILD)/test_rtl
@@ -249,6 +249,7 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
 	@$(BUILD)/test_bridge
 	@$(BUILD)/test_omni
 	@$(BUILD)/test_rate
+	@$(BUILD)/test_txq
 
 HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core -I src/net -I src/wireless
 
@@ -356,6 +357,10 @@ $(BUILD)/test_omni: tests/wireless/test_omni.c src/wireless/omni.c src/net/txq.c
 $(BUILD)/test_reorder: tests/wireless/test_reorder.c src/wireless/reorder.c $(HEADERS)
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -o $@ tests/wireless/test_reorder.c src/wireless/reorder.c
+
+$(BUILD)/test_txq: tests/net/test_txq.c src/net/txq.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -o $@ tests/net/test_txq.c src/net/txq.c
 
 $(BUILD)/test_rate: tests/wireless/test_rate.c src/wireless/rate.c $(HEADERS)
 	@mkdir -p $(BUILD)

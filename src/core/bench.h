@@ -42,6 +42,10 @@ BENCH_RX bench_mode(u32 mode);
  * (the omni probe). Asked on every link poll. */
 u32    bench_wired_hidden(void);
 
+/* Non-zero while every frame to the uplink is to be refused, its ring said to have room
+ * (bench=debug, `xectl.py set bench_tx_refuse 1`): what a card's shut gate does. */
+u32    bench_tx_refused(void);
+
 /* A short mark on the console's UART (bench=debug), for what a hang leaves no
  * other trace of: read with `xerunner flash read-uart`. Any IRQL. */
 void   bench_trace(const char *mark);
@@ -69,6 +73,7 @@ static inline u32    bench_command(u32 what, volatile u32 *args)
 }
 static inline BENCH_RX bench_mode(u32 mode) { (void)mode; return 0; }
 static inline u32    bench_wired_hidden(void) { return 0; }
+static inline u32    bench_tx_refused(void) { return 0; }
 static inline void   bench_trace(const char *mark) { (void)mark; }
 static inline void   bench_audio_frame(float *frame) { (void)frame; }
 static inline void   bench_event(u32 code, u32 a, u32 b, u32 c)

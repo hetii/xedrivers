@@ -101,6 +101,7 @@ typedef struct NET_DEV {
     u8 mac[ETH_ALEN];
     u32 link_down_seen;
     u32 up_order;           /* when its link last came up, for keeping the uplink */
+    u32 stalled_ticks;      /* its link taken down by the transmit stall watch: ticks since */
     u8 *rings;
     u32 rings_size;
     u32 rings_used;

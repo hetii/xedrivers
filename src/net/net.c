@@ -102,6 +102,8 @@ static u32 socket_rank(const NET_DEV *nd)
 static NET_DEV *console_mac_owner;
 volatile u32 net_console_mac_handovers;
 volatile u32 net_tick_longest[NET_MAX];         /* each slot's driver tick, time base ticks */
+volatile u32 net_stall_retries;                 /* links the stall watch took down, given back */
+#define STALL_RETRY_TICKS 900u                  /* worker ticks: ~30 s */
 
 static u32 net_tb(void)
 {
@@ -269,6 +271,7 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
 
 void net_link_report(NET_DEV *nd, u32 up)
 {
+    nd->stalled_ticks = 0;              /* the driver's own word replaces the stall watch's */
     bench_event(1, (u32)(nd - net_devs), up, (u32)__builtin_return_address(0));
     if (!up)
         nd->link_down_seen = 1;
@@ -430,6 +433,8 @@ u32 net_tx(const u8 *frame, u32 length)
 {
     NET_DEV *nd = uplink();
 
+    if (bench_tx_refused())
+        return 0;
     if (!nd || !nd->st->ready || !nd->usb->active || length < ETH_HLEN ||
         length > ETH_FRAME_MAX) {
         if (nd)
@@ -541,9 +546,28 @@ void net_tick(void)
         }
     }
     owner_watch();
+    /* A link the stall watch took down while the card itself kept it comes back after
+     * STALL_RETRY_TICKS: a card that refused frames for a while (2026-11-10, bench_tx_refuse)
+     * otherwise stayed off until the next boot. Refusing still, it is taken down again. */
+    for (i = 0; i < NET_MAX; i++) {
+        NET_DEV *nd = &net_devs[i];
+
+        if (!nd->stalled_ticks)
+            continue;
+        if (!nd->drv || !nd->st->ready) {
+            nd->stalled_ticks = 0;
+        } else if (++nd->stalled_ticks >= STALL_RETRY_TICKS) {
+            nd->stalled_ticks = 0;
+            net_stall_retries++;
+            set_link(nd, 1);
+        }
+    }
     if (xnet_tick_stalled() && uplink()) {
-        bench_event(3, (u32)(uplink() - net_devs), xnet_stats.xq_stall_depth, 0);
-        net_link_report(uplink(), 0);
+        NET_DEV *nd = uplink();
+
+        bench_event(3, (u32)(nd - net_devs), xnet_stats.xq_stall_depth, 0);
+        net_link_report(nd, 0);
+        nd->stalled_ticks = 1;
     }
 }
 

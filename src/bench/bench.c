@@ -123,6 +123,19 @@ u32 bench_command(u32 what, volatile u32 *args)
     }
 }
 
+#if XE_BENCH_DEBUG
+volatile u32 bench_tx_refuse;
+#endif
+
+u32 bench_tx_refused(void)
+{
+#if XE_BENCH_DEBUG
+    return bench_tx_refuse;
+#else
+    return 0;
+#endif
+}
+
 u32 bench_wired_hidden(void)
 {
 #if XE_BENCH_DEBUG

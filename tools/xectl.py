@@ -811,9 +811,12 @@ def status(sym):
               u["match_calls"], u["add_calls"], u["remove_calls"], u["close_passes"],
               u["cancels"], u["unbound_resets"], u["no_slot"], u["control_late"],
               u["nak_reload_set"], u["nak_reload_skipped"]))
-    print("xnet q   stalls=%d depth at the last=%d head drops=%d (last %d B, type %#06x) | cwnd clamp %s" % (
+    retries = struct.unpack(">I", read(sym["net_stall_retries"], 4))[0] \
+        if "net_stall_retries" in sym else 0
+    print("xnet q   stalls=%d depth at the last=%d head drops=%d (last %d B, type %#06x) "
+          "links given back %d | cwnd clamp %s" % (
         xs["xq_stalls"], xs["xq_stall_depth"], xs["xq_head_drops"], xs["xq_head_length"],
-        xs["xq_head_type"],
+        xs["xq_head_type"], retries,
         "refused (other xam)" if xs["cwnd_refused"] else
         ("%d KB" % xs["cwnd_kb"]) if xs["cwnd_kb"] else "stock 64 KB"))
     print("xnet mem system pool +%d KB%s | TCP sockets %d -> %s%s" % (xs["pool_added_kb"],
@@ -1145,6 +1148,13 @@ def router_state(band):
     m = re.search(r"txpower ([\d.]+) dBm", out)
     if m:
         st["txpower_dbm"] = float(m.group(1))
+    # Two cards may be joined at once (an RTL8822BU and an AIC8800): the console's station is
+    # the one the result went through, the most bytes both ways.
+    stations = re.split(r"(?m)^Station ", out)[1:]
+    if stations:
+        def moved(block):
+            return sum(int(n) for n in re.findall(r"[rt]x bytes:\s+(\d+)", block))
+        out = "Station " + max(stations, key=moved)
     for key, pat in (("signal_dbm", r"signal:\s+(-?\d+)"), ("tx_bitrate", r"tx bitrate:\s+([\d.]+)"),
                      ("rx_bitrate", r"rx bitrate:\s+([\d.]+)"), ("tx_retries", r"tx retries:\s+(\d+)"),
                      ("tx_failed", r"tx failed:\s+(\d+)")):

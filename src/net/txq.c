@@ -16,7 +16,7 @@ static void dropped(NET_TXQ *t)
 void net_txq_drain(NET_TXQ *t)
 {
     NET_TXQ_ENTRY e;
-    u32 irql, sent;
+    u32 irql, sent, refused = 0;
 
     for (;;) {
         if (__sync_lock_test_and_set(&t->draining, 1))
@@ -39,6 +39,7 @@ void net_txq_drain(NET_TXQ *t)
                 t->head = (t->head + NET_TXQ_SIZE - 1) % NET_TXQ_SIZE;
                 t->q[t->head] = e;
                 KfReleaseSpinLock(&t->lock, irql);
+                refused = 1;
                 break;
             }
             if (!sent)
@@ -46,7 +47,12 @@ void net_txq_drain(NET_TXQ *t)
             t->done(t->owner, e.user, e.cookie);
         }
         __sync_lock_release(&t->draining);
-        if (t->head == t->tail || !t->space(t->owner))
+        /* A frame refused with room said is not tried again here: the card may refuse it
+         * every time (an AIC8800 whose handshake gate was shut while its ring had room),
+         * and this went round for ever on the thread that handed xnet's frame in -- the
+         * console hung. The next completion or put drains again; xnet.c's stall watch
+         * drops a frame refused for good. */
+        if (refused || t->head == t->tail || !t->space(t->owner))
             break;
     }
 }
