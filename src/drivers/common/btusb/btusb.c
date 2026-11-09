@@ -97,13 +97,17 @@ static void acl_done(URB *urb, u32 status)
     BTUSB *b = (BTUSB *)urb->Owner;
     u32 n = urb->Actual, i, need;
 
-    if (!b->running || !b->dev->active)
+    if (!b->running || !b->dev->active || !b->acl_receiving) {
+        b->acl_receiving = 0;
         return;
+    }
     if (!NT_SUCCESS(status)) {
         b->st->last_error = status;
         b->acl_have = 0;
         if (++b->errors < 16)
             acl_ask(b);
+        else
+            b->acl_receiving = 0;
         return;
     }
     for (i = 0; i < n && b->acl_have < BTUSB_ACL_MAX; i++)
@@ -125,6 +129,22 @@ static void acl_ask(BTUSB *b)
     usb_prepare(&b->acl_urb, b->dev, b->ep_acl_in, acl_done, b->acl_buf, BTUSB_ACL_MAX, 0);
     b->acl_urb.Owner = b;
     usb_submit(&b->acl_urb);
+}
+
+static void acl_receive(void *ctx, u32 on)
+{
+    BTUSB *b = (BTUSB *)ctx;
+
+    if (on && !b->acl_receiving && b->running) {
+        if (!usb_wait_idle(&b->acl_urb, 100))
+            return;                     /* the last one not back yet: next tick */
+        b->acl_receiving = 1;
+        b->acl_have = 0;
+        acl_ask(b);
+    } else if (!on && b->acl_receiving) {
+        b->acl_receiving = 0;
+        usb_cancel(&b->acl_urb);
+    }
 }
 
 /* --- sending --------------------------------------------------------------------------- */
@@ -251,10 +271,11 @@ static u32 start(BTUSB *b, USB_DEV *dev, const u8 *taken)
     b->transport.ctx = b;
     b->transport.command = send_command;
     b->transport.acl = send_acl;
+    b->transport.acl_receive = acl_receive;
+    b->acl_receiving = 0;
     b->running = 1;
     mem_sync();
     event_ask(b);
-    acl_ask(b);
     bt_attach(&b->transport);
     b->st->started++;
     return 0;
@@ -263,6 +284,7 @@ static u32 start(BTUSB *b, USB_DEV *dev, const u8 *taken)
 void btusb_stop(BTUSB *b)
 {
     b->running = 0;
+    b->acl_receiving = 0;
     mem_sync();
     bt_detach();
 }

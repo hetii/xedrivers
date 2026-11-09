@@ -17,6 +17,8 @@ static int failures;
 void  usb_prepare(URB *u, USB_DEV *d, void *e, URB_COMPLETION f, void *b, u32 l, const u8 *s)
 { (void)u; (void)d; (void)e; (void)f; (void)b; (void)l; (void)s; }
 void  usb_submit(URB *u) { (void)u; }
+void  usb_cancel(URB *u) { (void)u; }
+u32   usb_wait_idle(URB *u, u32 t) { (void)u; (void)t; return 1; }
 void  usb_wake(void) { }
 u32   usb_control(USB_DEV *d, const u8 s[8], void *b, u32 l, u32 *a, u32 t)
 { (void)d; (void)s; (void)b; (void)l; (void)a; (void)t; return 1; }
@@ -58,7 +60,7 @@ static u32 take_acl(void *ctx, const u8 *p, u32 n)
     return 0;
 }
 
-static const BT_TRANSPORT fake = { 0, take_command, take_acl };
+static const BT_TRANSPORT fake = { 0, take_command, take_acl, 0 };
 
 static void event(const u8 *e, u32 n)
 {

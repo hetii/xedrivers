@@ -17,6 +17,9 @@ typedef struct {
     void *ctx;
     u32 (*command)(void *ctx, const u8 *packet, u32 length);   /* an HCI command packet */
     u32 (*acl)(void *ctx, const u8 *packet, u32 length);       /* an ACL data packet */
+    /* Receive ACL data, or not: only while a link is up. A pending bulk IN on the shared
+     * EHCI halved an RTL8822BU's throughput beside it (2026-11-09). Thread-only. */
+    void (*acl_receive)(void *ctx, u32 on);
 } BT_TRANSPORT;
 
 /* The driver's side. attach and tick from the worker; detach, event and acl at any IRQL up

@@ -37,6 +37,7 @@ static u16 waiting_opcode[WAITING_MAX];
 static u8 waiting_length[WAITING_MAX];
 static u32 waiting_in, waiting_out;
 static u32 keys_loaded;
+static u32 acl_on;                      /* ACL in asked of the transport */
 
 /* --- for the driver ------------------------------------------------------------------- */
 
@@ -112,6 +113,7 @@ void bt_attach(const BT_TRANSPORT *t)
     queue_out = queue_in;
     acl_out = acl_in;
     acl_credits = 0;
+    acl_on = 0;
     waiting_in = waiting_out = 0;
     keys_loaded = 0;
     for (i = 0; i < BT_CONN_MAX; i++)
@@ -452,6 +454,17 @@ void bt_tick(void)
         acl_out++;
     }
     send_waiting();
+    {
+        /* ACL in only while some link is (being) up */
+        u32 i, links = 0;
+
+        for (i = 0; i < BT_CONN_MAX; i++)
+            links += bt_conns[i].state != BT_CONN_FREE;
+        if ((links != 0) != acl_on && transport->acl_receive) {
+            acl_on = links != 0;
+            transport->acl_receive(transport->ctx, acl_on);
+        }
+    }
     if (bt_keys_changed && keys_loaded)
         bt_save_keys();
     bt_profiles_tick();

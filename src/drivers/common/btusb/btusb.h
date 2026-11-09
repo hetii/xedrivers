@@ -52,6 +52,7 @@ typedef struct BTUSB {
     u8 *acl_buf;                    /* DMA: one bulk transfer */
     u8 acl[BTUSB_ACL_MAX];
     u32 acl_have;
+    volatile u32 acl_receiving;     /* the ACL IN request is out */
     URB out_urb[BTUSB_OUT];
     u8 *out_buf[BTUSB_OUT];
     volatile u32 out_busy[BTUSB_OUT];

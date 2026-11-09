@@ -7,6 +7,7 @@
 
 #include "aic.h"
 #include "btusb.h"
+#include "file.h"
 
 static BTUSB bt;
 
@@ -14,7 +15,12 @@ u32 aic_bt_start(AIC *a)
 {
     /* the Wi-Fi's: commands 0x02/0x82, data 0x01/0x81 (aic_cmd.c, aic_data.c) */
     static const u8 wifi[] = { 0x02, 0x82, 0x01, 0x81, 0 };
+    char value[8];
 
+    /* bluetooth = off in xedrivers.ini: the card's Wi-Fi only */
+    if (file_setting("xedrivers.ini", "bluetooth", value, sizeof(value)) && value[0] == 'o' &&
+        value[1] == 'f')
+        return AIC_STEP_BT_RESET;
     return btusb_start(&bt, a->dev, wifi) ? AIC_STEP_BT_RESET : 0;
 }
 
