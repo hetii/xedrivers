@@ -10,6 +10,7 @@
  */
 
 #include "host.h"
+#include "usb.h"
 
 #define QUEUE           16u             /* events, a power of two */
 #define EVENT_MAX       260u
@@ -242,7 +243,7 @@ static void start_inquiry(void)
     }
 }
 
-u32 bt_command(u32 what, volatile u32 *args)
+static u32 bt_command_now(u32 what, volatile u32 *args)
 {
     u8 address[6];
     u32 i;
@@ -466,7 +467,7 @@ static void take(const u8 *e, u32 length)
     }
 }
 
-void bt_tick(void)
+static void bt_tick_now(void)
 {
     if (!transport)
         return;
@@ -507,4 +508,89 @@ void bt_tick(void)
     if (bt_keys_changed && keys_loaded)
         bt_save_keys();
     bt_profiles_tick();
+}
+
+/* --- the host's own thread ---------------------------------------------------------------
+ * The host ran in the worker's loop, after the network cards' ticks, which wait on
+ * synchronous USB transfers: up to 700 ms (RTL8822BU) and 317 ms (AIC8800) at a time, 41
+ * times a minute over 100 ms -- an A2DP stream behind them heard 2 s gaps. Now it has a thread
+ * of its own: the worker's processor, a higher priority (it preempts the worker spinning on a
+ * control transfer), a 5 ms loop (packets go out as evenly as Linux sends them). The worker
+ * hands it xectl's commands and waits for the answer. */
+
+#define BT_PROCESSOR    5u
+#define BT_PRIORITY     20u
+#define BT_LOOP_MS      5
+
+extern int ExCreateThread(void **handle, u32 stack, u32 *id, void *api, void *start,
+                          void *parameter, u32 flags);
+extern u32 KeSetAffinityThread(void *thread, u32 affinity, u32 *previous);
+extern u32 KeSetPriorityThread(void *thread, u32 priority);
+
+static volatile u32 thread_started, posted_what, posted_done;
+#if defined(__powerpc__)
+static volatile u32 *posted_args;
+#endif
+
+#if defined(__powerpc__)
+static void bt_thread(void *parameter)
+{
+    s64 interval = -(s64)BT_LOOP_MS * 10000;
+    void *self;
+    u32 previous;
+
+    (void)parameter;
+#if defined(__powerpc__)
+    __asm__ volatile("lwz %0, 0x100(13)" : "=r"(self));
+#else
+    self = 0;
+#endif
+    KeSetAffinityThread(self, 1u << BT_PROCESSOR, &previous);
+    KeSetPriorityThread(self, BT_PRIORITY);
+    for (;;) {
+        bt_stats.thread_loops++;
+        bt_tick_now();
+        if (posted_what) {
+            u32 handled = bt_command_now(posted_what, posted_args);
+
+            mem_sync();
+            posted_done = handled ? 1 : 2;
+            posted_what = 0;
+        }
+        KeDelayExecutionThread(0, 0, &interval);
+    }
+}
+#endif
+
+void bt_tick(void)
+{
+#if defined(__powerpc__)
+    if (!thread_started && transport) {
+        void *h = 0;
+
+        thread_started = 1;
+        ExCreateThread(&h, 0, 0, 0, (void *)bt_thread, 0, 2);
+    }
+#else
+    bt_tick_now();                      /* host tests: no thread */
+#endif
+}
+
+u32 bt_command(u32 what, volatile u32 *args)
+{
+#if defined(__powerpc__)
+    u32 waited;
+
+    if (what < BT_CMD_SCAN || what > BT_CMD_RADIO || !thread_started)
+        return 0;
+    posted_done = 0;
+    posted_args = args;
+    mem_sync();
+    posted_what = what;
+    for (waited = 0; !posted_done && waited < 2000; waited++)
+        usb_sleep(1);
+    return posted_done == 1;
+#else
+    return bt_command_now(what, args);
+#endif
 }

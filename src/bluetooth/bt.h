@@ -85,6 +85,7 @@ typedef struct {
     s32 tx_power_max;
     s32 rssi;                   /* dB from the golden range, Read_RSSI */
     u32 radio_reads;
+    u32 thread_loops;           /* the host's own thread (hci.c) */
 } BT_STATS;
 
 extern volatile BT_STATS bt_stats;

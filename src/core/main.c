@@ -169,6 +169,47 @@ static void pulse_thread(void *parameter)
 
 #define PULSE_TICKS 25                          /* 500 ms of the worker without a count */
 
+/* How long each part of the worker's loop takes: its longest, and how often over 100 ms --
+ * a 2 s gap in a Bluetooth stream was the worker held up somewhere. Read by xectl.py
+ * (worker). Time base ticks (~49.875 MHz). */
+#define WP_PARTS 7                      /* claim, bring-up, net, voice, bt, servers, command */
+
+typedef struct {
+    u32 longest[WP_PARTS];
+    u32 over_100ms[WP_PARTS];
+    u32 longest_tick[WP_PARTS];         /* the worker tick of the longest */
+    u32 wait_longest;                   /* the tick's own wait, asked 20 ms */
+} WORKER_PROF;
+
+volatile WORKER_PROF worker_prof;
+
+static u32 tb_now(void)
+{
+#if defined(__powerpc__)
+    u32 t;
+
+    __asm__ volatile("mftb %0" : "=r"(t));
+    return t;
+#else
+    return 0;
+#endif
+}
+
+static u32 wp_mark;
+
+static void wp(u32 part, u32 tick)
+{
+    u32 now = tb_now(), took = now - wp_mark;
+
+    wp_mark = now;
+    if (took > worker_prof.longest[part]) {
+        worker_prof.longest[part] = took;
+        worker_prof.longest_tick[part] = tick;
+    }
+    if (took > 4987500u)                /* 100 ms */
+        worker_prof.over_100ms[part]++;
+}
+
 static void worker(void *parameter)
 {
     u32 tick, what, i, pulse_seen = 0, pulse_tick = 0;
@@ -185,6 +226,7 @@ static void worker(void *parameter)
     for (tick = 0;; tick++) {
         xe_state.worker_ticks = tick;
         bench_tick(tick);
+        wp_mark = tb_now();
 
         /* Ticks are 20 ms: the first claim one second in, then every five while
          * nothing has been offered, six tries in all. */
@@ -194,6 +236,7 @@ static void worker(void *parameter)
             if (usb_claim_present())
                 xe_state.claim_found++;
         }
+        wp(0, tick);
 
         if (pulse != pulse_seen) {
             pulse_seen = pulse;
@@ -226,14 +269,19 @@ static void worker(void *parameter)
                 away_from_the_usb_processor();
             }
         }
+        wp(1, tick);
         net_tick();
+        wp(2, tick);
 #if XE_AUDIO
         audio_voice_tick();
 #endif
+        wp(3, tick);
 #if XE_BLUETOOTH
         bt_tick();
 #endif
+        wp(4, tick);
         servers_tick(tick);
+        wp(5, tick);
 
         what = xe_cmd[0];
         if (what) {
@@ -243,7 +291,14 @@ static void worker(void *parameter)
             xe_cmd[6] = what;
             xe_cmd[4] = xe_cmd[4] + 1;
         }
+        wp(6, tick);
         usb_wait(20);
+        {
+            u32 w = tb_now() - wp_mark;
+
+            if (w > worker_prof.wait_longest)
+                worker_prof.wait_longest = w;
+        }
     }
 }
 

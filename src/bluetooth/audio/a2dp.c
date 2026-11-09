@@ -242,10 +242,15 @@ static u32 first_step(void)
     return step_count - 1;
 }
 
+/* Read once (a step change must not touch the file system mid-stream). */
 static void read_quality(void)
 {
+    static u32 read;
     char v[8];
 
+    if (read)
+        return;
+    read = 1;
     quality = QUALITY_AUTO;
     if (file_setting("xedrivers.ini", "bt_quality", v, sizeof(v))) {
         if (v[0] == 'm')

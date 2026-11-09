@@ -93,16 +93,22 @@ void audio_callback(void *context)
 USB_STUB("audio_entry", "lis 12, audio_callback@ha\n    addi 12, 12, audio_callback@l");
 void audio_entry(void *context);
 
+/* Read once: every (re)start of a stream used to read the file, a Bluetooth stream's step
+ * change among them -- file I/O on the USB medium in the middle of streaming. */
 static u32 volume_setting(void)
 {
+    static u32 cached = 0xFFFFFFFFu;
     char value[8];
-    u32 n = file_setting("xedrivers.ini", "audio_volume", value, sizeof(value)), i, v = 0;
+    u32 n, i, v = 0;
 
+    if (cached != 0xFFFFFFFFu)
+        return cached;
+    n = file_setting("xedrivers.ini", "audio_volume", value, sizeof(value));
     if (!n)
-        return DEFAULT_VOLUME;
+        return cached = DEFAULT_VOLUME;
     for (i = 0; i < n && value[i] >= '0' && value[i] <= '9'; i++)
         v = v * 10 + (u32)(value[i] - '0');
-    return v > 100 ? 100 : v;
+    return cached = v > 100 ? 100 : v;
 }
 
 u32 audio_surround(void)
@@ -180,6 +186,12 @@ void audio_read(u32 reader, s32 *out, u32 frames)
     u32 w = write_at, r = rd->read_at, have, n, i, c;
     u32 channels = rd->layout == AUDIO_STEREO ? 2 : 6;
 
+    if (!stereo_ring || !rd->active) {          /* no ring (its pool refused it) or not open */
+        for (i = 0; i < frames * channels; i++)
+            out[i] = 0;
+        audio_stats.underruns += frames;
+        return;
+    }
     if (w - r > RING_FRAMES - AUDIO_FRAME_SAMPLES) {    /* a ring behind: skip ahead */
         audio_stats.overruns += w - r - start_frames[reader];
         r = w - start_frames[reader];

@@ -18,6 +18,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py cmd N [a1 a2 a3]           any raw command
     xectl.py omni                       what a wireless card registered by cmd 21 was asked
     xectl.py prof [SECONDS]             where a frame's time goes (bench=prof)
+    xectl.py worker                     where the worker's loop spends its longest moments
     xectl.py bt [scan|connect N|disconnect N]  the Bluetooth host; scan ~10 s; connect pairs (Just Works)
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
     xectl.py bench tcp [up|down|both] [--streams 1,4] [--seconds S] [--pace MB/s]
@@ -178,7 +179,7 @@ STRUCTS = {
                  "connections", "connect_failures", "pairings", "auth_failures",
                  "keys_loaded", "acl_received", "acl_sent", "acl_dropped",
                  "keys_saved", "keys_save_failed", "tx_power", "tx_power_max", "rssi",
-                 "radio_reads"],
+                 "radio_reads", "thread_loops"],
     "a2dp_stats": ["state", "role_initiator", "remote_seid", "rate", "mode", "blocks", "bitpool",
                    "allocation", "caps", "caps_bitpool", "frame_length", "frames_per_packet",
                    "packets", "frames", "send_failures", "late", "rejects", "last_reject",
@@ -1722,6 +1723,20 @@ def main(argv):
                 print("slot %d: %s" % (i, one))
     elif what == "bt":
         bt(sym, rest)
+    elif what == "worker":
+        names = ["claim", "bring-up", "net (drivers' ticks)", "voice", "bluetooth", "servers",
+                 "command"]
+        raw = read(sym["worker_prof"], 4 * (3 * 7 + 1))
+        w = struct.unpack(">22I", raw)
+        for i, n in enumerate(names):
+            print("%-22s longest %8.1f ms (tick %d), over 100 ms %d times" % (
+                n, w[i] / 49875.0, w[14 + i], w[7 + i]))
+        print("%-22s longest %8.1f ms" % ("the tick's wait (20)", w[21] / 49875.0))
+        if "net_tick_longest" in sym:
+            t = struct.unpack(">%dI" % NET_MAX, read(sym["net_tick_longest"], 4 * NET_MAX))
+            for i in range(NET_MAX):
+                if t[i]:
+                    print("  slot %d driver tick longest %8.1f ms" % (i, t[i] / 49875.0))
     elif what == "memory":
         # bench=debug: MmQueryStatistics' words, and 64 KB blocks that can be taken
         st = command(sym, 25, wait=120)

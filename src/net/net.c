@@ -101,6 +101,19 @@ static u32 socket_rank(const NET_DEV *nd)
 /* 1 if `a` should be the uplink rather than `b` (both with a link up). */
 static NET_DEV *console_mac_owner;
 volatile u32 net_console_mac_handovers;
+volatile u32 net_tick_longest[NET_MAX];         /* each slot's driver tick, time base ticks */
+
+static u32 net_tb(void)
+{
+#if defined(__powerpc__)
+    u32 t;
+
+    __asm__ volatile("mftb %0" : "=r"(t));
+    return t;
+#else
+    return 0;
+#endif
+}
 static u32 owner_unlinked;              /* worker ticks the owner has gone without a link */
 
 /* The console's address goes to another card when its card has had no link for 30 s while
@@ -518,8 +531,14 @@ void net_tick(void)
     for (i = 0; i < NET_MAX; i++) {
         NET_DEV *nd = &net_devs[i];
 
-        if (nd->drv && nd->drv->tick && nd->st->ready)
+        if (nd->drv && nd->drv->tick && nd->st->ready) {
+            u32 t0 = net_tb(), took;
+
             nd->drv->tick(nd);
+            took = net_tb() - t0;
+            if (took > net_tick_longest[i])
+                net_tick_longest[i] = took;     /* xectl.py worker: per slot */
+        }
     }
     owner_watch();
     if (xnet_tick_stalled() && uplink()) {
