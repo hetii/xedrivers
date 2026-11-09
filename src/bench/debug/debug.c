@@ -6,6 +6,7 @@
  */
 
 #include "debug.h"
+#include "usb.h"
 #include "net.h"
 #include "wpa.h"
 
@@ -300,3 +301,30 @@ u32 debug_memory(void)
     debug_memory_blocks[3] = probe(1, 1);
     return status;
 }
+
+#if XE_AUDIO
+extern int XamVoiceSubmitPacket(void *handle, u32 direction, void *packet);
+
+volatile u32 debug_voice_words[8];
+s16 debug_voice_buffer[1024];
+
+u32 debug_voice(u32 units)
+{
+    u32 i;
+
+    if (!units || units > 512)
+        units = 160;                    /* 20 ms */
+    for (i = 0; i < 8; i++)
+        debug_voice_words[i] = 0;
+    for (i = 0; i < 1024; i++)
+        debug_voice_buffer[i] = 0;
+    debug_voice_words[2] = (u32)(unsigned long)debug_voice_buffer;
+    debug_voice_words[3] = units;
+    debug_voice_words[5] = 1;           /* G.726, as XHV asks */
+    debug_voice_words[7] = (u32)usb_framed_call((void *)XamVoiceSubmitPacket, 0, 1,
+                                                (u32)(unsigned long)debug_voice_words);
+    for (i = 0; i < 200 && debug_voice_words[0] == 0x103u; i++)
+        usb_sleep(1);
+    return debug_voice_words[0];
+}
+#endif

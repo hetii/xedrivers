@@ -90,7 +90,8 @@ volatile AUDIO_VOICE_STATS audio_voice_stats;
 static DETOUR present_detour, submit_detour, battery_detour;
 static u32 bind_checked, bind_ok;
 static volatile u32 bound, bound_user = 0xFF;
-static u32 displaced_context, displaced_device, bind_ticks, last_alive;
+static u32 displaced_context, displaced_device, bind_ticks, last_alive, quiet_ticks;
+#define QUIET_TICKS 15u                 /* ~0.5 s of worker ticks with nothing captured: gone */
 
 typedef struct {
     volatile u32 state;                 /* 0 free, 1 taken, 2 queued, 3 being answered */
@@ -352,8 +353,11 @@ void audio_voice_tick(void)
 {
     u32 written = audio_mic_stats.samples;
 
-    audio_voice_stats.alive = written != last_alive;
+    /* A tick can come twice between two of the capture's 4 ms transfers: only a run of quiet
+     * ticks means the microphone went. */
+    quiet_ticks = written != last_alive ? 0 : quiet_ticks + 1;
     last_alive = written;
+    audio_voice_stats.alive = quiet_ticks < QUIET_TICKS;
     if (!audio_voice_stats.alive) {
         fail_all();
         if (bound)

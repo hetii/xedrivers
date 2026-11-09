@@ -71,4 +71,11 @@ extern volatile u32 debug_omni_wired_hidden;
 u32 debug_omni_wired_off(u32 seconds);
 void debug_omni_tick(void);
 
+/* A microphone request through xam's XamVoiceSubmitPacket, as XHV makes one: `units` (two
+ * 16 kHz samples each, up to 512) into debug_voice_buffer. The packet's words are left in
+ * debug_voice_words; returns its status word after up to 200 ms. */
+u32 debug_voice(u32 units);
+extern volatile u32 debug_voice_words[8];
+extern s16 debug_voice_buffer[1024];
+
 #endif /* XE_DEBUG_CMDS_H */

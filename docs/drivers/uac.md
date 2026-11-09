@@ -54,6 +54,21 @@ with WMA Pro (`XAudioGetSpeakerConfig`, kernel 511: 0x00000003 digital stereo, 0
 Dolby Digital, 0x00030001 with WMA Pro), else the stereo mix in its front pair. The setting is
 read about every 3 s; a change resets the card, which then chooses again.
 
+## Microphone
+
+A card's microphone (`mic.c`) is captured beside its output, channel 0 averaged three to one
+into 16 kHz mono, and offered to the console's voice chat (`src/audio/voice.c`, after
+usb-audio-x360): XamVoiceHeadsetPresent, XamVoiceSubmitPacket and XamVoiceGetBatteryStatus are
+entered through ours first (`src/core/detour.c`), the title's microphone requests are answered
+from the capture as 16 kHz PCM, and player 0's voice route is pointed at a virtual headset
+through xam's binding routine (0x816D9060 on 17559, checked word for word), the old route put
+back when the microphone goes. A profile has to be signed in on player 0.
+
+Tested with a CM108's output looped into its microphone input and bench=debug's test tone:
+`xectl.py cmd 26` makes a microphone request through the real XamVoiceSubmitPacket, and it came
+back answered, 640 bytes of 16 kHz PCM carrying the tone's 1, 3 and 5.3 kHz. Not yet heard in a
+game's chat.
+
 ## Issues
 
 - Pulling the card out by hand is untested; the same path ran on 3 device resets.
@@ -64,6 +79,6 @@ read about every 3 s; a change resets the card, which then chooses again.
 - At boot the speaker setting reads 0x00000003 before the dashboard applies its own; a 5.1 card
   is corrected by the 3 s check, a stereo card does not care.
 
-Not done: microphone (XamVoice), the 4 ms + ring latency is not tuned, UAC2 clock selectors.
+Not done: the 4 ms + ring latency is not tuned, UAC2 clock selectors.
 The isochronous request layout and status words come from usb-audio-x360's reading of retail
 17559, not from a claim of our own.

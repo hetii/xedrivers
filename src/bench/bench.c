@@ -27,6 +27,7 @@
 #define CMD_THREAD_PRIO 15u /* [1] thread id (xerunner console list-threads), [2] prio */
 #define CMD_PEEK       16u  /* [1] address, [2] 1 = little-endian (MMIO) -> word */
 #define CMD_POKE       17u  /* [1] address, [2] 1 = little-endian, [3] word */
+#define CMD_VOICE      26u  /* debug_voice: a microphone request as a title makes it */
 #define CMD_MEMORY     25u  /* debug_memory: statistics, and what can be taken */
 #define CMD_CONFIG     18u  /* [1] category, [2] setting -> size, bytes in
                              * debug_config_value */
@@ -75,6 +76,11 @@ u32 bench_command(u32 what, volatile u32 *args)
     case CMD_THREAD_PRIO:
         args[5] = debug_thread_priority(args[1], args[2]);
         return 1;
+#if XE_AUDIO
+    case CMD_VOICE:
+        args[5] = debug_voice(args[1]);
+        return 1;
+#endif
     case CMD_PEEK:
         args[5] = debug_peek(args[1], args[2]);
         return 1;
