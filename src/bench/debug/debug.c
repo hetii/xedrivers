@@ -180,6 +180,8 @@ u32 debug_crypto(void)
     return passed;
 }
 
+static WPA known_wpa;           /* the known-answer check's own */
+
 /* --- WPA2's two awkward parts, against known answers --------------------------
  *   1  the key from a passphrase: "password" on the network "IEEE" gives
  *      f42c6fc52df0ebef9ebb4b90b38a5f90 2e83fe1b135a70e23aed762e9710a12e
@@ -208,9 +210,9 @@ u32 debug_wpa(void)
     for (i = 0; i < 12; i++)
         debug_crypto_out[i] = 0;
 
-    wpa_set_psk("password", (const u8 *)"IEEE", 4);
-    keep(0, (const u8 *)wpa_psk_for_test(), 16);
-    if (same((const u8 *)wpa_psk_for_test(), psk_want, 32))
+    wpa_set_psk(&known_wpa, "password", (const u8 *)"IEEE", 4);
+    keep(0, (const u8 *)wpa_psk_for_test(&known_wpa), 16);
+    if (same((const u8 *)wpa_psk_for_test(&known_wpa), psk_want, 32))
         passed |= 1;
 
     if (wpa_unwrap(kek, wrapped, sizeof(wrapped), out) == 16) {

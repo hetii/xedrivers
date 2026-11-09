@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "bridge.h"
+#include "wpa.h"
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
@@ -31,7 +32,8 @@ u32 file_setting(const char *name, const char *key, char *out, u32 size)
 }
 
 static u32 keys_waiting;
-u32 wpa_apply(void) { u32 w = keys_waiting; keys_waiting = 0; return w; }
+static WPA handshake;           /* only its address: wpa_apply is stubbed */
+u32 wpa_apply(WPA *h) { u32 w = keys_waiting; (void)h; keys_waiting = 0; return w; }
 
 const WL_MODE wl_omni_mode;            /* not this test's (omni.c) */
 const u8 *net_join_mac(NET_DEV *nd) { return nd->mac; }  /* the tests run without a device */
@@ -59,7 +61,7 @@ static u32 c_state(void *c)
     return (joined ? WL_CARD_JOINED : 0) | (scanning ? WL_CARD_SCANNING : 0);
 }
 
-static const WL_CARD card = { 0, c_scan, c_join, c_leave, c_state };
+static const WL_CARD card = { 0, c_scan, c_join, c_leave, c_state, &handshake };
 
 /* A scan's result, as wireless.c keeps them. */
 static void seen(u32 i, const char *ssid, s8 rssi, u8 security)

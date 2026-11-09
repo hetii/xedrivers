@@ -267,6 +267,7 @@ typedef struct AIC {
     KDPC reorder_dpc;           /* a timeout's flush, run where receive runs */
     volatile u32 reorder_dpc_queued;
     WL_CARD card;               /* what the layer above may ask of it */
+    WPA wpa;                    /* this card's handshake */
     WL_LINK link;               /* which way it serves, and that mode's state */
     u32 secured;                /* this join runs the handshake before the link */
     u8 bssid[6];                /* the access point joined, for the EAPOL header */

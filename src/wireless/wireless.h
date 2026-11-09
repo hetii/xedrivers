@@ -121,6 +121,7 @@ typedef struct {
     u32 (*join)(void *context, const WL_BSS *bss, const char *pass, u32 pass_len);
     u32 (*leave)(void *context);
     u32 (*state)(void *context);            /* WL_CARD_* */
+    struct WPA *wpa;                        /* this card's handshake (wpa.h) */
 } WL_CARD;
 
 /* --- which way a card serves the console ---------------------------------------- *

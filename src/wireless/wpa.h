@@ -71,27 +71,49 @@ typedef struct {
     u32 group_rekeys;       /* group key handshakes answered after the four-way */
 } WPA_STATS;
 
-extern volatile WPA_STATS wpa_stats;
+extern volatile WPA_STATS wpa_stats;       /* the last handshake's, for xectl.py */
+
+/* One card's handshake: each wireless card has its own (two cards, an RTL8822BU and an
+ * AIC8800, shared one and wrote over each other's keys: the AIC8800 reset looped on 4-way
+ * timeouts while the RTL8822BU was joined). */
+#define WPA_FRAME_MAX 512
+typedef struct WPA {
+    u8 psk[WPA_PSK_LEN];
+    u8 ptk[WPA_PTK_LEN];                    /* confirmation, encryption and temporal key */
+    u8 anonce[WPA_NONCE_LEN];
+    u8 snonce[WPA_NONCE_LEN];
+    u8 replay[8];
+    u8 own_addr[6], ap_addr[6];
+    u8 own_rsn[32];
+    u32 own_rsn_len;
+    u8 frame[WPA_FRAME_MAX];
+    WPA_HOST host;
+    /* settled by the handshake, to be installed on the worker (wpa_apply) */
+    u8 pending_gtk[WPA_GTK_MAX];
+    u32 pending_gtk_len, pending_gtk_index;
+    u32 pending_ptk;                        /* the pairwise key too: the four-way, not a rekey */
+    volatile WPA_STATS st;
+} WPA;
 
 /* The key from the passphrase and the network's name. Thread-only: it is 8192
  * keyed hashes and takes a moment. */
-void wpa_set_psk(const char *passphrase, const u8 *ssid, u32 ssid_len);
+void wpa_set_psk(WPA *w, const char *passphrase, const u8 *ssid, u32 ssid_len);
 
 /* Start a handshake: the addresses are the station's own and the access point's.
  * The association request's security element must be the one the access point will
  * see in the second message, so it is given here. */
-void wpa_begin(const WPA_HOST *host, const u8 *own_mac, const u8 *ap_mac,
+void wpa_begin(WPA *w, const WPA_HOST *host, const u8 *own_mac, const u8 *ap_mac,
                const u8 *rsn_ie, u32 rsn_ie_len);
 
 /* One EAPOL frame from the air: what follows the Ethernet header. Any IRQL up to
  * DISPATCH: it hashes, answers on the air, and leaves the keys for wpa_apply. */
-void wpa_eapol_in(const u8 *body, u32 length);
+void wpa_eapol_in(WPA *w, const u8 *body, u32 length);
 
 /* Hand the firmware whatever the handshake has settled, if anything: the keys and
  * then the open port. Thread-only, because installing a key is a command the
  * firmware confirms and that has to be waited for. 1 if there was something to
  * do, so the caller knows the link state may have changed. */
-u32 wpa_apply(void);
+u32 wpa_apply(WPA *w);
 
 /* The group key's wrapping undone (RFC 3394) with the console's AES: `in_len` a
  * multiple of eight and at least 24, the result eight bytes shorter, 0 when the
@@ -100,8 +122,8 @@ u32 wpa_apply(void);
 u32 wpa_unwrap(const u8 *kek, const u8 *in, u32 in_len, u8 *out);
 
 /* The derived keys themselves, for that check and the host test, nothing else. */
-const u8 *wpa_psk_for_test(void);
-const u8 *wpa_ptk_for_test(void);
+const u8 *wpa_psk_for_test(WPA *w);
+const u8 *wpa_ptk_for_test(WPA *w);
 
 /* The security element a station announces for WPA2 with a pre-shared key and
  * CCMP: written into `out`, which needs 22 bytes. Returns its length. */

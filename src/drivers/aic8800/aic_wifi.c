@@ -349,7 +349,7 @@ static u32 wifi_ind(AIC *a, u32 id, const u8 *p, u32 length)
             h.context = a;
             for (i = 0; i < 6; i++)
                 a->bssid[i] = p[2 + i];
-            wpa_begin(&h, a->nd->mac, a->bssid, rsn, wpa_rsn_ie(rsn));
+            wpa_begin(&a->wpa, &h, a->nd->mac, a->bssid, rsn, wpa_rsn_ie(rsn));
             return 1;
         }
         /* The speed the dashboard shows is cosmetic here; what matters is that
@@ -618,7 +618,7 @@ u32 aic_wifi_join(AIC *a, const WL_BSS *bss, const char *pass, u32 pass_len)
          * moment: done before the association, not inside the handshake. */
         for (i = 0; i < 6; i++)
             a->bssid[i] = bss->bssid[i];
-        wpa_set_psk(pass, (const u8 *)bss->ssid, bss->ssid_len);
+        wpa_set_psk(&a->wpa, pass, (const u8 *)bss->ssid, bss->ssid_len);
         a->st->secured_joins++;
     }
 
@@ -674,6 +674,7 @@ static u32 card_state(void *context)
 void aic_wifi_card(AIC *a)
 {
     a->card.context = a;
+    a->card.wpa = &a->wpa;
     a->card.scan = card_scan;
     a->card.join = card_join;
     a->card.leave = card_leave;

@@ -53,7 +53,8 @@ u32 file_setting(const char *name, const char *key, char *out, u32 size)
         out[0] = 0;
     return 0;
 }
-u32 wpa_apply(void) { return 0; }
+static WPA handshake;
+u32 wpa_apply(WPA *h) { (void)h; return 0; }
 const WL_MODE wl_bridge_mode;          /* not this test's (bridge.c) */
 
 /* --- what the kernel was given at attach -------------------------------------- */
@@ -98,7 +99,7 @@ static u32 c_state(void *c)
     (void)c;
     return (joined_state ? WL_CARD_JOINED : 0) | (scanning ? WL_CARD_SCANNING : 0);
 }
-static const WL_CARD card_ops = { 0, c_scan, c_join, c_leave, c_state };
+static const WL_CARD card_ops = { 0, c_scan, c_join, c_leave, c_state, &handshake };
 
 static void seen(u32 i, const char *name, s8 rssi, u8 sec, u8 b5)
 {

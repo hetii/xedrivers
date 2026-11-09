@@ -414,7 +414,7 @@ static void mpdu_in(AIC *a, u8 *p, u32 length)
         /* The handshake's own frames are the station's business, not the
          * console's: they arrive before any key is in place. */
         a->st->eapol_in++;
-        wpa_eapol_in(eth + ETH_HLEN, length - strip);
+        wpa_eapol_in(&a->wpa, eth + ETH_HLEN, length - strip);
         if (wpa_stats.pending)
             usb_wake();
         return;

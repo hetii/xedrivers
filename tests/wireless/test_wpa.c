@@ -13,6 +13,7 @@
 
 #include "wpa.h"
 
+static WPA card;                /* the handshake under test */
 static int failures;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
                       failures++; } } while (0)
@@ -194,17 +195,17 @@ int main(void)
     CHECK(rsn[8] == 0x01 && rsn[13] == 0x04);           /* one pairwise, CCMP */
     CHECK(rsn[14] == 0x01 && rsn[19] == 0x02);          /* one manager, the PSK */
 
-    wpa_set_psk("a passphrase", (const u8 *)"net", 3);
+    wpa_set_psk(&card, "a passphrase", (const u8 *)"net", 3);
     CHECK(wpa_stats.psk_ready);
 
-    wpa_begin(&host, own_mac, ap_mac, rsn, rsn_len);
+    wpa_begin(&card, &host, own_mac, ap_mac, rsn, rsn_len);
     CHECK(wpa_stats.state == WPA_WAIT_1);
 
     /* The first message: no check value on it, the access point's number in it.
      * The answer must carry ours, our security element, and a check value. */
     counter[7] = 1;
     n = build(frame, 2 | 0x08 | 0x80, counter, anonce, 0, 0);
-    wpa_eapol_in(frame, n);
+    wpa_eapol_in(&card, frame, n);
     CHECK(wpa_stats.state == WPA_WAIT_3);
     CHECK(sent_count == 1);
     if (sent_count) {
@@ -227,7 +228,7 @@ int main(void)
 
         memset(old, 0, 8);
         n = build(frame, 2 | 0x08 | 0x80, old, anonce, 0, 0);
-        wpa_eapol_in(frame, n);
+        wpa_eapol_in(&card, frame, n);
         CHECK(wpa_stats.replays == 1 && sent_count == before);
     }
 
@@ -235,25 +236,39 @@ int main(void)
     counter[7] = 2;
     n = build(frame, 2 | 0x08 | 0x100 | 0x40 | 0x200, counter, anonce, 0, 0);
     memset(frame + 81, 0xFF, 16);
-    wpa_eapol_in(frame, n);
+    wpa_eapol_in(&card, frame, n);
     CHECK(wpa_stats.mic_failures == 1 && sent_count == 1);
     CHECK(wpa_stats.state == WPA_WAIT_3);
 
     /* The real third message: keys installed, the fourth sent, the port opened. */
     counter[7] = 3;
     n = build(frame, 2 | 0x08 | 0x100 | 0x40 | 0x200, counter, anonce, 0, 0);
-    fake_mic(wpa_ptk_for_test(), frame, n);
-    wpa_eapol_in(frame, n);
+    fake_mic(wpa_ptk_for_test(&card), frame, n);
+    wpa_eapol_in(&card, frame, n);
     CHECK(wpa_stats.state == WPA_DONE);
     CHECK(sent_count == 2);
     /* The keys wait for the worker: installing one is a command the firmware
      * confirms, which cannot be waited for where the frames arrive. */
     CHECK(wpa_stats.pending && !keys_pairwise && !ready_calls);
-    CHECK(wpa_apply() == 1);
+    CHECK(wpa_apply(&card) == 1);
     CHECK(keys_pairwise == 1 && keys_group == 0);
-    CHECK(!memcmp(installed_tk, wpa_ptk_for_test() + 32, 16));
+    CHECK(!memcmp(installed_tk, wpa_ptk_for_test(&card) + 32, 16));
     CHECK(ready_calls == 1 && ready_ok == 1);
-    CHECK(!wpa_apply());                        /* nothing left to do */
+    CHECK(!wpa_apply(&card));                        /* nothing left to do */
+
+    /* a second card's handshake starting leaves this one's alone (they shared one state,
+     * and an AIC8800 rejoining wrote over an RTL8822BU's) */
+    {
+        static WPA other;
+        u8 before[WPA_PTK_LEN];
+
+        memcpy(before, wpa_ptk_for_test(&card), WPA_PTK_LEN);
+        wpa_set_psk(&other, "another one", (const u8 *)"net2", 4);
+        wpa_begin(&other, &host, ap_mac, own_mac, rsn, rsn_len);
+        CHECK(card.st.state == WPA_DONE && other.st.state == WPA_WAIT_1);
+        CHECK(!memcmp(before, wpa_ptk_for_test(&card), WPA_PTK_LEN));
+        CHECK(memcmp(wpa_psk_for_test(&card), wpa_psk_for_test(&other), WPA_PSK_LEN));
+    }
     if (sent_count == 2) {
         const u8 *m4 = sent[1];
 
@@ -274,11 +289,11 @@ int main(void)
         kde[2] = 0x00; kde[3] = 0x0F; kde[4] = 0xAC; kde[5] = 0x01;
         kde[6] = 2; kde[7] = 0;                         /* index 2 */
         memcpy(kde + 8, gtk2, 16);
-        wl = fake_wrap(wpa_ptk_for_test() + 16, kde, 3, wrapped);
+        wl = fake_wrap(wpa_ptk_for_test(&card) + 16, kde, 3, wrapped);
         counter[7] = 4;
         n = build(frame, 2 | 0x80 | 0x100 | 0x200 | 0x1000, counter, 0, wrapped, wl);
-        fake_mic(wpa_ptk_for_test(), frame, n);
-        wpa_eapol_in(frame, n);
+        fake_mic(wpa_ptk_for_test(&card), frame, n);
+        wpa_eapol_in(&card, frame, n);
         CHECK(wpa_stats.group_rekeys == 1 && sent_count == before + 1);
         CHECK(wpa_stats.state == WPA_DONE);
         if (sent_count == before + 1) {
@@ -288,12 +303,12 @@ int main(void)
             CHECK(!memcmp(g2 + 9, counter, 8));
             CHECK((u32)(g2[97] << 8 | g2[98]) == 0);
         }
-        CHECK(wpa_apply() == 1);
+        CHECK(wpa_apply(&card) == 1);
         CHECK(keys_pairwise == 1 && keys_group == 1 && ready_calls == 1);
 
         /* The same message again: an old counter, no second answer. */
         before = sent_count;
-        wpa_eapol_in(frame, n);
+        wpa_eapol_in(&card, frame, n);
         CHECK(sent_count == before && wpa_stats.group_rekeys == 1);
     }
 

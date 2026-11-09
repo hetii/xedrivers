@@ -239,7 +239,7 @@ static u32 card_join(void *context, const WL_BSS *bss, const char *pass, u32 pas
     s->pass_len = i;
     s->secured = (bss->security & WL_SEC_WPA2) != 0;
     if (s->secured)
-        wpa_set_psk(s->pass, (const u8 *)bss->ssid, bss->ssid_len);
+        wpa_set_psk(&s->wpa, s->pass, (const u8 *)bss->ssid, bss->ssid_len);
     choose_own(s);
     s->ies_len = 0;
     s->got_auth = s->got_assoc = s->got_lost = 0;
@@ -307,7 +307,7 @@ static void send_assoc(WL_STA *s)
         host.ready = wpa_ready;
         host.context = s;
         s->ready_pending = 0;
-        wpa_begin(&host, s->own, s->bss.bssid, s->rsn, s->rsn_len);
+        wpa_begin(&s->wpa, &host, s->own, s->bss.bssid, s->rsn, s->rsn_len);
     }
     s->got_assoc = 0;
     s->st->assocs++;
@@ -456,6 +456,7 @@ void wl_sta_init(WL_STA *s, const WL_SOFTMAC *hw, NET_DEV *nd, volatile WL_STA_S
     s->port_open = 0;
     s->pairwise_set = 0;
     s->card.context = s;
+    s->card.wpa = &s->wpa;
     s->card.scan = card_scan;
     s->card.join = card_join;
     s->card.leave = card_leave;

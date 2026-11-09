@@ -31,7 +31,7 @@ void wl_bridge_tick(WL_BRIDGE *b, const WL_CARD *card)
     u32 secured, state;
     s32 pick;
 
-    if (wpa_apply())
+    if (card->wpa && wpa_apply(card->wpa))
         return;
     state = card->state(card->context);
     /* Joined on an address that is no longer this card's to use, or on its own while the

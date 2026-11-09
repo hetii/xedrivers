@@ -31,31 +31,25 @@
 #define KI_ERROR        0x0400u
 #define KI_ENCRYPTED    0x1000u
 
-#define FRAME_MAX       512     /* an EAPOL-Key frame we will build or answer */
+#define FRAME_MAX       WPA_FRAME_MAX   /* an EAPOL-Key frame we will build or answer */
 
 volatile WPA_STATS wpa_stats;
 
-static u8 psk[WPA_PSK_LEN];
-static u8 ptk[WPA_PTK_LEN];     /* confirmation, encryption and temporal key */
-static u8 anonce[WPA_NONCE_LEN];
-static u8 snonce[WPA_NONCE_LEN];
-static u8 replay[8];
-static u8 own_addr[6], ap_addr[6];
-static u8 own_rsn[32];
-static u32 own_rsn_len;
-static u8 frame[FRAME_MAX];
-static WPA_HOST host;
+#define KCK (w->ptk)
+#define KEK (w->ptk + 16)
+#define TK  (w->ptk + 32)
 
-/* What the handshake has settled and the worker has yet to hand to the firmware:
- * installing a key is a command that must be waited for, which cannot be done
- * where the frames arrive. */
-static u8 pending_gtk[WPA_GTK_MAX];
-static u32 pending_gtk_len, pending_gtk_index;
-static u32 pending_ptk;         /* the pairwise key too: the four-way, not a rekey */
+/* The last handshake's counters, for xectl.py: each card has its own (WPA.st), and the one
+ * that ran last is copied here. */
+static void publish(WPA *w)
+{
+    const volatile u32 *from = (const volatile u32 *)&w->st;
+    volatile u32 *to = (volatile u32 *)&wpa_stats;
+    u32 i;
 
-#define KCK (ptk)
-#define KEK (ptk + 16)
-#define TK  (ptk + 32)
+    for (i = 0; i < sizeof(WPA_STATS) / 4; i++)
+        to[i] = from[i];
+}
 
 static void zero(u8 *p, u32 n)
 {
@@ -115,14 +109,14 @@ static void hmac(const u8 *key, u32 key_len, const u8 *a, u32 a_len,
 /* The key from the passphrase: the name of the network, a counter, and four
  * thousand repetitions folded together, twice over for 32 bytes (IEEE 802.11i's
  * password-based derivation). */
-void wpa_set_psk(const char *passphrase, const u8 *ssid, u32 ssid_len)
+void wpa_set_psk(WPA *w, const char *passphrase, const u8 *ssid, u32 ssid_len)
 {
     u8 counter[4], u[20], t[20];
     u32 pass_len = 0, block, round, i;
 
     while (passphrase[pass_len])
         pass_len++;
-    wpa_stats.psk_ready = 0;
+    w->st.psk_ready = 0;
     for (block = 1; block <= 2; block++) {
         counter[0] = counter[1] = counter[2] = 0;
         counter[3] = (u8)block;
@@ -134,51 +128,52 @@ void wpa_set_psk(const char *passphrase, const u8 *ssid, u32 ssid_len)
                 t[i] ^= u[i];
         }
         for (i = 0; i < 20 && (block - 1) * 20 + i < WPA_PSK_LEN; i++)
-            psk[(block - 1) * 20 + i] = t[i];
+            w->psk[(block - 1) * 20 + i] = t[i];
     }
     mem_sync();
-    wpa_stats.psk_ready = 1;
+    w->st.psk_ready = 1;
+    publish(w);
 }
 
-const u8 *wpa_psk_for_test(void)
+const u8 *wpa_psk_for_test(WPA *w)
 {
-    return psk;
+    return w->psk;
 }
 
-const u8 *wpa_ptk_for_test(void)
+const u8 *wpa_ptk_for_test(WPA *w)
 {
-    return ptk;
+    return w->ptk;
 }
 
 /* The pair of keys both sides end up with: the two addresses least first, then the
  * two numbers least first, hashed with the label until there are enough bytes
  * (IEEE 802.11i's pseudo-random function). */
-static void derive_ptk(void)
+static void derive_ptk(WPA *w)
 {
     static const char label[] = "Pairwise key expansion";
     u8 data[2 * 6 + 2 * WPA_NONCE_LEN + 1], block[20];
     u32 at = 0, i, k;
 
-    if (lower(own_addr, ap_addr, 6)) {
-        copy(data, own_addr, 6);
-        copy(data + 6, ap_addr, 6);
+    if (lower(w->own_addr, w->ap_addr, 6)) {
+        copy(data, w->own_addr, 6);
+        copy(data + 6, w->ap_addr, 6);
     } else {
-        copy(data, ap_addr, 6);
-        copy(data + 6, own_addr, 6);
+        copy(data, w->ap_addr, 6);
+        copy(data + 6, w->own_addr, 6);
     }
-    if (lower(snonce, anonce, WPA_NONCE_LEN)) {
-        copy(data + 12, snonce, WPA_NONCE_LEN);
-        copy(data + 12 + WPA_NONCE_LEN, anonce, WPA_NONCE_LEN);
+    if (lower(w->snonce, w->anonce, WPA_NONCE_LEN)) {
+        copy(data + 12, w->snonce, WPA_NONCE_LEN);
+        copy(data + 12 + WPA_NONCE_LEN, w->anonce, WPA_NONCE_LEN);
     } else {
-        copy(data + 12, anonce, WPA_NONCE_LEN);
-        copy(data + 12 + WPA_NONCE_LEN, snonce, WPA_NONCE_LEN);
+        copy(data + 12, w->anonce, WPA_NONCE_LEN);
+        copy(data + 12 + WPA_NONCE_LEN, w->snonce, WPA_NONCE_LEN);
     }
     for (i = 0; at < WPA_PTK_LEN; i++) {
         data[12 + 2 * WPA_NONCE_LEN] = (u8)i;
-        hmac(psk, WPA_PSK_LEN, (const u8 *)label, sizeof(label), data,
+        hmac(w->psk, WPA_PSK_LEN, (const u8 *)label, sizeof(label), data,
              sizeof(data), 0, 0, block);
         for (k = 0; k < 20 && at < WPA_PTK_LEN; k++)
-            ptk[at++] = block[k];
+            w->ptk[at++] = block[k];
     }
 }
 
@@ -235,7 +230,7 @@ u32 wpa_rsn_ie(u8 *out)
 
 /* A number this station will not repeat: the time base, which moves every tick,
  * mixed with the keyed hash so it does not reveal the clock directly. */
-static void fresh_nonce(u8 *out)
+static void fresh_nonce(WPA *w, u8 *out)
 {
     static u32 count;
     u8 seed[16];
@@ -249,42 +244,42 @@ static void fresh_nonce(u8 *out)
         seed[i] = (u8)(now >> (24 - 8 * i));
         seed[4 + i] = (u8)(count >> (24 - 8 * i));
     }
-    copy(seed + 8, own_addr, 6);
+    copy(seed + 8, w->own_addr, 6);
     seed[14] = seed[15] = 0;
-    hmac(psk, WPA_PSK_LEN, seed, sizeof(seed), 0, 0, 0, 0, out);
-    hmac(psk, WPA_PSK_LEN, out, 20, seed, sizeof(seed), 0, 0, out + 12);
+    hmac(w->psk, WPA_PSK_LEN, seed, sizeof(seed), 0, 0, 0, 0, out);
+    hmac(w->psk, WPA_PSK_LEN, out, 20, seed, sizeof(seed), 0, 0, out + 12);
 }
 
 /* Build an answer: the same replay counter the access point used, our number, the
  * key data given, and the check value over the whole of it. */
-static u32 answer(u32 key_info, const u8 *data, u32 data_len, u32 with_nonce)
+static u32 answer(WPA *w, u32 key_info, const u8 *data, u32 data_len, u32 with_nonce)
 {
     u32 length = E_DATA + data_len;
     u8 mic[20];
 
     if (length > FRAME_MAX)
         return 0;
-    zero(frame, length);
-    frame[E_VERSION] = 1;
-    frame[E_TYPE] = EAPOL_KEY;
-    put_be16(frame + E_BODY_LEN, length - 4);
-    frame[E_DESCRIPTOR] = DESC_RSN;
-    put_be16(frame + E_KEY_INFO, key_info);
-    put_be16(frame + E_KEY_LEN, WPA_KEY_LEN);
-    copy(frame + E_REPLAY, replay, 8);
+    zero(w->frame, length);
+    w->frame[E_VERSION] = 1;
+    w->frame[E_TYPE] = EAPOL_KEY;
+    put_be16(w->frame + E_BODY_LEN, length - 4);
+    w->frame[E_DESCRIPTOR] = DESC_RSN;
+    put_be16(w->frame + E_KEY_INFO, key_info);
+    put_be16(w->frame + E_KEY_LEN, WPA_KEY_LEN);
+    copy(w->frame + E_REPLAY, w->replay, 8);
     if (with_nonce)
-        copy(frame + E_NONCE, snonce, WPA_NONCE_LEN);
-    put_be16(frame + E_DATA_LEN, data_len);
+        copy(w->frame + E_NONCE, w->snonce, WPA_NONCE_LEN);
+    put_be16(w->frame + E_DATA_LEN, data_len);
     if (data_len)
-        copy(frame + E_DATA, data, data_len);
-    hmac(KCK, 16, frame, length, 0, 0, 0, 0, mic);
-    copy(frame + E_MIC, mic, WPA_MIC_LEN);
-    wpa_stats.messages_out++;
-    return host.send ? host.send(host.context, frame, length) : 0;
+        copy(w->frame + E_DATA, data, data_len);
+    hmac(KCK, 16, w->frame, length, 0, 0, 0, 0, mic);
+    copy(w->frame + E_MIC, mic, WPA_MIC_LEN);
+    w->st.messages_out++;
+    return w->host.send ? w->host.send(w->host.context, w->frame, length) : 0;
 }
 
 /* Is the check value on a received frame the one it should carry? */
-static u32 mic_holds(const u8 *in, u32 length)
+static u32 mic_holds(WPA *w, const u8 *in, u32 length)
 {
     u8 copy_of[FRAME_MAX], mic[20];
     u32 i;
@@ -328,27 +323,28 @@ static u32 gtk_from_kde(const u8 *data, u32 length, u32 *index, const u8 **key,
 
 /* --- the handshake ------------------------------------------------------------- */
 
-void wpa_begin(const WPA_HOST *h, const u8 *own, const u8 *ap, const u8 *rsn,
+void wpa_begin(WPA *w, const WPA_HOST *h, const u8 *own, const u8 *ap, const u8 *rsn,
                u32 rsn_len)
 {
-    host = *h;
-    copy(own_addr, own, 6);
-    copy(ap_addr, ap, 6);
-    own_rsn_len = rsn_len <= sizeof(own_rsn) ? rsn_len : 0;
-    copy(own_rsn, rsn, own_rsn_len);
-    zero(replay, 8);
-    wpa_stats.state = WPA_WAIT_1;
-    wpa_stats.gtk_len = 0;
+    w->host = *h;
+    copy(w->own_addr, own, 6);
+    copy(w->ap_addr, ap, 6);
+    w->own_rsn_len = rsn_len <= sizeof(w->own_rsn) ? rsn_len : 0;
+    copy(w->own_rsn, rsn, w->own_rsn_len);
+    zero(w->replay, 8);
+    w->st.state = WPA_WAIT_1;
+    w->st.gtk_len = 0;
     mem_sync();
+    publish(w);
 }
 
-static void fail(void)
+static void fail(WPA *w)
 {
-    wpa_stats.failures++;
-    wpa_stats.state = WPA_FAILED;
+    w->st.failures++;
+    w->st.state = WPA_FAILED;
     mem_sync();
-    if (host.ready)
-        host.ready(host.context, 0);
+    if (w->host.ready)
+        w->host.ready(w->host.context, 0);
 }
 
 /* The group key handshake (802.11i 8.5.4), the access point's new group key
@@ -356,49 +352,49 @@ static void fail(void)
  * the answer is the same counter with our check value and nothing else. Left
  * unanswered the access point gives the station up -- hostapd's default rekey is
  * an hour, and every long session ended there (2026-11-04). */
-static void group_message(const u8 *body, u32 length, u32 key_info)
+static void group_message(WPA *w, const u8 *body, u32 length, u32 key_info)
 {
     u8 data[FRAME_MAX];
     const u8 *gtk;
     u32 data_len = be16(body + E_DATA_LEN), index = 0, gtk_len, i, newer = 0;
 
-    if (wpa_stats.state != WPA_DONE || !(key_info & KI_MIC) ||
+    if (w->st.state != WPA_DONE || !(key_info & KI_MIC) ||
         !(key_info & KI_ENCRYPTED) || E_DATA + data_len > length || !data_len)
         return;
     for (i = 0; i < 8 && !newer; i++)
-        newer = body[E_REPLAY + i] > replay[i] ? 1 : body[E_REPLAY + i] < replay[i]
+        newer = body[E_REPLAY + i] > w->replay[i] ? 1 : body[E_REPLAY + i] < w->replay[i]
                                                      ? 2 : 0;
     if (newer != 1) {
-        wpa_stats.replays++;
+        w->st.replays++;
         return;
     }
-    if (!mic_holds(body, length)) {
-        wpa_stats.mic_failures++;
+    if (!mic_holds(w, body, length)) {
+        w->st.mic_failures++;
         return;
     }
-    copy(replay, body + E_REPLAY, 8);
+    copy(w->replay, body + E_REPLAY, 8);
     gtk_len = wpa_unwrap(KEK, body + E_DATA, data_len, data);
     if (!gtk_len) {
-        wpa_stats.unwrap_failures++;
+        w->st.unwrap_failures++;
         return;
     }
     if (!gtk_from_kde(data, gtk_len, &index, &gtk, &gtk_len)) {
-        wpa_stats.no_gtk++;
+        w->st.no_gtk++;
         return;
     }
-    copy(pending_gtk, gtk, gtk_len);
-    pending_gtk_len = gtk_len;
-    pending_gtk_index = index;
-    pending_ptk = 0;
-    wpa_stats.gtk_len = gtk_len;
-    if (!answer(2 | KI_MIC | KI_SECURE, 0, 0, 0))
+    copy(w->pending_gtk, gtk, gtk_len);
+    w->pending_gtk_len = gtk_len;
+    w->pending_gtk_index = index;
+    w->pending_ptk = 0;
+    w->st.gtk_len = gtk_len;
+    if (!answer(w, 2 | KI_MIC | KI_SECURE, 0, 0, 0))
         return;
-    wpa_stats.group_rekeys++;
+    w->st.group_rekeys++;
     mem_sync();
-    wpa_stats.pending = 1;
+    w->st.pending = 1;
 }
 
-void wpa_eapol_in(const u8 *body, u32 length)
+static void eapol_in(WPA *w, const u8 *body, u32 length)
 {
     u8 data[FRAME_MAX];
     const u8 *gtk;
@@ -407,19 +403,19 @@ void wpa_eapol_in(const u8 *body, u32 length)
     if (length < E_MIN || body[E_TYPE] != EAPOL_KEY ||
         body[E_DESCRIPTOR] != DESC_RSN)
         return;
-    if (wpa_stats.state != WPA_WAIT_1 && wpa_stats.state != WPA_WAIT_3 &&
-        wpa_stats.state != WPA_DONE)
+    if (w->st.state != WPA_WAIT_1 && w->st.state != WPA_WAIT_3 &&
+        w->st.state != WPA_DONE)
         return;
     key_info = be16(body + E_KEY_INFO);
-    wpa_stats.messages_in++;
-    wpa_stats.last_key_info = key_info;
+    w->st.messages_in++;
+    w->st.last_key_info = key_info;
     if ((key_info & KI_VERSION) != 2 || (key_info & KI_ERROR))
         return;
     if (!(key_info & KI_PAIRWISE)) {
-        group_message(body, length, key_info);
+        group_message(w, body, length, key_info);
         return;
     }
-    if (wpa_stats.state == WPA_DONE)
+    if (w->st.state == WPA_DONE)
         return;                         /* a pairwise rekey: not asked for here */
     data_len = be16(body + E_DATA_LEN);
     if (E_DATA + data_len > length)
@@ -428,55 +424,55 @@ void wpa_eapol_in(const u8 *body, u32 length)
     /* The access point's counter must have moved on, or this is an old message
      * being replayed at us. */
     for (i = 0; i < 8 && !newer; i++)
-        newer = body[E_REPLAY + i] > replay[i] ? 1 : body[E_REPLAY + i] < replay[i]
+        newer = body[E_REPLAY + i] > w->replay[i] ? 1 : body[E_REPLAY + i] < w->replay[i]
                                                      ? 2 : 0;
     if (newer == 2) {
-        wpa_stats.replays++;
+        w->st.replays++;
         return;
     }
-    copy(replay, body + E_REPLAY, 8);
+    copy(w->replay, body + E_REPLAY, 8);
 
     if (!(key_info & KI_MIC)) {
         /* The first message: the access point's number, and nothing to check yet.
          * Answer with ours, the keys both sides can now work out, and the security
          * element the association carried. */
-        if (wpa_stats.state != WPA_WAIT_1)
+        if (w->st.state != WPA_WAIT_1)
             return;
-        copy(anonce, body + E_NONCE, WPA_NONCE_LEN);
-        fresh_nonce(snonce);
-        derive_ptk();
-        if (!answer(2 | KI_PAIRWISE | KI_MIC, own_rsn, own_rsn_len, 1)) {
-            fail();
+        copy(w->anonce, body + E_NONCE, WPA_NONCE_LEN);
+        fresh_nonce(w, w->snonce);
+        derive_ptk(w);
+        if (!answer(w, 2 | KI_PAIRWISE | KI_MIC, w->own_rsn, w->own_rsn_len, 1)) {
+            fail(w);
             return;
         }
-        wpa_stats.state = WPA_WAIT_3;
+        w->st.state = WPA_WAIT_3;
         mem_sync();
         return;
     }
 
-    if (!mic_holds(body, length)) {
-        wpa_stats.mic_failures++;
+    if (!mic_holds(w, body, length)) {
+        w->st.mic_failures++;
         return;                         /* not from anyone holding our key */
     }
-    if (wpa_stats.state != WPA_WAIT_3)
+    if (w->st.state != WPA_WAIT_3)
         return;
 
     /* The third message: the group key, wrapped. Install both keys, answer, and
      * the port may open. */
     if (data_len) {
         if (!(key_info & KI_ENCRYPTED)) {
-            fail();
+            fail(w);
             return;
         }
         gtk_len = wpa_unwrap(KEK, body + E_DATA, data_len, data);
         if (!gtk_len) {
-            wpa_stats.unwrap_failures++;
-            fail();
+            w->st.unwrap_failures++;
+            fail(w);
             return;
         }
         if (!gtk_from_kde(data, gtk_len, &index, &gtk, &gtk_len)) {
-            wpa_stats.no_gtk++;
-            fail();
+            w->st.no_gtk++;
+            fail(w);
             return;
         }
     }
@@ -484,46 +480,60 @@ void wpa_eapol_in(const u8 *body, u32 length)
      * point is waiting for it; the keys themselves go in on the worker, which is
      * allowed to wait for the firmware (wpa_apply). */
     if (gtk_len)
-        copy(pending_gtk, gtk, gtk_len);
-    pending_gtk_len = gtk_len;
-    pending_gtk_index = index;
-    pending_ptk = 1;
-    wpa_stats.gtk_len = gtk_len;
-    if (!answer(2 | KI_PAIRWISE | KI_MIC | KI_SECURE, 0, 0, 0)) {
-        fail();
+        copy(w->pending_gtk, gtk, gtk_len);
+    w->pending_gtk_len = gtk_len;
+    w->pending_gtk_index = index;
+    w->pending_ptk = 1;
+    w->st.gtk_len = gtk_len;
+    if (!answer(w, 2 | KI_PAIRWISE | KI_MIC | KI_SECURE, 0, 0, 0)) {
+        fail(w);
         return;
     }
-    wpa_stats.state = WPA_DONE;
+    w->st.state = WPA_DONE;
     mem_sync();
-    wpa_stats.pending = 1;
+    w->st.pending = 1;
 }
 
-u32 wpa_apply(void)
+static u32 apply(WPA *w)
 {
     u32 ok;
 
-    if (!wpa_stats.pending)
+    if (!w->st.pending)
         return 0;
-    wpa_stats.pending = 0;
-    wpa_stats.applied++;
+    w->st.pending = 0;
+    w->st.applied++;
     mem_sync();
-    if (!pending_ptk) {                 /* a group rekey: the new group key only */
-        if (host.key && pending_gtk_len &&
-            !host.key(host.context, 0, pending_gtk_index, pending_gtk, pending_gtk_len))
-            wpa_stats.failures++;
+    if (!w->pending_ptk) {                 /* a group rekey: the new group key only */
+        if (w->host.key && w->pending_gtk_len &&
+            !w->host.key(w->host.context, 0, w->pending_gtk_index, w->pending_gtk, w->pending_gtk_len))
+            w->st.failures++;
         mem_sync();
         return 1;
     }
-    ok = host.key && host.key(host.context, 1, 0, TK, WPA_KEY_LEN);
-    if (ok && pending_gtk_len)
-        ok = host.key(host.context, 0, pending_gtk_index, pending_gtk,
-                      pending_gtk_len);
+    ok = w->host.key && w->host.key(w->host.context, 1, 0, TK, WPA_KEY_LEN);
+    if (ok && w->pending_gtk_len)
+        ok = w->host.key(w->host.context, 0, w->pending_gtk_index, w->pending_gtk,
+                      w->pending_gtk_len);
     if (!ok) {
-        wpa_stats.failures++;
-        wpa_stats.state = WPA_FAILED;
+        w->st.failures++;
+        w->st.state = WPA_FAILED;
     }
     mem_sync();
-    if (host.ready)
-        host.ready(host.context, ok);
+    if (w->host.ready)
+        w->host.ready(w->host.context, ok);
     return 1;
+}
+
+void wpa_eapol_in(WPA *w, const u8 *body, u32 length)
+{
+    eapol_in(w, body, length);
+    publish(w);
+}
+
+u32 wpa_apply(WPA *w)
+{
+    u32 r = apply(w);
+
+    publish(w);
+    return r;
 }

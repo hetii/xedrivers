@@ -535,7 +535,7 @@ void wl_omni_tick(void)
 
     if (!card)
         return;
-    if (wpa_apply())
+    if (card->wpa && wpa_apply(card->wpa))
         return;
     state = card->state(card->context);
     if (wl_stats.scans_done != scans_seen && !(state & WL_CARD_SCANNING))

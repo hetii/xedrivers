@@ -122,7 +122,7 @@ static void deliver(WL_STA *s, const u8 *da_in, const u8 *sa_in, u8 *p, u32 leng
     type = (u32)p[6] << 8 | p[7];
     if (type == ETHERTYPE_EAPOL) {
         s->st->rx_eapol++;
-        wpa_eapol_in(p + SNAP_LEN, length - SNAP_LEN);
+        wpa_eapol_in(&s->wpa, p + SNAP_LEN, length - SNAP_LEN);
         return;
     }
     if (!s->port_open) {

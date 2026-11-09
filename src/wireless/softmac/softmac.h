@@ -17,6 +17,7 @@
 #define XE_WL_SOFTMAC_H
 
 #include "wireless.h"
+#include "wpa.h"
 #include "reorder.h"
 #include "net.h"
 
@@ -164,6 +165,7 @@ typedef struct {
     WL_REORDER reorder;
     u8 reorder_pool[WL_REORDER_POOL];
     u16 last_seq_ctrl[WL_REORDER_TIDS + 1];     /* per TID, and one for non-QoS */
+    WPA wpa;                    /* this card's handshake */
 } WL_STA;
 
 /* Set up `s` for the card `hw` with the network device `nd`, its stats in `st`.
