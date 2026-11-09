@@ -336,6 +336,9 @@ static void start_stream(void)
         a2dp_stats.frames_per_packet = 1;
     rate_hz = rates_hz[rate];
     samples_sent = 0;
+#if XE_AUDIO
+    played_at_start = audio_frames_played();   /* owed counts from here, not from the boot */
+#endif
     pending = 0;
     quiet_ticks = down_gap = 0;
     a2dp_stats.bitpool_lowest = 0;
@@ -1002,7 +1005,13 @@ void a2dp_tick(void)
      * not the 50 assumed, and a stream sent by it ran 0.28% slow -- the headset heard it as
      * the pitch wandering, the capture's reader fell a ring behind and skipped */
     (void)now;
-    owed = (u64)(audio_frames_played() - played_at_start);
+    {
+        u32 played = audio_frames_played() - played_at_start;
+
+        /* the console plays 48 kHz; in 32 bits (no 64-bit division here) */
+        owed = rate_hz == 48000 ? played
+                                : played / 48000 * rate_hz + played % 48000 * rate_hz / 48000;
+    }
 #else
     owed_fp += (u64)(now - last_tb) * per_tick;
     last_tb = now;
