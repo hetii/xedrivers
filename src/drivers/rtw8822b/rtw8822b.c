@@ -475,12 +475,38 @@ static void rx_watchdog(RTW *r)
 
 #define DIG_TICKS       60              /* ~2 s of 33 ms ticks, rtw88's watchdog */
 
+/* N1: about one boot in eight the card came up receiving nothing -- no scan result, no frame,
+ * rx_transfers 0 -- and never joined; the receive watch (above) only watches a linked card.
+ * ~30 s of that and the card is reset, as a stall is; at most every 2 minutes. */
+#define DEAF_TICKS      900u            /* ~30 s of 33 ms ticks */
+#define DEAF_GAP_TICKS  3600u
+
+volatile u32 rtw_deaf_resets;
+static u32 deaf_gap;
+
+static void deaf_watch(RTW *r)
+{
+    if (deaf_gap)
+        deaf_gap--;
+    if (r->st->linked || r->st->rx_transfers) {
+        r->deaf_ticks = 0;
+        return;
+    }
+    if (++r->deaf_ticks < DEAF_TICKS || deaf_gap)
+        return;
+    r->deaf_ticks = 0;
+    deaf_gap = DEAF_GAP_TICKS;
+    rtw_deaf_resets++;
+    UsbdResetDevice(r->dev->device);
+}
+
 static void rtw8822b_tick(NET_DEV *nd)
 {
     RTW *r = (RTW *)nd->priv;
 
     if (!r || r->st->step != RTW_STEP_UP)
         return;
+    deaf_watch(r);
     r->st->tx_inflight_now = r->tx_inflight;
     tx_watchdog(r);
     rx_watchdog(r);

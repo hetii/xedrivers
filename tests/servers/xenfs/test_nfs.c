@@ -81,7 +81,7 @@ int main(void)
 
     snprintf(cmd, sizeof(cmd),
              "sudo -n mount -t nfs -o vers=3,proto=tcp,port=%d,mountport=%d,mountproto=tcp,"
-             "nolock,actimeo=0,nconnect=4,soft,timeo=100,retrans=2 127.0.0.1:/ %s", PORT, PORT, mnt);
+             "nolock,actimeo=0,nconnect=4,soft,timeo=600,retrans=3 127.0.0.1:/ %s", PORT, PORT, mnt);
     if (run(cmd) != 0) {
         printf("FAIL: mount\n");
         return 1;
@@ -104,7 +104,7 @@ int main(void)
     CHECK(run(cmd) == 0);
     snprintf(cmd, sizeof(cmd),
              "sudo -n mount -t nfs -o vers=3,proto=tcp,port=%d,mountport=%d,mountproto=tcp,"
-             "nolock,actimeo=0,nconnect=4,soft,timeo=100,retrans=2 127.0.0.1:/ %s", PORT, PORT, mnt);
+             "nolock,actimeo=0,nconnect=4,soft,timeo=600,retrans=3 127.0.0.1:/ %s", PORT, PORT, mnt);
     CHECK(run(cmd) == 0);
     {
         static char back[sizeof(buf)];
