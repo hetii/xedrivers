@@ -1571,10 +1571,60 @@ def bench_servers(a, ctx, ways):
     print("     console: %s" % console_ports())
 
 
+A2DP_RESULTS = os.path.join(ROOT, "docs", "a2dp.jsonl")
+
+
+def a2dp_bench(sym, seconds, record, note):
+    """How a running A2DP stream fares for `seconds`: packets a second, sends that found no
+    ACL credit (the radio lagging), samples skipped as late, the bitpool the stream ran at
+    (sampled each second) and ladder steps; with the conditions that bear on it -- the
+    Bluetooth RSSI and whether the AIC8800's Wi-Fi (the same chip) holds a link."""
+    a0 = read_struct(sym, "a2dp_stats")
+    if a0["state"] != 8:
+        raise SystemExit("no A2DP stream (state %d): xectl.py bt connect first" % a0["state"])
+    command(sym, 44, 0)                         # the RSSI, read while it runs
+    pools, t0 = [], time.time()
+    while time.time() - t0 < seconds:
+        time.sleep(1)
+        pools.append(read_struct(sym, "a2dp_stats")["bitpool_now"])
+    a1, el = read_struct(sym, "a2dp_stats"), time.time() - t0
+    b = read_struct(sym, "bt_stats")
+    sg = lambda v: v - (1 << 32) if v & 0x80000000 else v
+    drivers, wifi = driver_names(sym), []
+    for i in range(NET_MAX):
+        ns = read_struct(sym, "net_stats", i)
+        name = drivers.get(ns["driver"])
+        if name in ("aic8800", "rtw8822b") and ns["ready"]:
+            wifi.append("%s:%s" % (name, "link" if ns["link"] else "no link"))
+    row = {"date": time.strftime("%Y-%m-%d"), "commit": built_from(sym)[0], "test": "a2dp",
+           "seconds": round(el), "codec": "SBC %d Hz bitpool<=%d" % (a1["rate"],
+                                                                    a1["bitpool"]),
+           "rssi_db": sg(b["rssi"]), "wifi": wifi,
+           "packets_s": round((a1["packets"] - a0["packets"]) / el, 1),
+           "no_credit_s": round((a1["send_failures"] - a0["send_failures"]) / el, 2),
+           "late_ms": round((a1["late"] - a0["late"]) * 1000.0 / max(a1["rate"], 1)),
+           "bitpool_mean": round(sum(pools) / len(pools), 1), "bitpool_min": min(pools),
+           "steps_down": a1["steps_down"] - a0["steps_down"],
+           "steps_up": a1["steps_up"] - a0["steps_up"]}
+    if note:
+        row["note"] = note
+    print("a2dp  %d s  %s  RSSI %d dB  wifi %s" % (row["seconds"], row["codec"], row["rssi_db"],
+                                                ", ".join(wifi) or "none"))
+    print("      %.1f packets/s, no ACL credit %.2f/s, late %d ms, bitpool mean %.1f min %d, "
+          "steps down %d up %d" % (row["packets_s"], row["no_credit_s"], row["late_ms"],
+                                   row["bitpool_mean"], row["bitpool_min"], row["steps_down"],
+                                   row["steps_up"]))
+    if record:
+        with open(A2DP_RESULTS, "a") as f:
+            f.write(json.dumps(row) + "\n")
+        print("      kept in %s" % os.path.relpath(A2DP_RESULTS, ROOT))
+
+
 def bench(sym, argv):
     global GUARD_S
     ap = argparse.ArgumentParser(prog="xectl.py bench")
-    ap.add_argument("test", choices=["tcp", "udp", "ftpdll", "xeftp", "xenfs", "mix", "sockets"])
+    ap.add_argument("test", choices=["tcp", "udp", "ftpdll", "xeftp", "xenfs", "mix", "sockets",
+                                     "a2dp"])
     ap.add_argument("which", nargs="?", default="both", choices=["down", "up", "both"])
     ap.add_argument("--streams", default="1,4")
     ap.add_argument("--seconds", type=float, default=10)
@@ -1600,6 +1650,9 @@ def bench(sym, argv):
     if not HOST:
         raise SystemExit("set XE_HOST to the console's address")
     ways = ["down", "up"] if a.which == "both" else [a.which]
+    if a.test == "a2dp":
+        a2dp_bench(sym, a.seconds, a.record, a.note)
+        return
     if a.test == "sockets":
         opened, alive = sockets_run(a.count)
         print("sockets  %d connections held (asked %d), %d still taking data" % (
