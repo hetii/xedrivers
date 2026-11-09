@@ -70,6 +70,8 @@ typedef struct {
     u32 acl_received;
     u32 acl_sent;
     u32 acl_dropped;            /* the ACL queue was full */
+    u32 keys_saved;             /* xedrivers.ini written with the bt_pair lines */
+    u32 keys_save_failed;
 } BT_STATS;
 
 extern volatile BT_STATS bt_stats;

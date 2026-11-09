@@ -7,6 +7,7 @@
 #include "btusb.h"
 #include "host.h"
 #include "sbc.h"
+#include "a2dp.h"
 
 static int failures;
 
@@ -22,6 +23,7 @@ u32   usb_control(USB_DEV *d, const u8 s[8], void *b, u32 l, u32 *a, u32 t)
 void *usb_open(USB_DEV *d, u32 t, u32 a, u32 m, u32 i) { (void)d; (void)t; (void)a; (void)m; (void)i; return 0; }
 void *MmAllocatePhysicalMemory(u32 f, u32 s, u32 p) { (void)f; (void)s; (void)p; return 0; }
 void  bt_load_keys(void) { }
+u32   bt_save_keys(void) { return 0; }
 
 /* A transport that keeps what was sent. */
 static u8 sent[16][64];
@@ -361,7 +363,7 @@ static void test_l2cap_incoming(void)
     CHECK(r[8] == 0x09 && r[9] == 3 && r[12] == 'h' && r[13] == 'i');
 
     /* a PSM nobody listens on is refused */
-    { static const u8 s[] = { 0x02, 4, 4, 0, 0x01, 0, 0x42, 0 }; acl(1, s, sizeof(s)); }
+    { static const u8 s[] = { 0x02, 4, 4, 0, 0x03, 0, 0x42, 0 }; acl(1, s, sizeof(s)); }
     r = acl_sent[acl_sent_count - 1];
     CHECK(r[8] == 0x03 && r[16] == 2);
 
@@ -404,6 +406,88 @@ static void test_sbc(void)
     CHECK(sbc_frame_length(&s) == 4 + 4 + 62);
 }
 
+/* The configuration from a sink's SBC capabilities. */
+static void test_a2dp_choose(void)
+{
+    SBC_CAPS all = { { 0xFF, 0xFF, 2, 53 } }, out;
+    SBC_CAPS joint44 = { { 0x21, 0x15, 2, 53 } };   /* 44.1k joint, 16 blocks, 8sb, loudness */
+    SBC_CAPS four = { { 0xFF, 0xF8, 2, 53 } };      /* 4 subbands only */
+    u32 bp = 0;
+
+    /* everything: 48 kHz, dual channel (twice the bits at the same bitpool), 16 blocks */
+    CHECK(a2dp_choose(&all, 2, 53, &out, &bp));
+    CHECK(out.b[0] == 0x14 && out.b[1] == 0x15 && out.b[2] == 2 && out.b[3] == 53 && bp == 53);
+    CHECK(a2dp_choose(&joint44, 2, 53, &out, &bp));
+    CHECK(out.b[0] == 0x21 && out.b[1] == 0x15 && bp == 53);
+    CHECK(!a2dp_choose(&four, 2, 53, &out, &bp));
+    CHECK(!a2dp_choose(&all, 60, 53, &out, &bp));
+}
+
+static u8 sdp_sent[8][600];
+static u32 sdp_sent_len[8], sdp_count;
+
+/* SDP on a channel opened by the device: a ServiceSearchAttributeRequest for AudioSource. */
+static void test_sdp(void)
+{
+    u32 local;
+    u8 *r;
+
+    (void)sdp_sent; (void)sdp_sent_len; (void)sdp_count;
+    acl_sent_count = 0;
+    bt_attach(&fake);
+    bt_tick();
+    {
+        static const u32 bring_up[9] = { 0x0C03, 0x1009, 0x1005, 0x0C01, 0x0C24, 0x0C13,
+                                         0x0C45, 0x0C56, 0x0C1A };
+        static const u8 buffer[] = { 0x0E, 11, 1, 0x05, 0x10, 0, 0xFD, 0x03, 0x40, 9, 0, 0, 0 };
+        u32 i;
+
+        for (i = 0; i < 9; i++) {
+            if (bring_up[i] == 0x1005)
+                event(buffer, sizeof(buffer));
+            else
+                complete_ok(bring_up[i]);
+        }
+    }
+    memset((void *)&bt_conns[0], 0, sizeof(BT_CONN));
+    bt_conns[0].state = BT_CONN_SECURE;
+    bt_conns[0].handle = 0x0B;
+    { static const u8 s[] = { 0x02, 1, 4, 0, 0x01, 0, 0x45, 0 }; acl(1, s, sizeof(s)); }
+    local = (u32)(acl_sent[0][12] | acl_sent[0][13] << 8);
+    CHECK(acl_sent[0][16] == 0);                    /* accepted */
+    {
+        u8 s[] = { 0x04, 2, 8, 0, 0, 0, 0, 0, 1, 2, 0x00, 0x04 };   /* MTU 1024 */
+
+        s[4] = (u8)local; s[5] = (u8)(local >> 8);
+        acl(1, s, sizeof(s));
+        { u8 c[] = { 0x05, acl_sent[1][9], 6, 0, (u8)local, (u8)(local >> 8), 0, 0, 0, 0 };
+          acl(1, c, sizeof(c)); }
+    }
+    {
+        /* search {AudioSource}, max 0x0400 bytes, attributes 0x0000-0xFFFF */
+        static const u8 q[] = { 0x06, 0x00, 0x01, 0x00, 0x0F,
+                                0x35, 0x03, 0x19, 0x11, 0x0A, 0x04, 0x00,
+                                0x35, 0x05, 0x0A, 0x00, 0x00, 0xFF, 0xFF, 0x00 };
+
+        acl(local, q, sizeof(q));
+    }
+    r = acl_sent[acl_sent_count - 1];
+    CHECK(r[6] == 0x45 && r[8] == 0x07 && r[10] == 0x01);           /* to its CID, the answer */
+    CHECK(r[15] == 0x36);                                           /* a sequence of records */
+    CHECK(sdp_stats.requests == 1 && sdp_stats.errors == 0);
+    {
+        /* the same, limited to 16 bytes: a part and a continuation state */
+        static const u8 q[] = { 0x06, 0x00, 0x02, 0x00, 0x0F,
+                                0x35, 0x03, 0x19, 0x11, 0x0A, 0x00, 0x10,
+                                0x35, 0x05, 0x0A, 0x00, 0x00, 0xFF, 0xFF, 0x00 };
+
+        acl(local, q, sizeof(q));
+    }
+    r = acl_sent[acl_sent_count - 1];
+    CHECK(r[13] == 0 && r[14] == 0x10 && r[15 + 16] == 2 && sdp_stats.continued == 1);
+    bt_detach();
+}
+
 int main(void)
 {
     test_find();
@@ -413,6 +497,8 @@ int main(void)
     test_connect_and_pair();
     test_l2cap_incoming();
     test_sbc();
+    test_a2dp_choose();
+    test_sdp();
     if (failures) {
         printf("bluetooth: %d failed\n", failures);
         return 1;

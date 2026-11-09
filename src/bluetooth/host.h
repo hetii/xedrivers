@@ -111,6 +111,7 @@ u32  bt_parse_pair(const char *line, u8 *address, u8 *key, u32 *kind);
 
 /* keys.c, thread-only: the bt_pair lines into bt_keys. */
 void bt_load_keys(void);
+u32  bt_save_keys(void);                /* 0 if written */
 
 /* --- ACL (hci.c) ---------------------------------------------------------------------- */
 
@@ -181,8 +182,18 @@ void bt_l2cap_ready(volatile BT_CONN *c);
 void bt_l2cap_gone(volatile BT_CONN *c);
 
 /* profiles.c: what starts on a secure link, and stops with it. */
+void bt_profiles_init(void);           /* a controller attached */
 void bt_profiles_ready(volatile BT_CONN *c);
 void bt_profiles_gone(volatile BT_CONN *c);
+void bt_profiles_tick(void);
+
+typedef struct {
+    u32 requests;
+    u32 errors;
+    u32 continued;
+} SDP_STATS;
+
+extern volatile SDP_STATS sdp_stats;
 
 /* Parsing, pure (tests/bluetooth): what an inquiry result event says about each device in it,
  * into bt_found; and the name in an extended inquiry response. */

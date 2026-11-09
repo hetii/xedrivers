@@ -122,6 +122,7 @@ void bt_attach(const BT_TRANSPORT *t)
     bt_stats.found = 0;
     mem_sync();
     transport = t;
+    bt_profiles_init();
     bt_stats.attached = 1;
     bt_stats.state = BT_STATE_INIT;
 }
@@ -451,4 +452,7 @@ void bt_tick(void)
         acl_out++;
     }
     send_waiting();
+    if (bt_keys_changed && keys_loaded)
+        bt_save_keys();
+    bt_profiles_tick();
 }
