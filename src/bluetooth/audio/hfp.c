@@ -14,6 +14,7 @@
 
 #include "hfp.h"
 #include "sco.h"
+#include "file.h"
 
 /* AG features: bit 8 extended error codes, bit 9 codec negotiation (mSBC) -- no three-way
  * calling, no in-band ring. */
@@ -178,8 +179,17 @@ static void data(RFCOMM_DLC *d, const u8 *p, u32 n)
     }
 }
 
+/* bt_voice = off in xedrivers.ini: no hands-free at all, so a headset stays in A2DP's
+ * quality for the console's sound (classic Bluetooth carries the microphone only on the
+ * voice link, and headsets suspend A2DP while it is up). */
+static u32 voice_off;
+
 static void opened(RFCOMM_DLC *d)
 {
+    if (voice_off) {
+        hfp_stats.refused++;
+        return;
+    }
     dlc = d;
     line_length = 0;
     hfp_stats.state = 1;
@@ -202,8 +212,13 @@ static const RFCOMM_USER hfp_user = { opened, data, closed };
 
 void hfp_init(void)
 {
+    char value[8];
+
+    voice_off = file_setting("xedrivers.ini", "bt_voice", value, sizeof(value)) &&
+                value[0] == 'o' && value[1] == 'f';
     rfcomm_init();
-    rfcomm_listen(HFP_CHANNEL, &hfp_user);
+    if (!voice_off)
+        rfcomm_listen(HFP_CHANNEL, &hfp_user);
 }
 
 /* The voice link, once the service level connection is up. mSBC: transparent air mode over

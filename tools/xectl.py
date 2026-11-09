@@ -189,7 +189,7 @@ STRUCTS = {
                   "out_underruns", "out_overruns", "peak_in", "handle", "bad_frames", "wideband"],
     "hfp_stats": ["state", "hf_features", "commands", "unknown", "last_unknown0",
                   "last_unknown1", "codecs", "speaker_gain", "mic_gain", "sco_asked",
-                  "sco_status", "sco_handle", "sco_air", "sco_transport", "codec"],
+                  "sco_status", "sco_handle", "sco_air", "sco_transport", "codec", "refused"],
     "l2cap_stats": ["frames_in", "frames_out", "signals_in", "signals_out", "send_failures",
                     "incoming", "refused", "opened", "rejected", "echo_asked", "echo_answered",
                     "no_channel", "no_channel_in", "too_long"],

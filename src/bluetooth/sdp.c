@@ -9,6 +9,7 @@
  */
 
 #include "host.h"
+#include "file.h"
 
 #define PSM_SDP             0x0001u
 
@@ -88,6 +89,7 @@ static const RECORD records[] = {
     { 0x00010002u, hfp_uuids, 6, hfp_attributes, 8 },
 };
 #define RECORDS (sizeof(records) / sizeof(records[0]))
+static u32 records_offered = RECORDS;   /* the HFP record left out when bt_voice = off */
 
 volatile SDP_STATS sdp_stats;
 
@@ -162,7 +164,7 @@ static u32 matching(const u8 *pattern, u32 n, u32 *list, u32 max, u32 *used)
         k++;
     }
     *used = h + size;
-    for (r = 0; r < RECORDS && count < max; r++) {
+    for (r = 0; r < records_offered && count < max; r++) {
         u32 all = 1, i, j;
 
         for (i = 0; i < k && all; i++) {
@@ -395,5 +397,9 @@ static const L2CAP_USER sdp_user = { 0, sdp_data, 0 };
 
 void sdp_init(void)
 {
+    char value[8];
+
+    records_offered = file_setting("xedrivers.ini", "bt_voice", value, sizeof(value)) &&
+                      value[0] == 'o' && value[1] == 'f' ? 1 : RECORDS;
     l2cap_listen(PSM_SDP, &sdp_user, 0);
 }

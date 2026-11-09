@@ -304,7 +304,10 @@ display (Just Works).
 
 A headset's microphone and earpiece work as a hands-free unit (HFP): its microphone is the
 voice chat's for player 0, and it hears the console. Wideband (mSBC, 16 kHz) when the
-headset takes it, else CVSD. Internals: [bluetooth.md](docs/bluetooth.md).
+headset takes it, else CVSD. Classic Bluetooth carries a microphone only on that voice link,
+and headsets stop A2DP while it is up: the console's sound is then 16 kHz mono too.
+`bt_voice = off` keeps A2DP's quality and leaves the microphone out. Internals:
+[bluetooth.md](docs/bluetooth.md).
 
 ## File servers
 

@@ -28,6 +28,7 @@ u32   usb_control(USB_DEV *d, const u8 s[8], void *b, u32 l, u32 *a, u32 t)
 void *usb_open(USB_DEV *d, u32 t, u32 a, u32 m, u32 i) { (void)d; (void)t; (void)a; (void)m; (void)i; return 0; }
 void *MmAllocatePhysicalMemory(u32 f, u32 s, u32 p) { (void)f; (void)s; (void)p; return 0; }
 void  bt_load_keys(void) { }
+u32   file_setting(const char *n, const char *k, char *o, u32 s) { (void)n; (void)k; (void)o; (void)s; return 0; }
 u32   bt_save_keys(void) { return 0; }
 
 /* A transport that keeps what was sent. */
