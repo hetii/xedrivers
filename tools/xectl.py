@@ -19,6 +19,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py omni                       what a wireless card registered by cmd 21 was asked
     xectl.py prof [SECONDS]             where a frame's time goes (bench=prof)
     xectl.py worker                     where the worker's loop spends its longest moments
+    xectl.py dim [SECONDS|wake]         dim the dashboard now (xam 17559's idle timer), or wake it
     xectl.py bt [scan|connect N|disconnect N]  the Bluetooth host; scan ~10 s; connect pairs (Just Works)
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
     xectl.py bench tcp [up|down|both] [--streams 1,4] [--seconds S] [--pace MB/s]
@@ -1737,6 +1738,29 @@ def main(argv):
             for i in range(NET_MAX):
                 if t[i]:
                     print("  slot %d driver tick longest %8.1f ms" % (i, t[i] / 49875.0))
+    elif what == "dim":
+        # xam 17559 (retail, 2.0.17559): XamSetInactivityTime (ord 415) writes the timeout of
+        # timer `type` as minutes * 60 s in 100 ns units at 0x81A9E0B0 + type * 16 + 8, and
+        # XamResetInactivity (ord 417) the last input's interrupt time at 0x81A9E0A0. Timer 0 is
+        # the dashboard's dim (600 s). Dim: a short timeout and the last input at 0 -- it dims
+        # within a second. Wake: the last input in the future (the dim ends at once, and comes
+        # again only after a real input has put the time back), the timeout back to 10 min.
+        last, table = 0x81A9E0A0, 0x81A9E0B0
+        flags, timeout = struct.unpack(">QQ", read(table, 16))
+        if flags >> 32 != 1 or timeout % 10000000:
+            print("not xam 17559's inactivity table at %#x (%016x %016x): not touched"
+                  % (table, flags, timeout))
+            return 1
+        if rest and rest[0] == "wake":
+            write(table + 8, struct.pack(">Q", 600 * 10000000))
+            write(last, struct.pack(">Q", 0x7FFFFFFFFFFFFFFF))
+            print("woken; the dim timeout 10 min again, from the next input on")
+        else:
+            seconds = num(rest[0]) if rest else 1
+            write(table + 8, struct.pack(">Q", seconds * 10000000))
+            write(last, struct.pack(">Q", 0))
+            print("dim in %d s (was a %d s timeout); `xectl.py dim wake` ends it"
+                  % (seconds, timeout // 10000000))
     elif what == "memory":
         # bench=debug: MmQueryStatistics' words, and 64 KB blocks that can be taken
         st = command(sym, 25, wait=120)
