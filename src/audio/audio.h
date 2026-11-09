@@ -17,21 +17,26 @@
 #define AUDIO_SIX           6u      /* the six channels as they are */
 #define AUDIO_STEREO_IN_SIX 7u      /* the stereo mix in a six-channel stream, the rest silent */
 
-/* Worker thread, PASSIVE_LEVEL: start hearing the console, in one of the layouts above;
- * 0, or what failed. */
-u32  audio_open(u32 layout);
+/* Who reads: each has its own place in the rings, so they play at once. */
+#define AUDIO_READER_CARD      0u   /* a USB card (uac) */
+#define AUDIO_READER_BLUETOOTH 1u   /* an A2DP headset */
+#define AUDIO_READERS          2u
+
+/* Worker thread, PASSIVE_LEVEL: start hearing the console, as `reader`, in one of the
+ * layouts above; 0, or what failed. */
+u32  audio_open(u32 reader, u32 layout);
 
 /* Worker thread: whether the dashboard's audio setting asks for 5.1 (Dolby Digital, with
  * or without WMA Pro), read from the kernel each call. Checked on 17559: 0x00000003 for
  * digital stereo, 0x00010001 for Dolby Digital 5.1, 0x00030001 with WMA Pro. */
 u32  audio_surround(void);
-/* Any IRQL: nobody is reading any more. */
-void audio_close(void);
+/* Any IRQL: `reader` reads no more. */
+void audio_close(u32 reader);
 
 /* `frames` into `out` (channels x s32 at full scale, as the layout opened), whatever there
  * is: the rest is silence and is counted. From the player's completion, DISPATCH_LEVEL.
  * Nothing is given until a little has gathered, so that the first frames do not run dry. */
-void audio_read(s32 *out, u32 frames);
+void audio_read(u32 reader, s32 *out, u32 frames);
 
 typedef struct {
     u32 open_status;        /* of the registration */

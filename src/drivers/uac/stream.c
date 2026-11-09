@@ -45,7 +45,7 @@ static void fill(UAC *u, u32 slot)
         u->play_lengths[slot][packet] = (u16)(n * one);
         frames += n;
     }
-    audio_read(u->frames, frames);
+    audio_read(AUDIO_READER_CARD, u->frames, frames);
     pcm_to_packet(u->frames, frames * p->channels, u->play_buf[slot], p->bytes);
     u->play[slot].Length = frames * one;
 }

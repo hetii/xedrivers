@@ -183,11 +183,11 @@ static u32 uac_start(NET_DEV *nd)
         if (!u->ep_feedback)
             return STEP_ENDPOINT;
     }
-    u->st->audio_open = audio_open(layout);
+    u->st->audio_open = audio_open(AUDIO_READER_CARD, layout);
     if (u->st->audio_open)
         return STEP_AUDIO;
     if (stream_start(u)) {
-        audio_close();
+        audio_close(AUDIO_READER_CARD);
         return STEP_STREAM;
     }
     if (u->info.mic.found)
@@ -204,7 +204,7 @@ static void uac_detached(NET_DEV *nd)
     taken = 0;
     if (u) {
         u->stopping = 1;
-        audio_close();
+        audio_close(AUDIO_READER_CARD);
     }
 }
 

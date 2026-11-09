@@ -34,16 +34,29 @@ volatile AUDIO_STATS audio_stats;
 static MEC_CLIENT client;
 static void *handle;
 static float frame[AUDIO_CHANNELS * AUDIO_FRAME_SAMPLES] __attribute__((aligned(128)));
-static s32 converted[AUDIO_FRAME_SAMPLES * 6];
-static s32 *ring;
-static volatile u32 write_at, read_at;      /* in frames, running on; one writer, one reader */
-static volatile u32 reading, started;
-static u32 channels = 2;                   /* a ring frame's values */
+static s32 stereo_frame[AUDIO_FRAME_SAMPLES * 2];
+static s32 six_frame[AUDIO_FRAME_SAMPLES * 6];
 
+/* Two rings filled from every frame -- the stereo mix and the six channels as they are --
+ * so that readers of either layout can play at once (a USB card and a Bluetooth headset).
+ * One writer; each reader has its own place, and one that falls a ring behind skips ahead
+ * itself: the writer never waits for anybody. */
+static s32 *stereo_ring, *six_ring;
+static volatile u32 write_at;               /* in frames, running on */
+
+typedef struct {
+    volatile u32 active;
+    u32 layout;
+    volatile u32 read_at;
+    u32 started;
+} READER;
+
+static READER readers[AUDIO_READERS];
+static volatile u32 reading;                /* any reader */
 
 void audio_callback(void *context)
 {
-    u32 w, i, used;
+    u32 w, i, c;
 
     (void)context;
     audio_stats.callback_context = ke_processor() << 8 | ke_irql();
@@ -56,22 +69,15 @@ void audio_callback(void *context)
     }
     bench_audio_frame(frame);
     w = write_at;
-    used = w - read_at;
-    if (used + AUDIO_FRAME_SAMPLES > RING_FRAMES) {
-        audio_stats.overruns += AUDIO_FRAME_SAMPLES;
-        return;                             /* the reader moves read_at: this frame goes */
-    }
-    if (audio_stats.layout == AUDIO_SIX)
-        pcm_six(frame, converted, audio_stats.volume);
-    else if (audio_stats.layout == AUDIO_STEREO_IN_SIX)
-        pcm_stereo_in_six(frame, converted, audio_stats.volume);
-    else
-        pcm_stereo_downmix(frame, converted, audio_stats.volume);
+    pcm_stereo_downmix(frame, stereo_frame, audio_stats.volume);
+    pcm_six(frame, six_frame, audio_stats.volume);
     for (i = 0; i < AUDIO_FRAME_SAMPLES; i++) {
-        u32 at = ((w + i) & (RING_FRAMES - 1)) * channels, c;
+        u32 at = (w + i) & (RING_FRAMES - 1);
 
-        for (c = 0; c < channels; c++)
-            ring[at + c] = converted[i * channels + c];
+        stereo_ring[at * 2] = stereo_frame[i * 2];
+        stereo_ring[at * 2 + 1] = stereo_frame[i * 2 + 1];
+        for (c = 0; c < 6; c++)
+            six_ring[at * 6 + c] = six_frame[i * 6 + c];
     }
     mem_sync();
     write_at = w + AUDIO_FRAME_SAMPLES;
@@ -102,21 +108,27 @@ u32 audio_surround(void)
     return (s32)audio_stats.speaker_status >= 0 && (speakers & SPEAKERS_DIGITAL) != 0;
 }
 
-u32 audio_open(u32 layout)
+u32 audio_open(u32 reader, u32 layout)
 {
-    reading = 0;                            /* the callback leaves the ring alone */
+    READER *r = &readers[reader];
+    u32 i, any = 0;
+
+    if (reader >= AUDIO_READERS)
+        return 3;
+    r->active = 0;
     mem_sync();
     audio_stats.volume = volume_setting() * 256u / 100u;
     audio_stats.layout = layout;
-    channels = layout == AUDIO_STEREO ? 2 : 6;
-    if (!ring) {
-        /* Room for six channels whichever card comes first. */
-        ring = (s32 *)ExAllocatePoolTypeWithTag(RING_FRAMES * 6 * sizeof(s32), POOL_TAG, 2);
-        if (!ring)
+    if (!stereo_ring) {
+        stereo_ring = (s32 *)ExAllocatePoolTypeWithTag(RING_FRAMES * 8 * sizeof(s32),
+                                                       POOL_TAG, 2);
+        if (!stereo_ring)
             return 1;
+        six_ring = stereo_ring + RING_FRAMES * 2;
     }
-    read_at = write_at;
-    started = 0;
+    r->layout = layout;
+    r->read_at = write_at;
+    r->started = 0;
     mem_sync();
     if (!handle) {
         void *h = 0;
@@ -130,41 +142,68 @@ u32 audio_open(u32 layout)
             return 2;
         handle = h;
     }
+    r->active = 1;
     reading = 1;
-    audio_stats.readers = 1;
+    for (i = 0; i < AUDIO_READERS; i++)
+        any += readers[i].active;
+    audio_stats.readers = any;
     return 0;
 }
 
-void audio_close(void)
+void audio_close(u32 reader)
 {
-    reading = 0;
-    audio_stats.readers = 0;
+    u32 i, any = 0;
+
+    if (reader >= AUDIO_READERS)
+        return;
+    readers[reader].active = 0;
+    for (i = 0; i < AUDIO_READERS; i++)
+        any += readers[i].active;
+    reading = any != 0;
+    audio_stats.readers = any;
 }
 
-void audio_read(s32 *out, u32 frames)
+void audio_read(u32 reader, s32 *out, u32 frames)
 {
-    u32 r = read_at, have = write_at - r, n, i, c;
+    READER *rd = &readers[reader];
+    u32 w = write_at, r = rd->read_at, have, n, i, c;
+    u32 channels = rd->layout == AUDIO_STEREO ? 2 : 6;
 
-    if (!started) {
+    if (w - r > RING_FRAMES - AUDIO_FRAME_SAMPLES) {    /* a ring behind: skip ahead */
+        audio_stats.overruns += w - r - START_FRAMES;
+        r = w - START_FRAMES;
+    }
+    have = w - r;
+    if (!rd->started) {
         if (have < START_FRAMES)
             have = 0;
         else
-            started = 1;
+            rd->started = 1;
     }
     n = have < frames ? have : frames;
     for (i = 0; i < n; i++) {
-        u32 at = ((r + i) & (RING_FRAMES - 1)) * channels;
+        u32 at = (r + i) & (RING_FRAMES - 1);
 
-        for (c = 0; c < channels; c++)
-            out[i * channels + c] = ring[at + c];
+        if (rd->layout == AUDIO_STEREO) {
+            out[i * 2] = stereo_ring[at * 2];
+            out[i * 2 + 1] = stereo_ring[at * 2 + 1];
+        } else if (rd->layout == AUDIO_SIX) {
+            for (c = 0; c < 6; c++)
+                out[i * 6 + c] = six_ring[at * 6 + c];
+        } else {                                        /* the stereo mix in front, the rest silent */
+            out[i * 6] = stereo_ring[at * 2];
+            out[i * 6 + 1] = stereo_ring[at * 2 + 1];
+            for (c = 2; c < 6; c++)
+                out[i * 6 + c] = 0;
+        }
     }
     for (; i < frames; i++)
         for (c = 0; c < channels; c++)
             out[i * channels + c] = 0;
     mem_sync();
-    read_at = r + n;
+    rd->read_at = r + n;
     audio_stats.frames_out += n;
     audio_stats.underruns += frames - n;
     if (n < frames)
-        started = 0;                        /* gather again rather than crackle */
+        rd->started = 0;                    /* gather again rather than crackle */
 }
