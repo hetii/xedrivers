@@ -98,11 +98,53 @@ void usb_sleep(u32 ms)
  * and the control transfers it waits for also wait on this event, which whatever
  * they wait for sets -- a device arriving or leaving, a control transfer done. */
 
+/* Other threads woken with the worker: the Bluetooth host's (hci.c). The dim stops their
+ * timed waits as it stops the worker's (2026-11-10: the worker, the Bluetooth thread and the
+ * pulse all stood in their waits ten minutes after a boot without a pad, while completions and
+ * the audio callback ran on), so they too wait on an event, which this sets. */
+#define WAKE_ALSO_MAX 2
+static KEVENT *wake_also[WAKE_ALSO_MAX];
+static volatile u32 wake_also_count;
+
+/* From above DISPATCH_LEVEL (the audio callback runs at 4): KeSetEvent there takes the
+ * dispatcher lock where it must not -- the console stopped, D3D reporting its own callback
+ * never returned (2026-11-10) -- so it goes through a DPC, which may be queued from there. */
+static KDPC wake_dpc;
+static volatile u32 wake_dpc_ready;
+
+static void wake_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
+{
+    (void)dpc;
+    (void)context;
+    (void)a1;
+    (void)a2;
+    usb_wake();
+}
+
+void usb_wake_soon(void)
+{
+    if (wake_dpc_ready)
+        KeInsertQueueDpc(&wake_dpc, 0, 0);
+}
+
+void usb_wake_also(KEVENT *event)
+{
+    if (wake_also_count < WAKE_ALSO_MAX) {
+        wake_also[wake_also_count] = event;
+        mem_sync();
+        wake_also_count++;
+    }
+}
+
 void usb_wake(void)
 {
+    u32 i;
+
     spun_woken = 1;
     if (wake_ready)
         KeSetEvent(&wake_event, 0, 0);
+    for (i = 0; i < wake_also_count; i++)
+        KeSetEvent(wake_also[i], 0, 0);
 }
 
 void usb_wait(u32 ms)
@@ -665,6 +707,9 @@ int usb_register(const USB_CLIENT *who)
     submit_dpc.TargetNumber = USB_PROCESSOR + 1;
     usb_dpc_init(&cancel_dpc, cancel_dpc_routine, 0);
     cancel_dpc.TargetNumber = USB_PROCESSOR + 1;
+    usb_dpc_init(&wake_dpc, wake_dpc_routine, 0);
+    mem_sync();
+    wake_dpc_ready = 1;
 
     /* xerunner: usb-driver-object-f2@1 -- both list words zero or a bug check. */
     driver_object.ListEntry.Flink = 0;

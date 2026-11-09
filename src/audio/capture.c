@@ -66,6 +66,9 @@ void audio_callback(void *context)
 
     (void)context;
     audio_stats.callback_context = ke_processor() << 8 | ke_irql();
+    /* The one clock the dim does not stop: wake the worker and the Bluetooth host, whose
+     * timed waits it leaves unended (usb.c). Through a DPC, whatever this IRQL is. */
+    usb_wake_soon();
     if (!reading || !handle)
         return;
     audio_stats.callbacks++;

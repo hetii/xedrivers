@@ -530,6 +530,20 @@ extern u32 KeSetPriorityThread(void *thread, u32 priority);
 static volatile u32 thread_started, posted_what, posted_done;
 #if defined(__powerpc__)
 static volatile u32 *posted_args;
+
+/* The thread waits on this, not on a timeout alone: once the dashboard dims, a timed wait is
+ * never ended (the A2DP stream stopped ten minutes after a boot without a pad). usb_wake sets
+ * it -- every completion of ours, and the audio callback's every 10 ms. */
+static KEVENT thread_event;
+#define TB_PER_MS       49875u          /* the time base, CPU clock / 64 */
+
+static u32 tb_low(void)
+{
+    u32 t;
+
+    __asm__ volatile("mftb %0" : "=r"(t));
+    return t;
+}
 #endif
 
 #if defined(__powerpc__)
@@ -537,7 +551,7 @@ static void bt_thread(void *parameter)
 {
     s64 interval = -(s64)BT_LOOP_MS * 10000;
     void *self;
-    u32 previous;
+    u32 previous, last = tb_low() - BT_LOOP_MS * TB_PER_MS;
 
     (void)parameter;
 #if defined(__powerpc__)
@@ -548,8 +562,13 @@ static void bt_thread(void *parameter)
     KeSetAffinityThread(self, 1u << BT_PROCESSOR, &previous);
     KeSetPriorityThread(self, BT_PRIORITY);
     for (;;) {
-        bt_stats.thread_loops++;
-        bt_tick_now();
+        /* woken early by any completion: the tick itself stays 5 ms apart, which the
+         * host's tick-counted timers assume */
+        if (tb_low() - last >= BT_LOOP_MS * TB_PER_MS) {
+            last = tb_low();
+            bt_stats.thread_loops++;
+            bt_tick_now();
+        }
         if (posted_what) {
             u32 handled = bt_command_now(posted_what, posted_args);
 
@@ -557,7 +576,7 @@ static void bt_thread(void *parameter)
             posted_done = handled ? 1 : 2;
             posted_what = 0;
         }
-        KeDelayExecutionThread(0, 0, &interval);
+        KeWaitForSingleObject(&thread_event, 0, 0, 0, &interval);
     }
 }
 #endif
@@ -569,6 +588,8 @@ void bt_tick(void)
         void *h = 0;
 
         thread_started = 1;
+        KeInitializeEvent(&thread_event, 1, 0);
+        usb_wake_also(&thread_event);
         ExCreateThread(&h, 0, 0, 0, (void *)bt_thread, 0, 2);
     }
 #else
@@ -587,8 +608,9 @@ u32 bt_command(u32 what, volatile u32 *args)
     posted_args = args;
     mem_sync();
     posted_what = what;
+    KeSetEvent(&thread_event, 0, 0);
     for (waited = 0; !posted_done && waited < 2000; waited++)
-        usb_sleep(1);
+        usb_wait(1);                    /* not usb_sleep: the dim would never end it */
     return posted_done == 1;
 #else
     return bt_command_now(what, args);

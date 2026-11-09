@@ -186,6 +186,13 @@ void  usb_spin_waits(u32 on);
 void  usb_wait(u32 ms);
 void  usb_wake(void);
 
+/* Have usb_wake set `event` too: another thread's wait that the dim must not stall (a
+ * synchronization event, initialised; it stays registered). */
+void  usb_wake_also(KEVENT *event);
+
+/* usb_wake from any IRQL, above DISPATCH_LEVEL too: through a DPC. */
+void  usb_wake_soon(void);
+
 typedef struct {
     u32 match_calls;
     u32 add_calls;
