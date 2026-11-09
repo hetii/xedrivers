@@ -270,9 +270,6 @@ typedef struct AIC {
     WL_LINK link;               /* which way it serves, and that mode's state */
     u32 secured;                /* this join runs the handshake before the link */
     u8 bssid[6];                /* the access point joined, for the EAPOL header */
-    void *ep_bt_event;          /* the Bluetooth controller's event endpoint */
-    volatile u32 bt_running;
-    u32 bt_errors;
     u8 *eapol_buf;              /* DMA, one frame to send */
 } AIC;
 

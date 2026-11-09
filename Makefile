@@ -101,11 +101,13 @@ NEEDS_rtl8156 := cdc common/realtek
 NEEDS_rtl8153 := cdc common/realtek
 NEEDS_ax88179 := common/asix
 NEEDS_ax88178 := common/asix
+NEEDS_aic8800 := common/btusb
 DRIVERS  ?= $(filter-out common,$(notdir $(patsubst %/,%,$(wildcard src/drivers/*/))))
 DRIVER_DIRS := $(sort $(DRIVERS) $(foreach d,$(DRIVERS),$(NEEDS_$(d))))
 SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
             $(addprefix src/drivers/,$(DRIVER_DIRS)) \
             $(if $(filter uac,$(DRIVERS)),src/audio) \
+            $(if $(filter common/btusb,$(DRIVER_DIRS)),src/bluetooth) \
             $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST))) \
             $(if $(SERVERS_LIST),src/servers src/servers/common $(addprefix src/servers/,$(SERVERS_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
@@ -215,7 +217,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) -D NTB_IN_SIZE=$(NTB_IN_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
-	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u $(BENCH_FLAGS) $(SERVERS_FLAGS) \
+	    -D XE_TRANSPORT=$(TRANSPORT_VALUE)u $(BENCH_FLAGS) $(SERVERS_FLAGS) -D XE_BLUETOOTH=$(if $(filter common/btusb,$(DRIVER_DIRS)),1,0) \
 	    -D XE_BUILD_COMMIT=0x$(GIT_COMMIT)u -D XE_BUILD_DIRTY=$(GIT_DIRTY)u \
 	    --name $(NAME).dll --into $(BUILD)
 	@mv $(BUILD)/plugin.xex $@
@@ -226,7 +228,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 # Each test sits beside the code it tests: tests/drivers/<driver>/, tests/bench/.
 test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/test_rndis \
       $(BUILD)/test_asix $(BUILD)/test_ax88179 $(BUILD)/test_ax88178 $(BUILD)/test_nfs \
-      $(BUILD)/test_ftp $(BUILD)/test_pcm $(BUILD)/test_descriptors \
+      $(BUILD)/test_ftp $(BUILD)/test_pcm $(BUILD)/test_descriptors $(BUILD)/test_bluetooth \
       $(BUILD)/test_aic $(BUILD)/test_wpa $(BUILD)/test_reorder \
       $(BUILD)/test_bridge $(BUILD)/test_omni
 	@$(BUILD)/test_cdc
@@ -240,6 +242,7 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
 	@$(BUILD)/test_ftp
 	@$(BUILD)/test_pcm
 	@$(BUILD)/test_descriptors
+	@$(BUILD)/test_bluetooth
 	@AIC_FW=$(FW_DIR)/aic8800D80 $(BUILD)/test_aic
 	@$(BUILD)/test_wpa
 	@$(BUILD)/test_reorder
@@ -286,6 +289,12 @@ $(BUILD)/test_pcm: tests/audio/test_pcm.c src/audio/pcm.c src/audio/pcm.h
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/audio -o $@ tests/audio/test_pcm.c src/audio/pcm.c -lm
 
+$(BUILD)/test_bluetooth: tests/bluetooth/test_bluetooth.c src/drivers/common/btusb/btusb.c \
+                        src/bluetooth/hci.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -I src/drivers/common/btusb -I src/bluetooth -o $@ tests/bluetooth/test_bluetooth.c \
+	    src/drivers/common/btusb/btusb.c src/bluetooth/hci.c
+
 $(BUILD)/test_descriptors: tests/drivers/uac/test_descriptors.c src/drivers/uac/descriptors.c \
                            src/drivers/uac/descriptors.h src/drivers/uac/pacer.h
 	@mkdir -p $(BUILD)
@@ -313,7 +322,6 @@ $(BUILD)/test_rndis: tests/drivers/rndis/test_rndis.c src/drivers/rndis/rndis.c 
 
 $(BUILD)/test_aic: tests/drivers/aic8800/test_aic.c src/drivers/aic8800/aic_fw.c \
                    src/drivers/aic8800/aic_wifi.c src/drivers/aic8800/aic_data.c \
-                   src/drivers/aic8800/aic_bt.c \
                    src/wireless/wireless.c src/wireless/wpa.c src/wireless/reorder.c \
                    src/wireless/bridge.c \
                    tests/drivers/aic8800/wifi-8d81.txt \
@@ -322,7 +330,7 @@ $(BUILD)/test_aic: tests/drivers/aic8800/test_aic.c src/drivers/aic8800/aic_fw.c
 	$(HOST_CC) -I src/drivers/aic8800 -o $@ tests/drivers/aic8800/test_aic.c \
 	    src/drivers/aic8800/aic_fw.c src/drivers/aic8800/aic_cmd.c \
 	    src/drivers/aic8800/aic_wifi.c src/drivers/aic8800/aic_data.c \
-	    src/drivers/aic8800/aic_bt.c src/wireless/wireless.c src/wireless/wpa.c \
+	    src/wireless/wireless.c src/wireless/wpa.c \
 	    src/wireless/reorder.c src/wireless/bridge.c
 
 $(BUILD)/test_bridge: tests/wireless/test_bridge.c src/wireless/bridge.c \

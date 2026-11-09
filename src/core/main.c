@@ -30,6 +30,9 @@
 #if XE_AUDIO
 #include "audio.h"
 #endif
+#if XE_BLUETOOTH
+#include "bt.h"
+#endif
 
 #define XE_VERSION 0x00020000u
 
@@ -92,6 +95,10 @@ static u32 run(u32 what)
     default:
         if (bench_command(what, xe_cmd) || net_command(what, xe_cmd))
             return xe_cmd[5];
+#if XE_BLUETOOTH
+        if (bt_command(what, xe_cmd))
+            return xe_cmd[5];
+#endif
         return 0xFFFFFFFFu;
     }
 }
@@ -192,6 +199,9 @@ static void worker(void *parameter)
         net_tick();
 #if XE_AUDIO
         audio_voice_tick();
+#endif
+#if XE_BLUETOOTH
+        bt_tick();
 #endif
         servers_tick(tick);
 

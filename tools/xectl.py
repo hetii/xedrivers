@@ -18,6 +18,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py cmd N [a1 a2 a3]           any raw command
     xectl.py omni                       what a wireless card registered by cmd 21 was asked
     xectl.py prof [SECONDS]             where a frame's time goes (bench=prof)
+    xectl.py bt [scan]                  the Bluetooth host; scan: ~10 s of inquiry, what answered
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
     xectl.py bench tcp [up|down|both] [--streams 1,4] [--seconds S] [--pace MB/s]
     xectl.py bench xeftp [up|down|both] [--mb 512] [--files 1,2,4] [--port 2121] [--repeat 3]
@@ -74,7 +75,7 @@ STRUCTS = {
     "usb_stats": ["match_calls", "add_calls", "remove_calls", "close_passes", "submit_direct",
                   "submit_dpc", "dpc_runs", "last_open_status", "scan_found", "reset_status",
                   "unbound_resets", "no_slot", "control_late", "cancels", "nak_reload_set",
-                  "nak_reload_skipped"],
+                  "nak_reload_skipped", "spin_bring_ups"],
     "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls", "tx_wait_ticks_hi", "tx_wait_ticks_lo", "tx_wait_bytes_hi", "tx_wait_bytes_lo", "tx_wait_calls", "turnaround_ticks_hi", "turnaround_ticks_lo", "turnaround_bytes_hi", "turnaround_bytes_lo", "turnaround_calls"],
     "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found",
                  "build_commit", "build_dirty"],
@@ -171,11 +172,13 @@ STRUCTS = {
     "wpa_stats": ["state", "failures", "replays", "mic_failures", "messages_in",
                   "messages_out", "unwrap_failures", "last_key_info", "gtk_len",
                   "no_gtk", "pending", "applied", "psk_ready", "group_rekeys"],
-    "aic_bt_stats": ["up", "commands", "command_errors", "timeouts", "events",
-                     "event_errors", "last_event", "last_event_error",
-                     "last_opcode", "reset_status", "version_status",
-                     "address_status", "hci_version", "hci_revision",
-                     "lmp_version", "manufacturer", "address0", "address1"],
+    "bt_stats": ["attached", "state", "commands", "events", "events_dropped", "last_opcode",
+                 "last_status", "failed_opcode", "address0", "address1", "acl_mtu",
+                 "acl_slots", "inquiries", "found"],
+    "btusb_stats": ["started", "events", "event_errors", "acl_in_packets", "acl_out_packets",
+                    "acl_out_full", "commands", "command_errors", "last_error",
+                    "start_status", "interface", "ep_event", "ep_acl_in", "ep_acl_out",
+                    "acl_max"],
     "wl_stats": ["scans", "scans_done", "results", "bad_frames", "table_full",
                  "bss_count", "last_scan_status"],
     "file_stats": ["opens", "found", "last_status", "read_errors",
@@ -268,6 +271,50 @@ def read_struct(sym, name, index=0):
 
 
 NET_MAX = 4
+
+
+BT_STATES = {0: "detached", 1: "init", 2: "ready", 3: "inquiry"}
+BT_FOUND_WORDS = 13      # bt.h BT_FOUND: address+pad, class, rssi, seen, name[32]
+
+
+def bt_line(sym):
+    b = read_struct(sym, "bt_stats")
+    u = read_struct(sym, "btusb_stats")
+    addr = struct.pack(">II", b["address0"], b["address1"])[:6].hex(":")
+    print("bt       %s addr=%s acl=%dx%d cmds=%d events=%d dropped=%d last=%#06x/%#x "
+          "failed=%#06x scans=%d found=%d | usb start=%d if=%d ep=%#x/%#x/%#x "
+          "events=%d err=%d cmd_err=%d acl in/out=%d/%d last_err=%#x" % (
+              BT_STATES.get(b["state"], b["state"]) if b["attached"] else "detached",
+              addr, b["acl_mtu"], b["acl_slots"], b["commands"], b["events"],
+              b["events_dropped"], b["last_opcode"], b["last_status"], b["failed_opcode"],
+              b["inquiries"], b["found"], u["start_status"], u["interface"], u["ep_event"],
+              u["ep_acl_in"], u["ep_acl_out"], u["events"], u["event_errors"],
+              u["command_errors"], u["acl_in_packets"], u["acl_out_packets"],
+              u["last_error"]))
+
+
+def bt_found(sym):
+    n = read_struct(sym, "bt_stats")["found"]
+    size = 4 * BT_FOUND_WORDS
+    raw = read(sym["bt_found"], size * min(n, 16)) if n else b""
+    for i in range(min(n, 16)):
+        one = raw[i * size:(i + 1) * size]
+        cls, rssi, seen = struct.unpack(">IiI", one[8:20])
+        name = one[20:52].split(b"\0")[0].decode("utf-8", "replace")
+        print("  %s class=%06x rssi=%d seen=%d %s" % (one[:6].hex(":"), cls, rssi, seen,
+                                                     name))
+
+
+def bt(sym, rest):
+    """xectl bt [scan]: the Bluetooth host's state and what the last scan found."""
+    if rest and rest[0] == "scan":
+        state = command(sym, 40)[0]
+        if state != 2:
+            print("not ready (state %s)" % BT_STATES.get(state, state))
+        else:
+            time.sleep(11)
+    bt_line(sym)
+    bt_found(sym)
 
 
 def uplink_index(sym):
@@ -505,16 +552,8 @@ def status(sym):
         print("wifi cfg loaded=%d ssid=%s pass=%s" % (
             loaded, ", ".join(repr(n) for n in names) or "none",
             "set" if has_pass else "none"))
-    if "aic_bt_stats" in sym:
-        b = read_struct(sym, "aic_bt_stats")
-        addr = struct.pack(">II", b["address0"], b["address1"])[:6].hex(":")
-        print("bt       up=%d addr=%s hci=%d.%d lmp=%d maker=%d | cmds=%d err=%d "
-              "timeouts=%d events=%d/%#x reset=%#x ver=%#x addr_st=%#x" % (
-                  b["up"], addr, b["hci_version"], b["hci_revision"],
-                  b["lmp_version"], b["manufacturer"],
-                  b["commands"], b["command_errors"], b["timeouts"], b["events"],
-                  b["last_event"], b["reset_status"], b["version_status"],
-                  b["address_status"]))
+    if "bt_stats" in sym:
+        bt_line(sym)
     if "wpa_stats" in sym:
         w = read_struct(sym, "wpa_stats")
         names = {0: "idle", 1: "wait-1", 2: "wait-3", 3: "done", 4: "failed"}
@@ -1554,6 +1593,8 @@ def main(argv):
             one = read_struct(sym, "uac_stats", i)
             if one["version"]:
                 print("slot %d: %s" % (i, one))
+    elif what == "bt":
+        bt(sym, rest)
     elif what == "memory":
         # bench=debug: MmQueryStatistics' words, and 64 KB blocks that can be taken
         st = command(sym, 25, wait=120)

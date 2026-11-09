@@ -1,0 +1,268 @@
+/* See btusb.h. Events and ACL data come in transfers of whatever the endpoint gives; one HCI
+ * packet may span several, so each is put together by its header's length before it goes up.
+ */
+
+#include "btusb.h"
+
+#define DT_CONFIG       2u
+#define DT_INTERFACE    4u
+#define DT_ENDPOINT     5u
+#define EP_IN           0x80u
+#define EP_BULK         2u
+#define EP_INTERRUPT    3u
+#define CONFIG_MAX      1024u
+
+volatile BTUSB_STATS btusb_stats;
+
+u32 btusb_find(const u8 *c, u32 length, BTUSB_EPS *e)
+{
+    u32 at = 0, in_hci = 0, found = 0, i;
+
+    for (i = 0; i < sizeof(*e); i++)
+        ((u8 *)e)[i] = 0;
+    while (at + 2 <= length) {
+        const u8 *d = c + at;
+        u32 n = d[0];
+
+        if (n < 2 || at + n > length)
+            break;
+        if (d[1] == DT_INTERFACE && n >= 9) {
+            /* the first HCI interface's first setting: class e0, subclass 01, protocol 01 */
+            in_hci = !found && d[3] == 0 && d[5] == 0xE0 && d[6] == 0x01 && d[7] == 0x01;
+            if (in_hci) {
+                found = 1;
+                e->interface = d[2];
+            }
+        } else if (d[1] == DT_ENDPOINT && n >= 7 && in_hci) {
+            u32 type = d[3] & 3u, max = (d[4] | (u32)d[5] << 8) & 0x7FFu;
+
+            if (type == EP_INTERRUPT && (d[2] & EP_IN) && !e->event) {
+                e->event = d[2];
+                e->event_max = max;
+                e->event_interval = d[6];
+            } else if (type == EP_BULK && (d[2] & EP_IN) && !e->acl_in) {
+                e->acl_in = d[2];
+                e->acl_max = max;
+            } else if (type == EP_BULK && !(d[2] & EP_IN) && !e->acl_out) {
+                e->acl_out = d[2];
+            }
+        }
+        at += n;
+    }
+    return found && e->event && e->acl_in && e->acl_out;
+}
+
+/* --- receiving ------------------------------------------------------------------------- */
+
+static void event_ask(BTUSB *b);
+static void acl_ask(BTUSB *b);
+
+static void event_done(URB *urb, u32 status)
+{
+    BTUSB *b = (BTUSB *)urb->Owner;
+    u32 n = urb->Actual, i;
+
+    if (!b->running || !b->dev->active)
+        return;
+    if (!NT_SUCCESS(status)) {
+        b->st->event_errors++;
+        b->st->last_error = status;
+        b->event_have = 0;
+        if (++b->errors < 16)
+            event_ask(b);
+        return;
+    }
+    b->errors = 0;
+    for (i = 0; i < n && b->event_have < BTUSB_EVENT_MAX; i++)
+        b->event[b->event_have++] = b->event_buf[i];
+    if (b->event_have >= 2 && b->event_have >= 2u + b->event[1]) {
+        b->st->events++;
+        bt_event(b->event, 2u + b->event[1]);
+        b->event_have = 0;
+        usb_wake();
+    }
+    event_ask(b);
+}
+
+static void event_ask(BTUSB *b)
+{
+    usb_prepare(&b->event_urb, b->dev, b->ep_event, event_done, b->event_buf,
+                b->eps.event_max ? b->eps.event_max : 64, 0);
+    b->event_urb.Owner = b;
+    usb_submit(&b->event_urb);
+}
+
+static void acl_done(URB *urb, u32 status)
+{
+    BTUSB *b = (BTUSB *)urb->Owner;
+    u32 n = urb->Actual, i, need;
+
+    if (!b->running || !b->dev->active)
+        return;
+    if (!NT_SUCCESS(status)) {
+        b->st->last_error = status;
+        b->acl_have = 0;
+        if (++b->errors < 16)
+            acl_ask(b);
+        return;
+    }
+    for (i = 0; i < n && b->acl_have < BTUSB_ACL_MAX; i++)
+        b->acl[b->acl_have++] = b->acl_buf[i];
+    need = b->acl_have >= 4 ? 4u + (b->acl[2] | (u32)b->acl[3] << 8) : 0xFFFFFFFFu;
+    if (need <= b->acl_have) {
+        b->st->acl_in_packets++;
+        bt_acl_in(b->acl, need);
+        b->acl_have = 0;
+        usb_wake();
+    } else if (need != 0xFFFFFFFFu && need > BTUSB_ACL_MAX) {
+        b->acl_have = 0;                /* larger than we take: dropped whole */
+    }
+    acl_ask(b);
+}
+
+static void acl_ask(BTUSB *b)
+{
+    usb_prepare(&b->acl_urb, b->dev, b->ep_acl_in, acl_done, b->acl_buf, BTUSB_ACL_MAX, 0);
+    b->acl_urb.Owner = b;
+    usb_submit(&b->acl_urb);
+}
+
+/* --- sending --------------------------------------------------------------------------- */
+
+static u32 send_command(void *ctx, const u8 *packet, u32 length)
+{
+    BTUSB *b = (BTUSB *)ctx;
+    u8 setup[8] = { 0x20, 0x00, 0, 0, 0, 0, 0, 0 };     /* class, to the device */
+    u32 i;
+
+    if (!b->running || length > 258)
+        return 1;
+    for (i = 0; i < length; i++)
+        b->cmd_buf[i] = packet[i];
+    setup[4] = (u8)b->eps.interface;
+    setup[6] = (u8)length;
+    setup[7] = (u8)(length >> 8);
+    b->st->commands++;
+    if (!NT_SUCCESS(usb_control(b->dev, setup, b->cmd_buf, length, 0, 1000))) {
+        b->st->command_errors++;
+        return 1;
+    }
+    return 0;
+}
+
+static void out_done(URB *urb, u32 status)
+{
+    BTUSB *b = (BTUSB *)urb->Owner;
+
+    if (!NT_SUCCESS(status))
+        b->st->last_error = status;
+    b->out_busy[urb - b->out_urb] = 0;
+}
+
+static u32 send_acl(void *ctx, const u8 *packet, u32 length)
+{
+    BTUSB *b = (BTUSB *)ctx;
+    u32 s, i;
+
+    if (!b->running || length > BTUSB_ACL_MAX)
+        return 1;
+    for (s = 0; s < BTUSB_OUT; s++)
+        if (!b->out_busy[s])
+            break;
+    if (s == BTUSB_OUT) {
+        b->st->acl_out_full++;
+        return 1;
+    }
+    b->out_busy[s] = 1;
+    for (i = 0; i < length; i++)
+        b->out_buf[s][i] = packet[i];
+    usb_prepare(&b->out_urb[s], b->dev, b->ep_acl_out, out_done, b->out_buf[s], length, 0);
+    b->out_urb[s].Owner = b;
+    b->st->acl_out_packets++;
+    usb_submit(&b->out_urb[s]);
+    return 0;
+}
+
+/* --- bring-up -------------------------------------------------------------------------- */
+
+static u32 start(BTUSB *b, USB_DEV *dev, const u8 *taken);
+
+u32 btusb_start(BTUSB *b, USB_DEV *dev, const u8 *taken)
+{
+    u32 status = start(b, dev, taken);
+
+    btusb_stats.start_status = status;
+    return status;
+}
+
+static u32 start(BTUSB *b, USB_DEV *dev, const u8 *taken)
+{
+    u8 setup[8] = { 0x80, 0x06, 0x00, DT_CONFIG, 0, 0, 9, 0 };
+    u32 actual = 0, total, s;
+    u8 *block;
+
+    b->dev = dev;
+    b->st = &btusb_stats;
+    b->running = 0;
+    b->errors = 0;
+    b->event_have = b->acl_have = 0;
+    if (!b->cmd_buf) {
+        /* one block: config (1 KB), command, event, ACL in, BTUSB_OUT ACL out */
+        block = (u8 *)MmAllocatePhysicalMemory(2, CONFIG_MAX + 512 + 512 +
+                                                BTUSB_ACL_MAX * (1 + BTUSB_OUT) + 64, 4);
+        if (!block)
+            return BTUSB_START_MEMORY;
+        b->cmd_buf = block + CONFIG_MAX;
+        b->event_buf = b->cmd_buf + 512;
+        b->acl_buf = b->event_buf + 512;
+        for (s = 0; s < BTUSB_OUT; s++)
+            b->out_buf[s] = b->acl_buf + BTUSB_ACL_MAX * (1 + s);
+    }
+    block = b->cmd_buf - CONFIG_MAX;
+    if (!NT_SUCCESS(usb_control(dev, setup, block, 9, &actual, 1000)) || actual < 9)
+        return BTUSB_START_CONFIG;
+    total = block[2] | (u32)block[3] << 8;
+    if (total > CONFIG_MAX)
+        total = CONFIG_MAX;
+    setup[6] = (u8)total;
+    setup[7] = (u8)(total >> 8);
+    if (!NT_SUCCESS(usb_control(dev, setup, block, total, &actual, 1000)) || actual < 9)
+        return BTUSB_START_CONFIG;
+    if (!btusb_find(block, actual > total ? total : actual, &b->eps))
+        return BTUSB_START_NOT_HCI;
+    b->st->interface = b->eps.interface;
+    b->st->ep_event = b->eps.event;
+    b->st->ep_acl_in = b->eps.acl_in;
+    b->st->ep_acl_out = b->eps.acl_out;
+    b->st->acl_max = b->eps.acl_max;
+    for (s = 0; taken && taken[s]; s++)
+        if (taken[s] == b->eps.event || taken[s] == b->eps.acl_in || taken[s] == b->eps.acl_out)
+            return BTUSB_START_SHARED;
+    if (!b->ep_event) {
+        b->ep_event = usb_open(dev, USB_TYPE_INTERRUPT, b->eps.event, b->eps.event_max,
+                               b->eps.event_interval);
+        b->ep_acl_in = usb_open(dev, USB_TYPE_BULK, b->eps.acl_in, b->eps.acl_max, 0);
+        b->ep_acl_out = usb_open(dev, USB_TYPE_BULK, b->eps.acl_out, b->eps.acl_max, 0);
+    }
+    if (!b->ep_event || !b->ep_acl_in || !b->ep_acl_out)
+        return BTUSB_START_ENDPOINTS;
+    for (s = 0; s < BTUSB_OUT; s++)
+        b->out_busy[s] = 0;
+    b->transport.ctx = b;
+    b->transport.command = send_command;
+    b->transport.acl = send_acl;
+    b->running = 1;
+    mem_sync();
+    event_ask(b);
+    acl_ask(b);
+    bt_attach(&b->transport);
+    b->st->started++;
+    return 0;
+}
+
+void btusb_stop(BTUSB *b)
+{
+    b->running = 0;
+    mem_sync();
+    bt_detach();
+}

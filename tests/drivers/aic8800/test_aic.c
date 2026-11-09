@@ -42,6 +42,9 @@ void XeCryptAesKey(XE_AES_STATE *s, const u8 *key) { (void)s; (void)key; }
 void XeCryptAesEcb(XE_AES_STATE *s, const u8 *in, u8 *out, u32 e)
 { (void)s; (void)e; memcpy(out, in, 16); }
 volatile u32 net_console_mac_known;
+u32 aic_bt_start(struct AIC *a) { (void)a; return 0; }
+void aic_bt_stop(struct AIC *a) { (void)a; }
+const u8 *net_join_mac(NET_DEV *nd) { return net_console_mac_known ? net_console_mac : nd->mac; }
 
 /* What the network layer saw: the last frame handed up, and the link reports. */
 static volatile NET_STATS net_counters;
