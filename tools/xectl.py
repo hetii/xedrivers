@@ -1597,8 +1597,9 @@ def a2dp_bench(sym, seconds, record, note):
         if name in ("aic8800", "rtw8822b") and ns["ready"]:
             wifi.append("%s:%s" % (name, "link" if ns["link"] else "no link"))
     row = {"date": time.strftime("%Y-%m-%d"), "commit": built_from(sym)[0], "test": "a2dp",
-           "seconds": round(el), "codec": "SBC %d Hz bitpool<=%d" % (a1["rate"],
-                                                                    a1["bitpool"]),
+           "seconds": round(el), "codec": "SBC %d Hz %s bitpool<=%d" % (
+               a1["rate"], {0: "mono", 1: "dual", 2: "stereo", 3: "joint"}.get(a1["mode"], "?"),
+               a1["bitpool"]),
            "rssi_db": sg(b["rssi"]), "wifi": wifi,
            "packets_s": round((a1["packets"] - a0["packets"]) / el, 1),
            "no_credit_s": round((a1["send_failures"] - a0["send_failures"]) / el, 2),
