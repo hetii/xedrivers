@@ -289,6 +289,21 @@ boot. The kernel's own outputs keep playing. A card's microphone is offered to g
 for the profile signed in on player 0. `audio_volume` in `xedrivers.ini` sets the level, 0-100, default 50 (-6 dB).
 `tools/xectl.py audio` shows the counters. More in [uac.md](docs/drivers/uac.md).
 
+### Bluetooth headphones
+
+The AIC8800D80's Bluetooth half is driven by the plugin's own Bluetooth host. A headset
+is an A2DP sink: the console plays to it as it plays to a USB card, both at once if both are
+there (SBC, the most bits a second the headset takes). It pairs as a device without a
+display (Just Works).
+
+- `tools/xectl.py bt scan` lists what answers; `tools/xectl.py bt connect N` links to the Nth,
+  pairs and starts the stream. A paired headset that connects by itself is served too.
+- A pairing's key is written to `xedrivers.ini` as a `bt_pair` line and read at start; a key
+  copied from a PC (BlueZ's `info` file) can be put there the same way.
+- `bluetooth = off` leaves the card's Bluetooth alone (Wi-Fi only).
+
+The microphone (HFP) is not done yet. Internals: [bluetooth.md](docs/bluetooth.md).
+
 ## File servers
 
 `make servers=xenfs,xeftp` builds in an NFSv3 server (xenfs) and an FTP server (xeftp); a plain `make`
