@@ -197,6 +197,9 @@ static u32 tb_now(void)
 
 static u32 wp_mark;
 
+#define TICK_MS         20u
+#define TB_PER_MS       49875u          /* the time base, measured: CPU / 64 */
+
 static void wp(u32 part, u32 tick)
 {
     u32 now = tb_now(), took = now - wp_mark;
@@ -212,7 +215,7 @@ static void wp(u32 part, u32 tick)
 
 static void worker(void *parameter)
 {
-    u32 tick, what, i, pulse_seen = 0, pulse_tick = 0;
+    u32 tick, what, i, pulse_seen = 0, pulse_tick = 0, tick_start = tb_now();
 
     (void)parameter;
     away_from_the_usb_processor();
@@ -292,7 +295,18 @@ static void worker(void *parameter)
             xe_cmd[4] = xe_cmd[4] + 1;
         }
         wp(6, tick);
-        usb_wait(20);
+        /* A tick is 20 ms whatever wakes the wait early (a device's completion, the
+         * Bluetooth host's events once did ~100 times a second): the drivers count ticks
+         * for their timers (the DIG every ~2 s, the receive watch's windows), and those ran
+         * at twice the speed while a headset played. */
+        for (;;) {
+            u32 spent = (tb_now() - tick_start) / TB_PER_MS;
+
+            if (spent >= TICK_MS)
+                break;
+            usb_wait(TICK_MS - spent);
+        }
+        tick_start = tb_now();
         {
             u32 w = tb_now() - wp_mark;
 

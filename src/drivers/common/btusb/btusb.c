@@ -108,7 +108,8 @@ static void event_done(URB *urb, u32 status)
         b->st->events++;
         bt_event(b->event, 2u + b->event[1]);
         b->event_have = 0;
-        usb_wake();
+        /* no usb_wake: the host's thread looks every 5 ms; waking the worker for each event
+         * ran its loop twice as often, and the drivers' tick-counted timers with it */
     }
     event_ask(b);
 }
@@ -146,7 +147,6 @@ static void acl_done(URB *urb, u32 status)
         b->st->acl_in_packets++;
         bt_acl_in(b->acl, need);
         b->acl_have = 0;
-        usb_wake();
     } else if (need != 0xFFFFFFFFu && need > BTUSB_ACL_MAX) {
         b->acl_have = 0;                /* larger than we take: dropped whole */
     }
