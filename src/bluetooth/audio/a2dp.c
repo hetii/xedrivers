@@ -13,6 +13,7 @@
 
 #include "a2dp.h"
 #include "file.h"
+#include "bench.h"
 #if XE_AUDIO
 #include "audio.h"
 #endif
@@ -892,7 +893,7 @@ static void one_packet(void)
     /* sent now, or held until the controller has room: a packet given up is a gap the
      * listener hears (6% of them, with a headset at -74 dBm) */
     pending = at;
-    if (!l2cap_send(media, packet, at)) {
+    if (!bench_a2dp_refused(at) && !l2cap_send(media, packet, at)) {
         pending = 0;
         a2dp_stats.packets++;
         a2dp_stats.frames += n;
@@ -904,16 +905,27 @@ static void one_packet(void)
 
 /* The bitpool follows the radio, as Android's does: down by 4 when a packet had to wait (at
  * most every 0.5 s, not under 18), up by 1 after 2 s without that, back to what was agreed.
- * Every SBC frame says its own bitpool, so the sink follows without asking. */
+ * Every SBC frame says its own bitpool, so the sink follows without asking.
+ * A stream already 100 ms behind is halfway to a gap the listener hears (200 ms, a2dp_tick):
+ * a quarter off then, every 100 ms it still waits. Dual channel at bitpool 64 beside the
+ * card's own Wi-Fi receiving lost 1.6 s of sound in 111 s while 4 at a time got there. */
 #define BITPOOL_FLOOR   18u
 #define DOWN_GAP_TICKS  25u
+#define BEHIND_GAP_TICKS 5u
 #define UP_AFTER_TICKS  100u
 
-static void bitpool_tick(u32 waited)
+static void bitpool_tick(u32 waited, u32 behind)
 {
     if (waited) {
         quiet_ticks = 0;
-        if (++down_gap >= DOWN_GAP_TICKS && sbc.bitpool > BITPOOL_FLOOR + 4) {
+        down_gap++;
+        if (behind && down_gap >= BEHIND_GAP_TICKS && sbc.bitpool > BITPOOL_FLOOR) {
+            sbc.bitpool -= sbc.bitpool / 4;
+            if (sbc.bitpool < BITPOOL_FLOOR)
+                sbc.bitpool = BITPOOL_FLOOR;
+            down_gap = 0;
+            a2dp_stats.bitpool_downs++;
+        } else if (down_gap >= DOWN_GAP_TICKS && sbc.bitpool > BITPOOL_FLOOR + 4) {
             sbc.bitpool -= 4;
             down_gap = 0;
             a2dp_stats.bitpool_downs++;
@@ -982,7 +994,7 @@ static void ladder_tick(u32 waited)
 
 void a2dp_tick(void)
 {
-    u32 now = 0, per, waited = 0;
+    u32 now = 0, per, waited = 0, behind;
     u64 owed;
 
     /* the headset opened signalling and then waited for us (027570 did, its channel and ours
@@ -1018,13 +1030,14 @@ void a2dp_tick(void)
     owed = owed_fp >> 32;
 #endif
     per = sbc_samples(&sbc) * a2dp_stats.frames_per_packet;
+    behind = owed > samples_sent + rate_hz / 10;
     if (owed > samples_sent + rate_hz / 5) {        /* 200 ms behind: start over from now */
         a2dp_stats.late += (u32)(owed - samples_sent);
         samples_sent = owed;
     }
     while (media) {
         if (pending) {
-            if (l2cap_send(media, packet, pending)) {
+            if (bench_a2dp_refused(pending) || l2cap_send(media, packet, pending)) {
                 a2dp_stats.send_failures++;     /* no room yet: it waits */
                 waited = 1;
                 break;
@@ -1038,6 +1051,6 @@ void a2dp_tick(void)
             break;
         one_packet();
     }
-    bitpool_tick(waited);
+    bitpool_tick(waited, behind);
     ladder_tick(waited);
 }

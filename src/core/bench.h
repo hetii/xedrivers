@@ -46,6 +46,11 @@ u32    bench_wired_hidden(void);
  * (bench=debug, `xectl.py set bench_tx_refuse 1`): what a card's shut gate does. */
 u32    bench_tx_refused(void);
 
+/* Non-zero when `bytes` more of A2DP media are over what the radio is said to carry
+ * (bench=debug, `xectl.py set bench_a2dp_kbps 400`, 0 for no limit): what a link without
+ * ACL credit does, on demand. The Bluetooth worker's. */
+u32    bench_a2dp_refused(u32 bytes);
+
 /* A short mark on the console's UART (bench=debug), for what a hang leaves no
  * other trace of: read with `xerunner flash read-uart`. Any IRQL. */
 void   bench_trace(const char *mark);
@@ -74,6 +79,7 @@ static inline u32    bench_command(u32 what, volatile u32 *args)
 static inline BENCH_RX bench_mode(u32 mode) { (void)mode; return 0; }
 static inline u32    bench_wired_hidden(void) { return 0; }
 static inline u32    bench_tx_refused(void) { return 0; }
+static inline u32    bench_a2dp_refused(u32 bytes) { (void)bytes; return 0; }
 static inline void   bench_trace(const char *mark) { (void)mark; }
 static inline void   bench_audio_frame(float *frame) { (void)frame; }
 static inline void   bench_event(u32 code, u32 a, u32 b, u32 c)

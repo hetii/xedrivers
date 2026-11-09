@@ -136,6 +136,39 @@ u32 bench_tx_refused(void)
 #endif
 }
 
+#if XE_BENCH_DEBUG
+volatile u32 bench_a2dp_kbps;
+#endif
+
+u32 bench_a2dp_refused(u32 bytes)
+{
+#if XE_BENCH_DEBUG
+    static u32 last, budget;
+    u32 now = 0, ms, kbps = bench_a2dp_kbps;
+
+    if (!kbps)
+        return 0;
+#if defined(__powerpc__)
+    __asm__ volatile("mftb %0" : "=r"(now));
+#endif
+    ms = (now - last) / 49875u;         /* the time base's ticks a millisecond */
+    if (ms > 40)
+        ms = 40, last = now;            /* at most 40 ms saved up */
+    else
+        last += ms * 49875u;
+    budget += ms * kbps / 8;
+    if (budget > kbps * 5)
+        budget = kbps * 5;
+    if (budget < bytes)
+        return 1;
+    budget -= bytes;
+    return 0;
+#else
+    (void)bytes;
+    return 0;
+#endif
+}
+
 u32 bench_wired_hidden(void)
 {
 #if XE_BENCH_DEBUG
