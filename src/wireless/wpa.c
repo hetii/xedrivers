@@ -91,20 +91,25 @@ static void put_be16(u8 *p, u32 v)
 
 /* HMAC-SHA1 over up to three pieces, the incremental way: the one-shot form takes
  * ten arguments and this compiler cannot pass them (kernel.h). */
-static void hmac(const u8 *key, u32 key_len, const u8 *a, u32 a_len,
-                 const u8 *b, u32 b_len, const u8 *c, u32 c_len, u8 *out)
-{
-    static XE_HMAC_STATE state;
+/* Two states, never one: wpa_set_psk runs on the worker for one card while another card's
+ * handshake hashes in a receive DPC (both on at once since each card has its own WPA). The
+ * DPCs run on one processor, one after another, so they can share theirs. */
+static XE_HMAC_STATE thread_state, dpc_state;
 
-    XeCryptHmacShaInit(&state, key, key_len);
+static void hmac_with(XE_HMAC_STATE *state, const u8 *key, u32 key_len, const u8 *a,
+                      u32 a_len, const u8 *b, u32 b_len, const u8 *c, u32 c_len, u8 *out)
+{
+    XeCryptHmacShaInit(state, key, key_len);
     if (a_len)
-        XeCryptHmacShaUpdate(&state, a, a_len);
+        XeCryptHmacShaUpdate(state, a, a_len);
     if (b_len)
-        XeCryptHmacShaUpdate(&state, b, b_len);
+        XeCryptHmacShaUpdate(state, b, b_len);
     if (c_len)
-        XeCryptHmacShaUpdate(&state, c, c_len);
-    XeCryptHmacShaFinal(&state, out, 20);
+        XeCryptHmacShaUpdate(state, c, c_len);
+    XeCryptHmacShaFinal(state, out, 20);
 }
+
+#define hmac(...) hmac_with(&dpc_state, __VA_ARGS__)
 
 /* The key from the passphrase: the name of the network, a counter, and four
  * thousand repetitions folded together, twice over for 32 bytes (IEEE 802.11i's
@@ -120,10 +125,10 @@ void wpa_set_psk(WPA *w, const char *passphrase, const u8 *ssid, u32 ssid_len)
     for (block = 1; block <= 2; block++) {
         counter[0] = counter[1] = counter[2] = 0;
         counter[3] = (u8)block;
-        hmac((const u8 *)passphrase, pass_len, ssid, ssid_len, counter, 4, 0, 0, u);
+        hmac_with(&thread_state, (const u8 *)passphrase, pass_len, ssid, ssid_len, counter, 4, 0, 0, u);
         copy(t, u, 20);
         for (round = 1; round < 4096; round++) {
-            hmac((const u8 *)passphrase, pass_len, u, 20, 0, 0, 0, 0, u);
+            hmac_with(&thread_state, (const u8 *)passphrase, pass_len, u, 20, 0, 0, 0, 0, u);
             for (i = 0; i < 20; i++)
                 t[i] ^= u[i];
         }

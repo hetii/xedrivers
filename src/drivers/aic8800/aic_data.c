@@ -142,7 +142,7 @@ u32 aic_data_xmit(AIC *a, const u8 *frame, u32 length)
     if (!a->joined || !a->dev->active || length < ETH_HLEN)
         return 0;
     /* Before the handshake is through only its own frames may go. */
-    if (a->secured && wpa_stats.state != WPA_DONE &&
+    if (a->secured && a->wpa.st.state != WPA_DONE &&
         (frame[12] != (u8)(WPA_ETHERTYPE >> 8) || frame[13] != (u8)WPA_ETHERTYPE))
         return 0;
     payload = length - ETH_HLEN;
@@ -415,7 +415,7 @@ static void mpdu_in(AIC *a, u8 *p, u32 length)
          * console's: they arrive before any key is in place. */
         a->st->eapol_in++;
         wpa_eapol_in(&a->wpa, eth + ETH_HLEN, length - strip);
-        if (wpa_stats.pending)
+        if (a->wpa.st.pending)
             usb_wake();
         return;
     }
