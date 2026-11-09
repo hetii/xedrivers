@@ -1,8 +1,10 @@
-/* Reading files; see file.h. */
+/* Reading files, and writing back the settings file; see file.h. */
 
 #include "file.h"
 
 #define GENERIC_READ                 0x80000000u
+#define GENERIC_WRITE                0x40000000u
+#define FILE_OVERWRITE_IF            0x00000005u
 #define SYNCHRONIZE                  0x00100000u
 #define FILE_SHARE_READ              0x00000001u
 #define FILE_OPEN                    0x00000001u
@@ -69,7 +71,14 @@ void file_set_plugin(void *instance)
         plugin_dir[0] = 0;
 }
 
+static void *open_path_as(const char *path, u32 access, u32 share, u32 disposition);
+
 static void *open_path(const char *path)
+{
+    return open_path_as(path, GENERIC_READ | SYNCHRONIZE, FILE_SHARE_READ, FILE_OPEN);
+}
+
+static void *open_path_as(const char *path, u32 access, u32 share, u32 disposition)
 {
     ANSI_STRING name;
     OBJECT_ATTRIBUTES attributes;
@@ -87,13 +96,13 @@ static void *open_path(const char *path)
     attributes.Attributes = OBJ_CASE_INSENSITIVE;
     io.Status = 0;
     args[0] = (u32)&handle;
-    args[1] = GENERIC_READ | SYNCHRONIZE;
+    args[1] = access;
     args[2] = (u32)&attributes;
     args[3] = (u32)&io;
     args[4] = 0;
     args[5] = 0;
-    args[6] = FILE_SHARE_READ;
-    args[7] = FILE_OPEN;
+    args[6] = share;
+    args[7] = disposition;
     args[8] = FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE;
     args[9] = (u32)&NtCreateFile;
     status = kcall9(args);
@@ -124,6 +133,50 @@ void *file_open(const char *name)
         }
     }
     return 0;
+}
+
+u32 file_replace(const char *name, const void *data, u32 length)
+{
+    char path[160];
+    void *handle = 0;
+    IO_STATUS_BLOCK io;
+    s64 at = 0;
+    u32 i, k, status;
+
+    /* where the file is now, else beside the plugin */
+    for (i = 0; i <= sizeof(fallback_dirs) / sizeof(fallback_dirs[0]) && !handle; i++) {
+        const char *dir = i ? fallback_dirs[i - 1] : plugin_dir;
+        void *probe;
+
+        if (!dir[0])
+            continue;
+        k = copy(path, 0, sizeof(path), dir);
+        k = copy(path, k, sizeof(path), "\\");
+        copy(path, k, sizeof(path), name);
+        probe = open_path(path);
+        if (probe) {
+            NtClose(probe);
+            handle = open_path_as(path, GENERIC_WRITE | SYNCHRONIZE, 0, FILE_OVERWRITE_IF);
+            if (!handle)
+                return 1;
+        }
+    }
+    if (!handle) {
+        if (!plugin_dir[0])
+            return 1;
+        k = copy(path, 0, sizeof(path), plugin_dir);
+        k = copy(path, k, sizeof(path), "\\");
+        copy(path, k, sizeof(path), name);
+        handle = open_path_as(path, GENERIC_WRITE | SYNCHRONIZE, 0, FILE_OVERWRITE_IF);
+        if (!handle)
+            return 1;
+    }
+    io.Status = 0;
+    io.Information = 0;
+    status = NtWriteFile(handle, 0, 0, 0, &io, data, length, &at);
+    file_stats.last_write_status = status;
+    NtClose(handle);
+    return !NT_SUCCESS(status) || io.Information != length;
 }
 
 u32 file_read(void *handle, void *buffer, u32 length, u32 offset)

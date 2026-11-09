@@ -22,10 +22,7 @@
 #define FILE_NON_DIRECTORY_FILE      0x00000040u
 #define OBJ_CASE_INSENSITIVE         0x00000040u
 
-/* NtWriteFile (255): handle, event, apc routine, apc context, io status, buffer,
- * length, byte offset -- eight arguments, all in registers. */
-extern u32 NtWriteFile(void *handle, void *event, void *apc, void *apc_context,
-                       IO_STATUS_BLOCK *io, const void *buffer, u32 length, s64 *offset);
+/* NtWriteFile (255), kernel.h: eight arguments, all in registers. */
 
 typedef struct {
     u32 tick, code, a, b, c;

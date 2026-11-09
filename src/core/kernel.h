@@ -320,6 +320,8 @@ extern u32   NtCreateFile(void **handle, u32 access, OBJECT_ATTRIBUTES *attribut
                           u32 share, u32 disposition, u32 options);
 extern u32   NtReadFile(void *handle, void *event, void *apc, void *apc_context,
                         IO_STATUS_BLOCK *io, void *buffer, u32 length, s64 *offset);
+extern u32   NtWriteFile(void *handle, void *event, void *apc, void *apc_context,
+                         IO_STATUS_BLOCK *io, const void *buffer, u32 length, s64 *offset);
 extern u32   NtClose(void *handle);
 extern u32   kcall9(u32 *args);
 

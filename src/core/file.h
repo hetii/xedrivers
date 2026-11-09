@@ -33,6 +33,10 @@ u32 file_read(void *handle, void *buffer, u32 length, u32 offset);
 
 void file_close(void *handle);
 
+/* Write `name` anew with `data`: where it is now (the first directory that has it), else
+ * beside the plugin. 0 if written whole. Thread-only. */
+u32 file_replace(const char *name, const void *data, u32 length);
+
 /* One setting of a small "key=value" file (xedrivers.ini beside the plugin): the
  * value of `key`, up to `size` - 1 bytes and terminated, without the spaces around
  * it. Lines starting with '#' or ';' are comments. Returns its length, or 0 when
@@ -47,6 +51,7 @@ typedef struct {
     u32  last_read_status;
     char plugin_dir[96];            /* the plugin's directory, "" if not known */
     char last_path[96];             /* the last path opened, or the last tried */
+    u32  last_write_status;
 } FILE_STATS;
 
 extern volatile FILE_STATS file_stats;
