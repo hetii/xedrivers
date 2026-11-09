@@ -302,7 +302,9 @@ display (Just Works).
   copied from a PC (BlueZ's `info` file) can be put there the same way.
 - `bluetooth = off` leaves the card's Bluetooth alone (Wi-Fi only).
 
-The microphone (HFP) is not done yet. Internals: [bluetooth.md](docs/bluetooth.md).
+A headset's microphone and earpiece work as a hands-free unit (HFP): its microphone is the
+voice chat's for player 0, and it hears the console. Wideband (mSBC, 16 kHz) when the
+headset takes it, else CVSD. Internals: [bluetooth.md](docs/bluetooth.md).
 
 ## File servers
 

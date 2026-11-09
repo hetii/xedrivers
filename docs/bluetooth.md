@@ -17,7 +17,10 @@ Bluetooth half). Goal: headphones with microphone (A2DP, HFP), later pads (HID).
     src/bluetooth/profiles.c    what starts on a secure link
     src/bluetooth/audio/sbc.c   SBC encoder, 8 subbands, every mode (SBC, SBC-XQ)
     src/bluetooth/audio/a2dp.c  AVDTP both roles, the SBC choice, RTP stream paced by the time base
-    later: audio/{rfcomm,hfp}.c, hid/, le/
+    src/bluetooth/audio/rfcomm.c  RFCOMM as responder: PN with credits, MSC, the rest answered
+    src/bluetooth/audio/hfp.c   the hands-free gateway: AT answers, codec negotiation, the voice link
+    src/bluetooth/audio/sco.c   voice data: CVSD 8 kHz PCM or mSBC H2 units, to and from the console
+    later: hid/, le/
 
 Events are queued from the USB completion and taken on the worker (`bt_tick`). The ACL bulk
 IN is asked for only while a link is up: queued from the start (before the HCI reset), it
@@ -48,6 +51,21 @@ taken, dual channel over joint at the same bitpool, 16 blocks, loudness), OPEN, 
 channel, START. A headset that connects by itself finds the source in SDP and leads; it is
 answered as SEID 1 taking any SBC configuration (bitpool up to 76).
 
+## Voice (HFP)
+
+The console is the audio gateway; the headset leads (it opens RFCOMM channel 1 after finding
+the record in SDP). Once AT+CMER brings the service level connection up the voice link goes
+up at once -- the voice chat is a call that never ends:
+
+| Headset takes | Link | USB setting | Console side |
+|---|---|---|---|
+| mSBC and codec negotiation | eSCO transparent, T2 then T1 | 1 (9 B/ms), SCO packets of 24 B | 16 kHz both ways |
+| CVSD only | SCO/eSCO CVSD from 16-bit PCM | 2 (17 B/ms), packets of 48 B | 8 kHz, doubled to 16 kHz for the microphone |
+
+The headset's microphone goes to `audio_mic_write` (the voice chat, player 0); its earpiece
+gets the console's mix (a third capture reader) through the 48 -> 16 kHz decimator. mSBC
+frames are decoded on the worker: floating point in the transfer's DPC hung the console.
+
 ## Control
 
     xectl.py bt                  state, counters, scan results, links, keys (never their value)
@@ -56,6 +74,11 @@ answered as SEID 1 taking any SBC configuration (bitpool up to 76).
     xectl.py bt disconnect N     (cmd 42)
 
 ## Status
+
+Stage 4 (2026-11-10): HFP with the PC's AX200 as the hands-free unit: service level
+connection, CVSD and then mSBC; a 1 + 5.5 kHz tone from the PC reached the console's
+microphone at peak 13909 of 14000, and the console's test tone arrived at the PC at 1, 2, 3
+and 6 kHz (decoded from btmon's capture). The SBC decoder agrees with libsbc both ways.
 
 Stage 3 (2026-11-09): A2DP to the PC's AX200 as the sink: SDP answered, AVDTP both roles,
 48 kHz joint stereo bitpool 58 (387 kbit/s), RTP of 5 frames a packet, no missed credits;
