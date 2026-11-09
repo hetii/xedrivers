@@ -431,6 +431,15 @@ static void test_a2dp_choose(void)
     CHECK(out.b[0] == 0x21 && out.b[1] == 0x15 && bp == 53);
     CHECK(!a2dp_choose(&four, 2, 53, &out, &bp));
     CHECK(!a2dp_choose(&all, 60, 53, &out, &bp));
+
+    /* the ladder: 027570 (bitpool 2-38) -- dual 38, joint 38, joint 35; a PC (2-64) -- dual
+     * 64, dual 38, joint 53, joint 35 */
+    {
+        SBC_CAPS hs = { { 0xFF, 0xFF, 2, 38 } };
+
+        CHECK(a2dp_steps(&hs, 2, 38) == 3);
+        CHECK(a2dp_steps(&all, 2, 64) == 4);
+    }
 }
 
 static u8 sdp_sent[8][600];

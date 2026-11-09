@@ -182,7 +182,8 @@ STRUCTS = {
     "a2dp_stats": ["state", "role_initiator", "remote_seid", "rate", "mode", "blocks", "bitpool",
                    "allocation", "caps", "caps_bitpool", "frame_length", "frames_per_packet",
                    "packets", "frames", "send_failures", "late", "rejects", "last_reject",
-                   "starts", "media_mtu", "bitpool_now", "bitpool_lowest", "bitpool_downs", "reconfigured", "led_for_sink"],
+                   "starts", "media_mtu", "bitpool_now", "bitpool_lowest", "bitpool_downs", "reconfigured", "led_for_sink", "quality", "step",
+                   "steps_down", "steps_up", "step_refused", "step_timeouts", "last_signal"],
     "sdp_stats": ["requests", "errors", "continued"],
     "rfcomm_stats": ["frames_in", "frames_out", "bad_fcs", "sessions", "dlcs_opened", "refused",
                      "no_credit", "last_control"],
@@ -345,7 +346,8 @@ def bt_conns(sym):
         a = read_struct(sym, "a2dp_stats")
         modes = {0: "mono", 1: "dual", 2: "stereo", 3: "joint"}
         states = ["idle", "signalling", "discovering", "capabilities", "configuring",
-                  "opening", "open", "starting", "streaming", "reconf-caps", "reconfiguring"]
+                  "opening", "open", "starting", "streaming", "reconf-caps", "reconfiguring",
+                  "switching"]
         rate = a["frame_length"] * 8 * a["rate"] // (a["blocks"] * 8) if a["blocks"] else 0
         print("  a2dp %s %s seid=%d | SBC %d Hz %s blocks=%d bitpool=%d %s = %d kbit/s, "
               "frame %d B x %d/packet (mtu %d) | sink caps %04x bitpool %d-%d | packets=%d "
@@ -358,6 +360,11 @@ def bt_conns(sym):
                   a["caps_bitpool"] >> 8, a["caps_bitpool"] & 255, a["packets"], a["frames"],
                   a["send_failures"], a["late"], a["rejects"], a["last_reject"], a["starts"],
                   a["bitpool_now"], a["bitpool_lowest"], a["bitpool_downs"], a["reconfigured"]))
+        print("  quality %s, step %d, steps down %d up %d refused %d timeouts %d | last signal "
+              "in %#x type %d" % (["auto", "max", "xq", "hq"][a["quality"] & 3], a["step"],
+                                  a["steps_down"], a["steps_up"], a["step_refused"],
+                                  a["step_timeouts"], a["last_signal"] >> 8,
+                                  (a["last_signal"] >> 4) & 3))
         print("  sdp", read_struct(sym, "sdp_stats"))
     if "hfp_stats" in sym:
         h = read_struct(sym, "hfp_stats")

@@ -12,6 +12,7 @@
  */
 
 #include "a2dp.h"
+#include "file.h"
 #if XE_AUDIO
 #include "audio.h"
 #endif
@@ -51,10 +52,16 @@ static L2CAP_CHANNEL *signalling, *media;
 static u32 label;
 static SBC_CAPS config;                 /* what is configured */
 static u32 config_bitpool;
+static u32 switch_ticks;
+static u32 sink_delay;                  /* the sink takes delay reporting */
+static u32 no_reconfigure;              /* the sink refused RECONFIGURE: steps by CLOSE */
+static void set_config_step(u32 t);
 static SBC_CAPS pending_config;         /* asked for by RECONFIGURE */
-static u32 pending_bitpool;
+static u32 pending_bitpool, pending_step;
 static void reconfigure_from(const u8 *p, u32 n);
 static void start_now(void);
+static void read_config(const SBC_CAPS *c, u32 *rate, u32 *mode, u32 *blocks, u32 *alloc);
+static void reconfigure_to(u32 t);
 static SBC sbc;
 static u32 sequence, timestamp, last_tb, rate_hz;
 static u32 per_tick;                    /* samples per time-base tick, x 2^32 */
@@ -143,6 +150,112 @@ u32 a2dp_choose(const SBC_CAPS *sink, u32 min_bitpool, u32 max_bitpool, SBC_CAPS
     out->b[2] = (u8)min_bitpool;
     out->b[3] = (u8)*bitpool;
     return 1;
+}
+
+/* --- the quality ladder ----------------------------------------------------------------
+ * bt_quality in xedrivers.ini:
+ *   auto (default)  start at the best the sink takes; when the bitpool has been held under 60%
+ *                   of the step's for 10 s, go one step down (a pause of ~0.2 s: SUSPEND,
+ *                   RECONFIGURE, START); after 60 s clean try one up, waiting twice as long
+ *                   (to 10 min) each time an up does not hold
+ *   max             the best the sink takes, never another step (only the bitpool follows)
+ *   xq / hq         dual 38 / joint 53 (or the nearest the sink takes), never another step
+ * Steps, best first, only those the sink takes and each under the one before: its best, dual
+ * 38 (SBC-XQ), joint 53 (SBC HQ), joint 35. */
+
+#define QUALITY_AUTO 0u
+#define QUALITY_MAX  1u
+#define QUALITY_XQ   2u
+#define QUALITY_HQ   3u
+
+typedef struct {
+    SBC_CAPS c;
+    u32 bitpool;
+    u32 kbps;
+} STEP;
+
+static STEP steps[4];
+static u32 step_count, step_now, quality;
+
+/* The sink's element with the mode `mode` and bitpool `bp` (capped to its range); 0 if the mode
+ * is not taken. */
+static u32 make_step(const SBC_CAPS *sink, u32 min_bp, u32 max_bp, u32 mode, u32 bp, STEP *out)
+{
+    static const u32 mode_bit[4] = { 0x08, 0x04, 0x02, 0x01 };
+    SBC_CAPS one = *sink;
+    u32 got;
+
+    if (!(sink->b[0] & mode_bit[mode]))
+        return 0;
+    one.b[0] = (u8)((sink->b[0] & 0xF0u) | mode_bit[mode]);     /* that mode only */
+    if (bp > max_bp)
+        bp = max_bp;
+    if (!a2dp_choose(&one, min_bp, bp, &out->c, &got))
+        return 0;
+    out->bitpool = got;
+    {
+        u32 rate, m, blocks, alloc;
+
+        read_config(&out->c, &rate, &m, &blocks, &alloc);
+        out->kbps = bitrate(rate, m, blocks, got) / 1000;
+    }
+    return 1;
+}
+
+u32 a2dp_steps(const SBC_CAPS *sink, u32 min_bp, u32 max_bp)
+{
+    STEP s;
+    u32 bp;
+
+    step_count = 0;
+    if (!a2dp_choose(sink, min_bp, max_bp, &steps[0].c, &bp))
+        return 0;
+    steps[0].bitpool = bp;
+    {
+        u32 rate, m, blocks, alloc;
+
+        read_config(&steps[0].c, &rate, &m, &blocks, &alloc);
+        steps[0].kbps = bitrate(rate, m, blocks, bp) / 1000;
+    }
+    step_count = 1;
+    if (make_step(sink, min_bp, max_bp, SBC_DUAL, 38, &s) && s.kbps < steps[step_count - 1].kbps)
+        steps[step_count++] = s;
+    if ((make_step(sink, min_bp, max_bp, SBC_JOINT, 53, &s) ||
+         make_step(sink, min_bp, max_bp, SBC_STEREO, 53, &s)) && s.kbps < steps[step_count - 1].kbps)
+        steps[step_count++] = s;
+    if ((make_step(sink, min_bp, max_bp, SBC_JOINT, 35, &s) ||
+         make_step(sink, min_bp, max_bp, SBC_STEREO, 35, &s)) && s.kbps < steps[step_count - 1].kbps)
+        steps[step_count++] = s;
+    return step_count;
+}
+
+/* The step the setting starts at. */
+static u32 first_step(void)
+{
+    u32 i, want = quality == QUALITY_XQ ? 492 : quality == QUALITY_HQ ? 345 : 0xFFFFFFFFu;
+
+    if (quality == QUALITY_AUTO || quality == QUALITY_MAX)
+        return 0;
+    for (i = 0; i < step_count; i++)
+        if (steps[i].kbps <= want + 10)
+            return i;
+    return step_count - 1;
+}
+
+static void read_quality(void)
+{
+    char v[8];
+
+    quality = QUALITY_AUTO;
+    if (file_setting("xedrivers.ini", "bt_quality", v, sizeof(v))) {
+        if (v[0] == 'm')
+            quality = QUALITY_MAX;
+        else if (v[0] == 'x')
+            quality = QUALITY_XQ;
+        else if (v[0] == 'h')
+            quality = QUALITY_HQ;
+    }
+    a2dp_stats.quality = quality;
 }
 
 /* What the element says, for the encoder. */
@@ -289,30 +402,15 @@ static void capabilities(const u8 *p, u32 n)
             sink.b[1] = p[at + 5];
             a2dp_stats.caps_seen[0] = (u32)(p[at + 4] << 8 | p[at + 5]);
             a2dp_stats.caps_seen[1] = (u32)(p[at + 6] << 8 | p[at + 7]);
-            if (!a2dp_choose(&sink, p[at + 6] < 2 ? 2 : p[at + 6], p[at + 7], &chosen, &bp))
+            read_quality();
+            if (!a2dp_steps(&sink, p[at + 6] < 2 ? 2 : p[at + 6], p[at + 7]))
                 break;
-            config = chosen;
-            config_bitpool = bp;
-            set[0] = (u8)(a2dp_stats.remote_seid << 2);
-            set[1] = (u8)(OUR_SEID << 2);
-            set[2] = CAT_MEDIA_TRANSPORT;
-            set[3] = 0;
-            set[4] = CAT_MEDIA_CODEC;
-            set[5] = 6;
-            set[6] = 0x00;              /* audio */
-            set[7] = 0x00;              /* SBC */
-            set[8] = chosen.b[0];
-            set[9] = chosen.b[1];
-            set[10] = chosen.b[2];
-            set[11] = chosen.b[3];
-            n = 12;
-            if (delay) {
-                set[12] = CAT_DELAY_REPORTING;
-                set[13] = 0;
-                n = 14;
-            }
-            a2dp_stats.state = A2DP_CONFIGURING;
-            command(SIG_SET_CONFIG, set, n);
+            (void)chosen;
+            (void)bp;
+            (void)set;
+            sink_delay = delay;
+            no_reconfigure = 0;
+            set_config_step(first_step());
             return;
         }
         at += 2 + len;
@@ -344,7 +442,9 @@ static void accepted(u32 signal, const u8 *p, u32 n)
         if (a2dp_stats.state == A2DP_RECONFIGURING) {
             config = pending_config;
             config_bitpool = pending_bitpool;
+            step_now = pending_step;
             a2dp_stats.reconfigured++;
+            a2dp_stats.step = step_now;
             start_now();
         }
         break;
@@ -360,8 +460,13 @@ static void accepted(u32 signal, const u8 *p, u32 n)
         break;
     case SIG_START:
         start_stream();
+        switch_ticks = 0;
         break;
     case SIG_SUSPEND:
+        if (a2dp_stats.state == A2DP_SWITCHING) {
+            reconfigure_to(pending_step);   /* suspended: now the new step */
+            break;
+        }
         stop_stream();
         a2dp_stats.state = A2DP_OPEN;
         break;
@@ -376,8 +481,19 @@ static void rejected(u32 signal, const u8 *p, u32 n)
 
     a2dp_stats.rejects++;
     a2dp_stats.last_reject = signal << 8 | (n ? p[n - 1] : 0);
-    if (a2dp_stats.state == A2DP_RECONF_CAPS || a2dp_stats.state == A2DP_RECONFIGURING) {
-        start_now();                    /* as the sink configured it, then */
+    if (signal == SIG_RECONFIGURE && switch_ticks && a2dp_stats.state == A2DP_RECONFIGURING) {
+        /* no RECONFIGURE (BlueZ: NOT SUPPORTED COMMAND): this sink keeps its step, the bitpool
+         * alone follows the radio. Closing the stream and configuring it anew was tried:
+         * BlueZ dropped the whole link once its only stream was closed. */
+        no_reconfigure = 1;
+        a2dp_stats.step_refused++;
+        start_now();
+        return;
+    }
+    if (a2dp_stats.state == A2DP_RECONF_CAPS || a2dp_stats.state == A2DP_RECONFIGURING ||
+        a2dp_stats.state == A2DP_SWITCHING) {
+        a2dp_stats.step_refused++;
+        start_now();                    /* as it was configured, then */
         return;
     }
     if (signal == SIG_GET_ALL_CAPS && a2dp_stats.state == A2DP_CAPABILITIES) {
@@ -472,6 +588,7 @@ static void signalling_data(L2CAP_CHANNEL *ch, const u8 *d, u32 n)
     lbl = d[0] >> 4;
     type = d[0] & 3u;
     signal = d[1] & 0x3Fu;
+    a2dp_stats.last_signal = signal << 8 | type << 4 | lbl;
     if (type == MSG_COMMAND)
         asked(lbl, signal, d + 2, n - 2);
     else if (type == MSG_ACCEPT)
@@ -526,6 +643,73 @@ static void media_open(L2CAP_CHANNEL *ch)
     }
 }
 
+/* RECONFIGURE to `t` (the stream suspended or not yet started). */
+static void reconfigure_to(u32 t)
+{
+    u8 r[9];
+
+    pending_config = steps[t].c;
+    pending_bitpool = steps[t].bitpool;
+    pending_step = t;
+    r[0] = (u8)(a2dp_stats.remote_seid << 2);
+    r[1] = CAT_MEDIA_CODEC;
+    r[2] = 6;
+    r[3] = 0x00;
+    r[4] = 0x00;
+    r[5] = steps[t].c.b[0];
+    r[6] = steps[t].c.b[1];
+    r[7] = steps[t].c.b[2];
+    r[8] = steps[t].c.b[3];
+    a2dp_stats.state = A2DP_RECONFIGURING;
+    command(SIG_RECONFIGURE, r, 9);
+}
+
+static void set_config_step(u32 t)
+{
+    u8 set[16];
+    u32 n = 12;
+
+    step_now = t;
+    a2dp_stats.step = t;
+    config = steps[t].c;
+    config_bitpool = steps[t].bitpool;
+    set[0] = (u8)(a2dp_stats.remote_seid << 2);
+    set[1] = (u8)(OUR_SEID << 2);
+    set[2] = CAT_MEDIA_TRANSPORT;
+    set[3] = 0;
+    set[4] = CAT_MEDIA_CODEC;
+    set[5] = 6;
+    set[6] = 0x00;                      /* audio */
+    set[7] = 0x00;                      /* SBC */
+    set[8] = config.b[0];
+    set[9] = config.b[1];
+    set[10] = config.b[2];
+    set[11] = config.b[3];
+    if (sink_delay) {
+        set[12] = CAT_DELAY_REPORTING;
+        set[13] = 0;
+        n = 14;
+    }
+    a2dp_stats.state = A2DP_CONFIGURING;
+    command(SIG_SET_CONFIG, set, n);
+}
+
+/* auto: one step down or up while streaming: SUSPEND, then (accepted) RECONFIGURE, START. */
+static void switch_step(u32 t)
+{
+    u8 q = (u8)(a2dp_stats.remote_seid << 2);
+
+    if (t >= step_count || t == step_now || a2dp_stats.state != A2DP_STREAMING)
+        return;
+    if (no_reconfigure)
+        return;                         /* this sink: the bitpool only (see rejected()) */
+    pending_step = t;
+    stop_stream();
+    switch_ticks = 1;
+    a2dp_stats.state = A2DP_SWITCHING;
+    command(SIG_SUSPEND, &q, 1);
+}
+
 static void start_now(void)
 {
     u8 q = (u8)(a2dp_stats.remote_seid << 2);
@@ -554,20 +738,19 @@ static void reconfigure_from(const u8 *p, u32 n)
             sink.b[1] = p[at + 5];
             a2dp_stats.caps_seen[0] = (u32)(p[at + 4] << 8 | p[at + 5]);
             a2dp_stats.caps_seen[1] = (u32)(p[at + 6] << 8 | p[at + 7]);
-            if (!a2dp_choose(&sink, p[at + 6] < 2 ? 2 : p[at + 6], p[at + 7], &chosen, &bp))
+            read_quality();
+            if (!a2dp_steps(&sink, p[at + 6] < 2 ? 2 : p[at + 6], p[at + 7]))
                 break;
-            {
-                u32 rate, mode, blocks, alloc;
-
-                read_config(&config, &rate, &mode, &blocks, &alloc);
-                now = bitrate(rate, mode, blocks, config_bitpool);
-                read_config(&chosen, &rate, &mode, &blocks, &alloc);
-                better = bitrate(rate, mode, blocks, bp);
-            }
-            if (better <= now)
-                break;
+            step_now = first_step();
+            chosen = steps[step_now].c;
+            bp = steps[step_now].bitpool;
+            (void)now;
+            (void)better;
+            if (chosen.b[0] == config.b[0] && chosen.b[1] == config.b[1] && bp == config_bitpool)
+                break;                          /* the sink chose what we would */
             pending_config = chosen;
             pending_bitpool = bp;
+            pending_step = step_now;
             r[0] = (u8)(a2dp_stats.remote_seid << 2);
             r[1] = CAT_MEDIA_CODEC;
             r[2] = 6;
@@ -736,6 +919,59 @@ static void bitpool_tick(u32 waited)
         a2dp_stats.bitpool_lowest = sbc.bitpool;
 }
 
+/* auto's steps: down when the bitpool stays under 60% of the step's for 10 s, up after a
+ * clean minute (twice as long each time an up does not hold, to 10 min). */
+#define DOWN_TICKS      500u
+#define UP_TICKS_FIRST  3000u
+#define UP_TICKS_MOST   30000u
+#define HELD_TICKS      1000u           /* an up that lasts 20 s held */
+
+static u32 low_ticks, clean_ticks, up_wait = UP_TICKS_FIRST, since_up = 0xFFFFFFFFu;
+
+#define SWITCH_TIMEOUT_TICKS 100u        /* 2 s for the sink to answer a step's SUSPEND */
+
+static void ladder_tick(u32 waited)
+{
+    /* a sink that does not answer the step's SUSPEND or RECONFIGURE: play on as it was */
+    if (switch_ticks && a2dp_stats.state != A2DP_STREAMING) {
+        if (++switch_ticks >= SWITCH_TIMEOUT_TICKS) {
+            switch_ticks = 0;
+            a2dp_stats.step_timeouts++;
+            start_stream();             /* the old configuration, streaming again */
+        }
+        return;
+    }
+    switch_ticks = 0;
+    if (quality != QUALITY_AUTO || a2dp_stats.state != A2DP_STREAMING || !step_count)
+        return;
+    if (a2dp_voice_busy() || no_reconfigure)   /* voice link up (hfp.c), or a sink that keeps
+                                                 * its step: no steps */
+        return;
+    if (since_up != 0xFFFFFFFFu)
+        since_up++;
+    if (sbc.bitpool * 10 < steps[step_now].bitpool * 6)
+        low_ticks++;
+    else
+        low_ticks = 0;
+    if (!waited && sbc.bitpool >= steps[step_now].bitpool)
+        clean_ticks++;
+    else
+        clean_ticks = 0;
+    if (low_ticks >= DOWN_TICKS && step_now + 1 < step_count) {
+        if (since_up < HELD_TICKS && up_wait < UP_TICKS_MOST)
+            up_wait *= 2;               /* that up did not hold */
+        low_ticks = clean_ticks = 0;
+        since_up = 0xFFFFFFFFu;
+        a2dp_stats.steps_down++;
+        switch_step(step_now + 1);
+    } else if (clean_ticks >= up_wait && step_now > 0) {
+        low_ticks = clean_ticks = 0;
+        since_up = 0;
+        a2dp_stats.steps_up++;
+        switch_step(step_now - 1);
+    }
+}
+
 void a2dp_tick(void)
 {
     u32 now = 0, per, waited = 0;
@@ -789,4 +1025,5 @@ void a2dp_tick(void)
         one_packet();
     }
     bitpool_tick(waited);
+    ladder_tick(waited);
 }

@@ -388,3 +388,8 @@ void hfp_gone(volatile BT_CONN *c)
     if (dlc && dlc->conn == c)
         closed(dlc);
 }
+
+u32 a2dp_voice_busy(void)
+{
+    return hfp_stats.state == 3;
+}

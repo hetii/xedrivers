@@ -17,6 +17,7 @@
 #define A2DP_STREAMING   8u
 #define A2DP_RECONF_CAPS 9u     /* the sink configured it: asking what else it takes */
 #define A2DP_RECONFIGURING 10u
+#define A2DP_SWITCHING   11u    /* auto: suspended for another step */
 
 /* The SBC codec information element, four bytes (A2DP 4.3.2). */
 typedef struct {
@@ -44,6 +45,13 @@ typedef struct {
     u32 bitpool_downs;
     u32 reconfigured;           /* the sink's choice replaced by a better one */
     u32 led_for_sink;           /* the sink opened signalling and waited: we led */
+    u32 quality;                /* bt_quality: 0 auto, 1 max, 2 xq, 3 hq */
+    u32 step;                   /* on the ladder, 0 the best the sink takes */
+    u32 steps_down;
+    u32 steps_up;
+    u32 step_refused;
+    u32 step_timeouts;          /* the sink did not answer a step's SUSPEND / RECONFIGURE */
+    u32 last_signal;            /* the last AVDTP signal in: id << 8 | type << 4 | label */
 } A2DP_STATS;
 
 extern volatile A2DP_STATS a2dp_stats;
@@ -57,9 +65,13 @@ u32  a2dp_choose(const SBC_CAPS *sink, u32 min_bitpool, u32 max_bitpool, SBC_CAP
 /* The most bits a second the link is asked to carry, 0 for no limit (the default). */
 void a2dp_link_limit(u32 kbps);
 
+/* Pure (tests/bluetooth): the ladder for a sink's capabilities; how many steps. */
+u32  a2dp_steps(const SBC_CAPS *sink, u32 min_bitpool, u32 max_bitpool);
+
 void a2dp_init(void);
 void a2dp_connect(volatile BT_CONN *c);     /* a paired headset's link is secure */
 void a2dp_gone(volatile BT_CONN *c);
 void a2dp_tick(void);                       /* the worker's, every tick */
+u32  a2dp_voice_busy(void);                 /* hfp.c: the voice link is up */
 
 #endif /* XE_A2DP_H */

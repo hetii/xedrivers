@@ -301,6 +301,11 @@ display (Just Works).
 - A pairing's key is written to `xedrivers.ini` as a `bt_pair` line and read at start; a key
   copied from a PC (BlueZ's `info` file) can be put there the same way.
 - `bluetooth = off` leaves the card's Bluetooth alone (Wi-Fi only).
+- `bt_quality = auto` (default): A2DP starts at the best SBC the headset takes and steps
+  down (dual 38 = SBC-XQ, joint 53 = SBC HQ, joint 35) when the radio cannot carry it for
+  10 s, back up after a clean minute; each step is a pause of ~0.2 s. `max` keeps the best
+  step, `xq` / `hq` that step; in each the bitpool still follows the radio for a moment.
+  A headset that refuses RECONFIGURE (BlueZ does) keeps its step.
 
 A headset's microphone and earpiece work as a hands-free unit (HFP): its microphone is the
 voice chat's for player 0, and it hears the console. Wideband (mSBC, 16 kHz) when the
