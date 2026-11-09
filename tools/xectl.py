@@ -18,7 +18,7 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py cmd N [a1 a2 a3]           any raw command
     xectl.py omni                       what a wireless card registered by cmd 21 was asked
     xectl.py prof [SECONDS]             where a frame's time goes (bench=prof)
-    xectl.py bt [scan]                  the Bluetooth host; scan: ~10 s of inquiry, what answered
+    xectl.py bt [scan|connect N|disconnect N]  the Bluetooth host; scan ~10 s; connect pairs (Just Works)
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
     xectl.py bench tcp [up|down|both] [--streams 1,4] [--seconds S] [--pace MB/s]
     xectl.py bench xeftp [up|down|both] [--mb 512] [--files 1,2,4] [--port 2121] [--repeat 3]
@@ -75,7 +75,7 @@ STRUCTS = {
     "usb_stats": ["match_calls", "add_calls", "remove_calls", "close_passes", "submit_direct",
                   "submit_dpc", "dpc_runs", "last_open_status", "scan_found", "reset_status",
                   "unbound_resets", "no_slot", "control_late", "cancels", "nak_reload_set",
-                  "nak_reload_skipped", "spin_bring_ups"],
+                  "nak_reload_skipped", "spin_bring_ups", "bring_ups_dimmed"],
     "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls", "tx_wait_ticks_hi", "tx_wait_ticks_lo", "tx_wait_bytes_hi", "tx_wait_bytes_lo", "tx_wait_calls", "turnaround_ticks_hi", "turnaround_ticks_lo", "turnaround_bytes_hi", "turnaround_bytes_lo", "turnaround_calls"],
     "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found",
                  "build_commit", "build_dirty"],
@@ -174,7 +174,12 @@ STRUCTS = {
                   "no_gtk", "pending", "applied", "psk_ready", "group_rekeys"],
     "bt_stats": ["attached", "state", "commands", "events", "events_dropped", "last_opcode",
                  "last_status", "failed_opcode", "address0", "address1", "acl_mtu",
-                 "acl_slots", "inquiries", "found"],
+                 "acl_slots", "inquiries", "found", "queued", "queue_full", "incoming",
+                 "connections", "connect_failures", "pairings", "auth_failures",
+                 "keys_loaded", "acl_received", "acl_sent", "acl_dropped"],
+    "l2cap_stats": ["frames_in", "frames_out", "signals_in", "signals_out", "send_failures",
+                    "incoming", "refused", "opened", "rejected", "echo_asked", "echo_answered",
+                    "no_channel", "no_channel_in", "too_long"],
     "btusb_stats": ["started", "events", "event_errors", "acl_in_packets", "acl_out_packets",
                     "acl_out_full", "commands", "command_errors", "last_error",
                     "start_status", "interface", "ep_event", "ep_acl_in", "ep_acl_out",
@@ -305,16 +310,58 @@ def bt_found(sym):
                                                      name))
 
 
+BT_CONN_STATES = {0: "free", 1: "paging", 2: "up", 3: "auth", 4: "encrypting", 5: "secure"}
+
+
+def bt_conns(sym):
+    b = read_struct(sym, "bt_stats")
+    print("  conns: incoming=%d connected=%d failed=%d pairings=%d auth_failed=%d "
+          "keys_loaded=%d queued=%d full=%d" % (
+              b["incoming"], b["connections"], b["connect_failures"], b["pairings"],
+              b["auth_failures"], b["keys_loaded"], b["queued"], b["queue_full"]))
+    print("  acl: in=%d out=%d dropped=%d" % (b["acl_received"], b["acl_sent"],
+                                              b["acl_dropped"]))
+    if "l2cap_stats" in sym:
+        print("  l2cap", read_struct(sym, "l2cap_stats"))
+    raw = read(sym["bt_conns"], 4 * 8 * 4)
+    for i in range(4):
+        one = raw[i * 32:(i + 1) * 32]
+        state, handle, called, enc, connects, status = struct.unpack(">6I", one[8:32])
+        if state:
+            print("  conn %d %s %s handle=%#x %s enc=%d connects=%d status=%#x" % (
+                i, one[:6].hex(":"), BT_CONN_STATES.get(state, state), handle,
+                "out" if called else "in", enc, connects, status))
+    keys = read(sym["bt_keys"], 8 * 32)
+    for i in range(8):
+        one = keys[i * 32:(i + 1) * 32]
+        if struct.unpack(">I", one[28:32])[0]:
+            print("  key %d for %s type %d (kept, not shown)" % (
+                i, one[:6].hex(":"), struct.unpack(">I", one[24:28])[0]))
+
+
 def bt(sym, rest):
-    """xectl bt [scan]: the Bluetooth host's state and what the last scan found."""
+    """xectl bt [scan | connect N|AA:BB:.. | disconnect N]: the Bluetooth host's state, what
+    the last scan found, the connections and the keys held (never their value)."""
     if rest and rest[0] == "scan":
         state = command(sym, 40)[0]
         if state != 2:
             print("not ready (state %s)" % BT_STATES.get(state, state))
         else:
             time.sleep(11)
+    elif rest and rest[0] == "connect":
+        if ":" in rest[1]:
+            a = bytes.fromhex(rest[1].replace(":", ""))
+            st = command(sym, 41, struct.unpack(">I", a[:4])[0], a[4] << 8 | a[5])
+        else:
+            st = command(sym, 41, int(rest[1]))
+        print("connect: %#x" % st[0])
+        time.sleep(float(rest[2]) if len(rest) > 2 else 8)
+    elif rest and rest[0] == "disconnect":
+        print("disconnect: %#x" % command(sym, 42, int(rest[1]))[0])
+        time.sleep(2)
     bt_line(sym)
     bt_found(sym)
+    bt_conns(sym)
 
 
 def uplink_index(sym):

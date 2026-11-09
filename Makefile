@@ -107,7 +107,7 @@ DRIVER_DIRS := $(sort $(DRIVERS) $(foreach d,$(DRIVERS),$(NEEDS_$(d))))
 SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
             $(addprefix src/drivers/,$(DRIVER_DIRS)) \
             $(if $(filter uac,$(DRIVERS)),src/audio) \
-            $(if $(filter common/btusb,$(DRIVER_DIRS)),src/bluetooth) \
+            $(if $(filter common/btusb,$(DRIVER_DIRS)),src/bluetooth src/bluetooth/audio) \
             $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST))) \
             $(if $(SERVERS_LIST),src/servers src/servers/common $(addprefix src/servers/,$(SERVERS_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
@@ -290,10 +290,13 @@ $(BUILD)/test_pcm: tests/audio/test_pcm.c src/audio/pcm.c src/audio/pcm.h
 	$(HOST_CC) -I src/audio -o $@ tests/audio/test_pcm.c src/audio/pcm.c -lm
 
 $(BUILD)/test_bluetooth: tests/bluetooth/test_bluetooth.c src/drivers/common/btusb/btusb.c \
-                        src/bluetooth/hci.c $(HEADERS)
+                        src/bluetooth/hci.c src/bluetooth/pair.c src/bluetooth/l2cap.c \
+                        src/bluetooth/profiles.c src/bluetooth/audio/sbc.c $(HEADERS)
 	@mkdir -p $(BUILD)
-	$(HOST_CC) -I src/drivers/common/btusb -I src/bluetooth -o $@ tests/bluetooth/test_bluetooth.c \
-	    src/drivers/common/btusb/btusb.c src/bluetooth/hci.c
+	$(HOST_CC) -I src/drivers/common/btusb -I src/bluetooth -I src/bluetooth/audio \
+	    -o $@ tests/bluetooth/test_bluetooth.c src/bluetooth/audio/sbc.c \
+	    src/drivers/common/btusb/btusb.c src/bluetooth/hci.c src/bluetooth/pair.c \
+	    src/bluetooth/l2cap.c src/bluetooth/profiles.c
 
 $(BUILD)/test_descriptors: tests/drivers/uac/test_descriptors.c src/drivers/uac/descriptors.c \
                            src/drivers/uac/descriptors.h src/drivers/uac/pacer.h

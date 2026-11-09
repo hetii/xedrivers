@@ -28,6 +28,16 @@ static u32 step;                        /* in the bring-up */
 static u32 waiting;                     /* the opcode we wait for, 0 none */
 static u8 out[EVENT_MAX];
 
+/* Commands that wait for a credit: whatever the events ask in answer (pair.c) and what
+ * xectl asks, in order. */
+#define WAITING_MAX 8u
+#define WAITING_SIZE 32u                /* the longest such command's parameters */
+static u8 waiting_params[WAITING_MAX][WAITING_SIZE];
+static u16 waiting_opcode[WAITING_MAX];
+static u8 waiting_length[WAITING_MAX];
+static u32 waiting_in, waiting_out;
+static u32 keys_loaded;
+
 /* --- for the driver ------------------------------------------------------------------- */
 
 void bt_event(const u8 *event, u32 length)
@@ -47,10 +57,49 @@ void bt_event(const u8 *event, u32 length)
     queue_in = in + 1;
 }
 
+/* ACL packets in, queued as the events are (any IRQL in, the worker out). */
+#define ACL_QUEUE 8u
+#define ACL_MAX   1028u
+static u8 acl_queue[ACL_QUEUE][ACL_MAX];
+static u16 acl_length[ACL_QUEUE];
+static volatile u32 acl_in, acl_out;
+static u32 acl_credits;                 /* packets the controller can take now */
+static u8 acl_buf[ACL_MAX];
+
 void bt_acl_in(const u8 *packet, u32 length)
 {
-    (void)packet;
-    (void)length;                       /* nothing connects yet: l2cap.c */
+    u32 in = acl_in, i;
+
+    if (!transport || length < 4 || length > ACL_MAX)
+        return;
+    if (in - acl_out >= ACL_QUEUE) {
+        bt_stats.acl_dropped++;
+        return;
+    }
+    for (i = 0; i < length; i++)
+        acl_queue[in & (ACL_QUEUE - 1)][i] = packet[i];
+    acl_length[in & (ACL_QUEUE - 1)] = (u16)length;
+    mem_sync();
+    acl_in = in + 1;
+}
+
+u32 hci_acl_send(u32 handle, const u8 *data, u32 length)
+{
+    u32 i;
+
+    if (!transport || !acl_credits || length + 4 > ACL_MAX || length > bt_stats.acl_mtu)
+        return 1;
+    acl_buf[0] = (u8)handle;
+    acl_buf[1] = (u8)((handle >> 8) & 0x0F) | 0x20;    /* PB 10: a start, flushable */
+    acl_buf[2] = (u8)length;
+    acl_buf[3] = (u8)(length >> 8);
+    for (i = 0; i < length; i++)
+        acl_buf[4 + i] = data[i];
+    if (transport->acl(transport->ctx, acl_buf, length + 4))
+        return 1;
+    acl_credits--;
+    bt_stats.acl_sent++;
+    return 0;
 }
 
 void bt_attach(const BT_TRANSPORT *t)
@@ -61,6 +110,12 @@ void bt_attach(const BT_TRANSPORT *t)
         for (k = 0; k < sizeof(BT_FOUND); k++)
             ((volatile u8 *)&bt_found[i])[k] = 0;
     queue_out = queue_in;
+    acl_out = acl_in;
+    acl_credits = 0;
+    waiting_in = waiting_out = 0;
+    keys_loaded = 0;
+    for (i = 0; i < BT_CONN_MAX; i++)
+        bt_conns[i].state = BT_CONN_FREE;
     credits = 1;
     step = 0;
     waiting = 0;
@@ -98,6 +153,39 @@ u32 hci_send(u32 opcode, const u8 *params, u32 length)
     bt_stats.commands++;
     bt_stats.last_opcode = opcode;
     return 0;
+}
+
+u32 hci_queue(u32 opcode, const u8 *params, u32 length)
+{
+    u32 at, i;
+
+    if (!transport || length > WAITING_SIZE)
+        return 1;
+    if (waiting_in - waiting_out >= WAITING_MAX) {
+        bt_stats.queue_full++;
+        return 1;
+    }
+    at = waiting_in & (WAITING_MAX - 1);
+    for (i = 0; i < length; i++)
+        waiting_params[at][i] = params[i];
+    waiting_opcode[at] = (u16)opcode;
+    waiting_length[at] = (u8)length;
+    waiting_in++;
+    bt_stats.queued = waiting_in - waiting_out;
+    return 0;
+}
+
+/* As many waiting commands as the controller has credits for, once the bring-up is over. */
+static void send_waiting(void)
+{
+    while (credits && waiting_out != waiting_in && bt_stats.state != BT_STATE_INIT) {
+        u32 at = waiting_out & (WAITING_MAX - 1);
+
+        if (hci_send(waiting_opcode[at], waiting_params[at], waiting_length[at]))
+            break;
+        waiting_out++;
+    }
+    bt_stats.queued = waiting_in - waiting_out;
 }
 
 /* The bring-up's next command; 1 when there is none left. */
@@ -146,12 +234,38 @@ static void start_inquiry(void)
 
 u32 bt_command(u32 what, volatile u32 *args)
 {
-    if (what != BT_CMD_SCAN)
+    u8 address[6];
+    u32 i;
+
+    switch (what) {
+    case BT_CMD_SCAN:
+        args[5] = bt_stats.state;
+        if (bt_stats.state == BT_STATE_READY && credits)
+            start_inquiry();
+        return 1;
+    case BT_CMD_CONNECT:
+        /* [1] < 16: that one of the scan's; else [1] [2] the address, 4 + 2 bytes */
+        if (args[1] < BT_FOUND_MAX) {
+            if (args[1] >= bt_stats.found) {
+                args[5] = 2;
+                return 1;
+            }
+            for (i = 0; i < 6; i++)
+                address[i] = bt_found[args[1]].address[i];
+        } else {
+            for (i = 0; i < 4; i++)
+                address[i] = (u8)(args[1] >> (24 - 8 * i));
+            address[4] = (u8)(args[2] >> 8);
+            address[5] = (u8)args[2];
+        }
+        args[5] = bt_connect(address);
+        return 1;
+    case BT_CMD_DISCONNECT:
+        args[5] = args[1] < BT_CONN_MAX ? bt_disconnect(&bt_conns[args[1]]) : 2;
+        return 1;
+    default:
         return 0;
-    args[5] = bt_stats.state;
-    if (bt_stats.state == BT_STATE_READY && credits)
-        start_inquiry();
-    return 1;
+    }
 }
 
 /* --- events --------------------------------------------------------------------------- */
@@ -246,6 +360,7 @@ static void complete(u32 opcode, u32 status, const u8 *r, u32 n)
     } else if (opcode == HCI_READ_BUFFER_SIZE && !status && n >= 7) {
         bt_stats.acl_mtu = r[0] | (u32)r[1] << 8;
         bt_stats.acl_slots = r[3] | (u32)r[4] << 8;
+        acl_credits = bt_stats.acl_slots;
     }
     if (opcode == waiting)
         waiting = 0;
@@ -270,10 +385,18 @@ static void take(const u8 *e, u32 length)
         if (length >= 6) {
             credits = e[3];
             if (e[2]) {                 /* refused at once */
-                bt_stats.failed_opcode = (u32)(e[4] | e[5] << 8);
+                u32 opcode = (u32)(e[4] | e[5] << 8), i;
+
+                bt_stats.failed_opcode = opcode;
                 bt_stats.last_status = e[2];
-                if (bt_stats.state == BT_STATE_INQUIRY)
+                if (opcode == HCI_INQUIRY && bt_stats.state == BT_STATE_INQUIRY)
                     bt_stats.state = BT_STATE_READY;
+                if (opcode == HCI_CREATE_CONNECTION) {
+                    bt_stats.connect_failures++;
+                    for (i = 0; i < BT_CONN_MAX; i++)
+                        if (bt_conns[i].state == BT_CONN_PAGING)
+                            bt_conns[i].state = BT_CONN_FREE;
+                }
             }
         }
         break;
@@ -282,11 +405,22 @@ static void take(const u8 *e, u32 length)
     case HCI_EV_EXTENDED_INQUIRY:
         hci_inquiry_result(e, length);
         break;
+    case HCI_EV_NUMBER_COMPLETED:       /* count, then handle and packets for each */
+        if (length >= 3) {
+            u32 n = e[2], i;
+
+            for (i = 0; i < n && 3 + 4 * i + 4 <= length; i++)
+                acl_credits += (u32)(e[3 + 4 * i + 2] | e[3 + 4 * i + 3] << 8);
+            if (acl_credits > bt_stats.acl_slots)
+                acl_credits = bt_stats.acl_slots;
+        }
+        break;
     case HCI_EV_INQUIRY_COMPLETE:
         if (bt_stats.state == BT_STATE_INQUIRY)
             bt_stats.state = BT_STATE_READY;
         break;
     default:
+        bt_pair_event(e, length);
         break;
     }
 }
@@ -297,6 +431,10 @@ void bt_tick(void)
         return;
     if (bt_stats.state == BT_STATE_INIT && step == 0 && !waiting && credits)
         bring_up(0);
+    if (bt_stats.state == BT_STATE_READY && !keys_loaded) {
+        keys_loaded = 1;
+        bt_load_keys();
+    }
     while (queue_out != queue_in) {
         u32 at = queue_out & (QUEUE - 1);
 
@@ -304,4 +442,13 @@ void bt_tick(void)
         mem_sync();
         queue_out++;
     }
+    while (acl_out != acl_in) {
+        u32 at = acl_out & (ACL_QUEUE - 1);
+
+        bt_stats.acl_received++;
+        l2cap_acl(acl_queue[at], acl_length[at]);
+        mem_sync();
+        acl_out++;
+    }
+    send_waiting();
 }

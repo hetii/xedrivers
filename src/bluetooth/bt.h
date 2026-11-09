@@ -28,7 +28,9 @@ void bt_acl_in(const u8 *packet, u32 length);       /* a whole ACL packet */
 void bt_tick(void);
 
 /* A host command (xectl.py bt): BT_CMD_SCAN starts a scan of ~10 s. 1 if handled. */
-#define BT_CMD_SCAN 40u
+#define BT_CMD_SCAN       40u
+#define BT_CMD_CONNECT    41u   /* [1] index in bt_found, or [1] [2] the address */
+#define BT_CMD_DISCONNECT 42u   /* [1] index in bt_conns */
 u32 bt_command(u32 what, volatile u32 *args);
 
 #define BT_FOUND_MAX 16u
@@ -57,6 +59,17 @@ typedef struct {
     u32 acl_slots;
     u32 inquiries;
     u32 found;
+    u32 queued;                 /* commands waiting for a credit now */
+    u32 queue_full;
+    u32 incoming;               /* connection requests from devices */
+    u32 connections;
+    u32 connect_failures;
+    u32 pairings;               /* link keys the controller gave */
+    u32 auth_failures;
+    u32 keys_loaded;            /* from xedrivers.ini */
+    u32 acl_received;
+    u32 acl_sent;
+    u32 acl_dropped;            /* the ACL queue was full */
 } BT_STATS;
 
 extern volatile BT_STATS bt_stats;
