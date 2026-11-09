@@ -177,6 +177,10 @@ u32   usb_claim_present(void);
 
 void  usb_sleep(u32 ms);
 
+/* 1: usb_sleep and usb_wait spin on the time base instead of waiting (the USB processor
+ * during a bring-up, main.c; see usb.c). */
+void  usb_spin_waits(u32 on);
+
 /* Wait up to `ms`, or until usb_wake: the worker's and usb_control's wait, which a
  * dimmed dashboard does not stall. usb_wake may be called at DISPATCH_LEVEL. */
 void  usb_wait(u32 ms);
@@ -199,6 +203,7 @@ typedef struct {
     u32 cancels;            /* requests taken back (usb_cancel) */
     u32 nak_reload_set;     /* high-speed bulk endpoints given NAK_RELOAD (usb_open) */
     u32 nak_reload_skipped; /* bulk endpoints whose handle did not read as an EHCI QH */
+    u32 spin_bring_ups;     /* bring-ups whose waits spun (usb_spin_waits) */
 } USB_STATS;
 
 extern volatile USB_STATS usb_stats;

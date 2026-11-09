@@ -183,7 +183,9 @@ static void worker(void *parameter)
                  * same kind of burst: usb_spin keeps the wake from being sent.
                  * 2026-10-29: 0 stops in 60 boots, from 5 in about 100. */
                 run_on(USB_PROCESSOR);
+                usb_spin_waits(1);      /* a bring-up in a dim does not wait there */
                 net_bring_up(dev);
+                usb_spin_waits(0);
                 away_from_the_usb_processor();
             }
         }

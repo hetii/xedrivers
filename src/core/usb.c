@@ -35,9 +35,59 @@ static u16 le16(const u8 *p)
     return (u16)(p[0] | (p[1] << 8));
 }
 
+/* The wake event (see usb_wake below). */
+static KEVENT wake_event;
+static volatile u32 wake_ready;
+
+#define SPIN_TB 50000u                  /* 1 ms of the 50 MHz time base */
+
+/* Waits on the USB processor, during a bring-up (main.c): counted on the time base, the
+ * thread running all along. Once the dashboard has dimmed the screen, a thread waiting there
+ * is woken neither by its timeout nor by its event (main.c, WORKER_PROCESSOR), so a device
+ * plugged in then stopped in its first wait until a pad moved (2026-11-09, an AIC8800). A
+ * thread that never waits is not stopped. usb_wake ends such a wait early, as it does the
+ * event's. */
+static volatile u32 spin_waits, spun_woken;
+
+void usb_spin_waits(u32 on)
+{
+    spin_waits = on;
+    if (on)
+        usb_stats.spin_bring_ups++;
+}
+
+static u32 timebase(void)
+{
+#if defined(__powerpc__)
+    u32 t;
+
+    __asm__ volatile("mftb %0" : "=r"(t));
+    return t;
+#else
+    return 0;
+#endif
+}
+
+static void spin(u32 ms)
+{
+    u32 start = timebase();
+
+    spun_woken = 0;
+    while (!spun_woken && timebase() - start < ms * SPIN_TB) {
+#if !defined(__powerpc__)
+        break;
+#endif
+    }
+}
+
 void usb_sleep(u32 ms)
 {
     s64 interval = -((s64)ms * 10000);          /* relative, 100 ns units */
+
+    if (spin_waits) {
+        spin(ms);
+        return;
+    }
     KeDelayExecutionThread(0, 0, &interval);
 }
 
@@ -47,11 +97,10 @@ void usb_sleep(u32 ms)
  * the same tick every time, and went on as soon as the pad moved). So the worker
  * and the control transfers it waits for also wait on this event, which whatever
  * they wait for sets -- a device arriving or leaving, a control transfer done. */
-static KEVENT wake_event;
-static volatile u32 wake_ready;
 
 void usb_wake(void)
 {
+    spun_woken = 1;
     if (wake_ready)
         KeSetEvent(&wake_event, 0, 0);
 }
@@ -60,7 +109,7 @@ void usb_wait(u32 ms)
 {
     s64 timeout = -((s64)ms * 10000);
 
-    if (!wake_ready) {
+    if (!wake_ready || spin_waits) {
         usb_sleep(ms);
         return;
     }
@@ -345,7 +394,6 @@ void usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
  * it, so the USB processor does not have to send this one a request to run again.
  * Two processors sending each other requests for every transfer of a bring-up is
  * what both stopped in (see main.c). The timebase runs at 50 MHz. */
-#define SPIN_TB 50000u                  /* 1 ms */
 
 void usb_spin(volatile u32 *done)
 {
