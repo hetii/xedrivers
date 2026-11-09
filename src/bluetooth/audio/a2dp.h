@@ -37,6 +37,9 @@ typedef struct {
     u32 last_reject;            /* signal << 8 | error */
     u32 starts;
     u32 media_mtu;
+    u32 bitpool_now;            /* following the radio (a2dp.c, bitpool_tick) */
+    u32 bitpool_lowest;
+    u32 bitpool_downs;
 } A2DP_STATS;
 
 extern volatile A2DP_STATS a2dp_stats;

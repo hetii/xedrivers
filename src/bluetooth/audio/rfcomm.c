@@ -210,10 +210,7 @@ static void multiplexer(const u8 *p, u32 n)
         if (command) {
             mcc(MCC_MSC, 0, v, len < 2 ? len : 2);  /* the same back, as the answer */
             d = find(v[0] >> 2);
-            if (d && d->state == 1) {
-                r[0] = v[0];
-                r[1] = 0x8D;                        /* EA, RTC, RTR, DV */
-                mcc(MCC_MSC, 1, r, 2);
+            if (d && d->state == 1 && d->user) {    /* ours went with the UA */
                 d->state = 2;
                 rfcomm_stats.dlcs_opened++;
                 if (d->user && d->user->open)
@@ -280,9 +277,15 @@ static void frame_in(L2CAP_CHANNEL *ch, const u8 *p, u32 n)
         if (!d)
             d = make(dlci);
         if (d && server_for(dlci)) {
+            u8 msc[2];
+
             d->user = server_for(dlci);
             control(dlci, 0, CTL_UA | PF);
-            /* open once both MSCs went: theirs is answered in multiplexer() */
+            /* our modem status at once: headsets wait for it before sending theirs (027570
+             * did, and the DLC never opened); open when theirs comes (multiplexer()) */
+            msc[0] = (u8)(dlci << 2 | 3u);
+            msc[1] = 0x8D;                      /* EA, RTC, RTR, DV */
+            mcc(MCC_MSC, 1, msc, 2);
         } else {
             rfcomm_stats.refused++;
             if (d)

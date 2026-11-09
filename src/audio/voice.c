@@ -101,10 +101,45 @@ typedef struct {
 
 static SLOT slots[PACKET_SLOTS];
 
-/* Whether the microphone runs: written to within the last few worker ticks. */
+/* A microphone that runs only when asked for (a Bluetooth headset: its voice link costs the
+ * A2DP stream): offered all the same, its requests answered with silence until it runs. */
+static volatile u32 standby;
+
+void audio_voice_standby(u32 on)
+{
+    standby = on;
+}
+
+/* Whether the microphone runs, or can: written to within the last few worker ticks. */
 static u32 mic_alive(void)
 {
-    return audio_voice_stats.alive;
+    return audio_voice_stats.alive || standby;
+}
+
+/* Requests while a standby microphone does not run yet: silence, so the title waits for
+ * nothing. */
+static void answer_silence(void)
+{
+    u32 i, k;
+
+    for (i = 0; i < PACKET_SLOTS; i++) {
+        SLOT *s = &slots[i];
+
+        if (!__sync_bool_compare_and_swap(&s->state, 2u, 3u))
+            continue;
+        for (k = 0; k < s->units * 2; k++)
+            ((s16 *)(unsigned long)s->words[2])[k] = 0;
+        s->words[3] = s->units * 4;
+        s->words[5] = 0;
+        s->words[1] = s->words[3];
+        mem_sync();
+        s->words[0] = 0;
+        audio_voice_stats.answered++;
+        audio_voice_stats.silent++;
+        s->words = 0;
+        mem_sync();
+        s->state = 0;
+    }
 }
 
 static u32 call_original(DETOUR *d, u32 a, u32 b, u32 c)
@@ -358,13 +393,16 @@ void audio_voice_tick(void)
     quiet_ticks = written != last_alive ? 0 : quiet_ticks + 1;
     last_alive = written;
     audio_voice_stats.alive = quiet_ticks < QUIET_TICKS;
-    if (!audio_voice_stats.alive) {
+    if (!audio_voice_stats.alive && !standby) {
         fail_all();
         if (bound)
             unbind();
         return;
     }
-    audio_voice_answer();
+    if (audio_voice_stats.alive)
+        audio_voice_answer();
+    else
+        answer_silence();
     if (!bind_checked) {
         bind_checked = 1;
         bind_ok = bind_routine_is_ours();

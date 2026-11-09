@@ -36,7 +36,7 @@ static struct {
     u16 psm;
     const L2CAP_USER *user;
     void *ctx;
-} listening[4];
+} listening[6];
 
 static u8 frame[BT_CONN_MAX][FRAME_MAX];
 static u32 frame_have[BT_CONN_MAX];
@@ -245,8 +245,10 @@ static void conn_request(volatile BT_CONN *c, u32 id, const u8 *d, u32 n)
         result = ch ? 0x0000 : 0x0004;      /* or no resources */
     }
     l2cap_stats.incoming++;
-    if (result)
+    if (result) {
         l2cap_stats.refused++;
+        l2cap_stats.last_refused_psm = psm;
+    }
     put16(p, ch ? ch->local_cid : 0);
     put16(p + 2, le16(d + 2));
     put16(p + 4, result);

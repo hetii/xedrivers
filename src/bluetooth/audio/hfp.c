@@ -15,6 +15,18 @@
 #include "hfp.h"
 #include "sco.h"
 #include "file.h"
+#if XE_AUDIO
+#include "audio.h"
+#endif
+
+/* The voice link only while the console asks for the microphone (a title's or party's chat
+ * requests): up within a tick of the first request, down after 10 s without one, so the
+ * headset is back in A2DP's quality. Both at once overloaded the radio (027570: a third of the
+ * A2DP stream late, a sixth of the microphone's frames broken). */
+#define VOICE_IDLE_TICKS 500u
+static u32 last_requests, idle_ticks, closing;
+static void hfp_standby(u32 on);
+static void voice_policy(void);
 
 /* AG features: bit 8 extended error codes, bit 9 codec negotiation (mSBC) -- no three-way
  * calling, no in-band ring. */
@@ -94,23 +106,25 @@ u32 hfp_answer(const char *s, u32 n, char *out, u32 room)
                                 "(\"callsetup\",(0-3)),(\"callheld\",(0-2)),(\"signal\",(0-5)),"
                                 "(\"roam\",(0,1)),(\"battchg\",(0-5))\r\n");
     } else if (starts(s, n, "AT+CIND?")) {
-        at = put(out, at, room, "\r\n+CIND: 1,0,0,0,5,0,5\r\n");
+        at = put(out, at, room, hfp_stats.call ? "\r\n+CIND: 1,1,0,0,5,0,5\r\n" :
+                                                 "\r\n+CIND: 1,0,0,0,5,0,5\r\n");
     } else if (starts(s, n, "AT+CMER=")) {
         if (hfp_stats.state < 2) {
             hfp_stats.state = 2;                /* the service level connection is up */
+            hfp_standby(1);
             /* wideband when both negotiate and it takes mSBC: offered after the OK */
             if ((hfp_stats.hf_features & HF_CODEC_NEGOTIATION) && (hfp_stats.codecs & 4u)) {
                 at = put(out, at, room, "\r\nOK\r\n\r\n+BCS: 2\r\n");
                 return at;
             }
             codec = CODEC_CVSD;
-            sco_wanted = 1;
         }
     } else if (starts(s, n, "AT+BCS=")) {
         codec = number(s + 7, n - 7) == CODEC_MSBC ? CODEC_MSBC : CODEC_CVSD;
         hfp_stats.codec = codec;
         msbc_tries = 0;
-        sco_wanted = 1;
+        if (hfp_stats.voice_wanted)
+            sco_wanted = 1;
     } else if (starts(s, n, "AT+BCC")) {
         if (hfp_stats.codecs & 4u) {
             at = put(out, at, room, "\r\nOK\r\n\r\n+BCS: 2\r\n");
@@ -124,7 +138,14 @@ u32 hfp_answer(const char *s, u32 n, char *out, u32 room)
     } else if (starts(s, n, "AT+CHLD=?")) {
         at = put(out, at, room, "\r\n+CHLD: (0,1,2)\r\n");
     } else if (starts(s, n, "AT+CLCC")) {
-        /* no calls listed */
+        /* the one call while the voice link is up: active, voice, not a conference */
+        if (hfp_stats.call)
+            at = put(out, at, room, "\r\n+CLCC: 1,0,0,0,0\r\n");
+    } else if (starts(s, n, "AT+CHUP")) {
+        /* the headset's button ends the "call": the voice link goes, and comes back with the
+         * next request */
+        hfp_stats.voice_wanted = 0;
+        idle_ticks = VOICE_IDLE_TICKS;
     } else if (starts(s, n, "AT+COPS?")) {
         at = put(out, at, room, "\r\n+COPS: 0,0,\"Xbox 360\"\r\n");
     } else if (starts(s, n, "AT+CNUM")) {
@@ -184,6 +205,16 @@ static void data(RFCOMM_DLC *d, const u8 *p, u32 n)
  * voice link, and headsets suspend A2DP while it is up). */
 static u32 voice_off;
 
+/* The headset's microphone offered to the voice chat while the service level connection is up. */
+static void hfp_standby(u32 on)
+{
+#if XE_AUDIO
+    audio_voice_standby(on);
+#else
+    (void)on;
+#endif
+}
+
 static void opened(RFCOMM_DLC *d)
 {
     if (voice_off) {
@@ -200,6 +231,9 @@ static void closed(RFCOMM_DLC *d)
     if (d != dlc)
         return;
     dlc = 0;
+    hfp_stats.call = 0;
+    hfp_standby(0);
+    hfp_stats.voice_wanted = 0;
     if (hfp_stats.state == 3) {
         hci_sco(0);
         sco_link(0, 0);
@@ -221,6 +255,55 @@ void hfp_init(void)
         rfcomm_listen(HFP_CHANNEL, &hfp_user);
 }
 
+/* The call indicator (the second of AT+CIND's list): a headset that keeps its microphone
+ * muted outside a call opens it on call = 1 (027570 sent silence on the voice link without it). */
+static void call_indicator(u32 on)
+{
+    static const char up[] = "\r\n+CIEV: 2,1\r\n", down[] = "\r\n+CIEV: 2,0\r\n";
+
+    if (dlc && hfp_stats.call != on) {
+        hfp_stats.call = on;
+        rfcomm_send(dlc, (const u8 *)(on ? up : down), sizeof(up) - 1);
+    }
+}
+
+static void voice_policy(void)
+{
+    u32 requests = 0;
+
+#if XE_AUDIO
+    requests = audio_voice_stats.queued;
+#endif
+    if (hfp_stats.state < 2)
+        return;
+    if (requests != last_requests) {
+        last_requests = requests;
+        idle_ticks = 0;
+        if (!hfp_stats.voice_wanted) {
+            hfp_stats.voice_wanted = 1;
+            hfp_stats.voice_ups++;
+            if (hfp_stats.state == 2 && !closing) {
+                msbc_tries = 0;
+                sco_wanted = 1;
+            }
+        }
+        return;
+    }
+    if (hfp_stats.voice_wanted && ++idle_ticks < VOICE_IDLE_TICKS)
+        return;
+    hfp_stats.voice_wanted = 0;
+    if (hfp_stats.state == 3 && !closing) {
+        u8 p[3];
+
+        p[0] = (u8)hfp_stats.sco_handle;
+        p[1] = (u8)(hfp_stats.sco_handle >> 8);
+        p[2] = 0x13;
+        closing = 1;
+        hfp_stats.voice_downs++;
+        hci_queue(HCI_DISCONNECT, p, 3);
+    }
+}
+
 /* The voice link, once the service level connection is up. mSBC: transparent air mode over
  * eSCO, HFP's T2 settings (2-EV3, 13 ms, retransmission for quality), else T1 (EV3, 8 ms).
  * CVSD: 64 kbit/s each way, the controller converting from 16-bit linear PCM (0x0060). */
@@ -229,6 +312,7 @@ void hfp_tick(void)
     u8 p[17];
 
     sco_tick();
+    voice_policy();
     if (!sco_wanted || !dlc || !dlc->conn || dlc->conn->state != BT_CONN_SECURE)
         return;
     sco_wanted = 0;
@@ -265,6 +349,7 @@ void hfp_sco_event(const u8 *e, u32 length)
             hfp_stats.sco_handle = (u32)(e[3] | (e[4] & 0x0F) << 8);
             hfp_stats.sco_air = e[2 + 16];
             hfp_stats.state = 3;
+            call_indicator(1);
             sco_link(hfp_stats.sco_handle, wide);
             /* USB setting 1 (9 bytes a ms) for mSBC, 2 (17) for 16-bit CVSD, as Linux */
             hfp_stats.sco_transport = hci_sco(wide ? 1 : 2);
@@ -279,8 +364,12 @@ void hfp_sco_event(const u8 *e, u32 length)
                (u32)(e[3] | (e[4] & 0x0F) << 8) == hfp_stats.sco_handle) {
         hfp_stats.state = 2;
         hfp_stats.sco_handle = 0;
+        closing = 0;
+        call_indicator(0);
         hci_sco(0);
         sco_link(0, 0);
+        if (hfp_stats.voice_wanted)
+            sco_wanted = 1;                     /* asked for again meanwhile */
     }
 }
 
@@ -288,6 +377,8 @@ u32 hfp_voice(void)
 {
     if (hfp_stats.state != 2)
         return 1;
+    hfp_stats.voice_wanted = 1;
+    idle_ticks = 0;
     sco_wanted = 1;
     return 0;
 }

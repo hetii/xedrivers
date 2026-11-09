@@ -26,10 +26,15 @@ typedef struct {
     u32 sco_transport;          /* what starting its data in the transport gave */
     u32 codec;                  /* 1 CVSD, 2 mSBC (AT+BCS) */
     u32 refused;                /* bt_voice = off */
+    u32 voice_wanted;           /* the console asks for the microphone */
+    u32 voice_ups;
+    u32 voice_downs;
+    u32 call;                   /* the call indicator we gave: 1 while the voice link is up */
 } HFP_STATS;
 
 extern volatile HFP_STATS hfp_stats;
 
+/* hfp.c */
 /* Pure (tests/bluetooth): one AT command line (no CR) into the answer, written to `out`;
  * its length. */
 u32  hfp_answer(const char *line, u32 n, char *out, u32 room);

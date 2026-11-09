@@ -171,6 +171,7 @@ typedef struct {
     u32 no_channel;
     u32 no_channel_in;
     u32 too_long;
+    u32 last_refused_psm;
 } L2CAP_STATS;
 
 extern volatile L2CAP_STATS l2cap_stats;
@@ -200,6 +201,16 @@ typedef struct {
     u32 errors;
     u32 continued;
 } SDP_STATS;
+
+typedef struct {
+    u32 commands;
+    u32 not_implemented;
+    u32 presses;                /* PASS THROUGH pressed */
+    u32 last_button;            /* its operation id, bit 7 released */
+} AVRCP_STATS;
+
+extern volatile AVRCP_STATS avrcp_stats;
+void avrcp_init(void);
 
 extern volatile SDP_STATS sdp_stats;
 

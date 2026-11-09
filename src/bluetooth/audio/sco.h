@@ -23,6 +23,7 @@ typedef struct {
     u32 peak_in;                /* of the last packet, out of 32767 */
     u32 handle;
     u32 bad_frames;             /* mSBC frames that did not decode */
+    u32 peak_max;               /* the loudest since the link went up */
     u32 wideband;
 } SCO_STATS;
 

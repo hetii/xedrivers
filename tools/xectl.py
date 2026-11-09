@@ -181,18 +181,20 @@ STRUCTS = {
     "a2dp_stats": ["state", "role_initiator", "remote_seid", "rate", "mode", "blocks", "bitpool",
                    "allocation", "caps", "caps_bitpool", "frame_length", "frames_per_packet",
                    "packets", "frames", "send_failures", "late", "rejects", "last_reject",
-                   "starts", "media_mtu"],
+                   "starts", "media_mtu", "bitpool_now", "bitpool_lowest", "bitpool_downs"],
     "sdp_stats": ["requests", "errors", "continued"],
     "rfcomm_stats": ["frames_in", "frames_out", "bad_fcs", "sessions", "dlcs_opened", "refused",
                      "no_credit", "last_control"],
     "sco_stats": ["packets_in", "packets_out", "bad_headers", "samples_in", "samples_out",
-                  "out_underruns", "out_overruns", "peak_in", "handle", "bad_frames", "wideband"],
+                  "out_underruns", "out_overruns", "peak_in", "handle", "bad_frames", "wideband", "peak_max"],
     "hfp_stats": ["state", "hf_features", "commands", "unknown", "last_unknown0",
                   "last_unknown1", "codecs", "speaker_gain", "mic_gain", "sco_asked",
-                  "sco_status", "sco_handle", "sco_air", "sco_transport", "codec", "refused"],
+                  "sco_status", "sco_handle", "sco_air", "sco_transport", "codec", "refused", "voice_wanted", "voice_ups",
+                  "voice_downs", "call"],
     "l2cap_stats": ["frames_in", "frames_out", "signals_in", "signals_out", "send_failures",
                     "incoming", "refused", "opened", "rejected", "echo_asked", "echo_answered",
-                    "no_channel", "no_channel_in", "too_long"],
+                    "no_channel", "no_channel_in", "too_long", "last_refused_psm"],
+    "avrcp_stats": ["commands", "not_implemented", "presses", "last_button"],
     "btusb_stats": ["started", "events", "event_errors", "acl_in_packets", "acl_out_packets",
                     "acl_out_full", "commands", "command_errors", "last_error",
                     "start_status", "interface", "ep_event", "ep_acl_in", "ep_acl_out",
@@ -231,7 +233,7 @@ STRUCTS = {
     "audio_mic_stats": ["samples", "overruns", "peak", "writes"],
     "audio_voice_stats": ["hooks", "bind_routine", "alive", "bound", "binds", "queued",
                           "answered", "failed", "full", "bind_step", "signin", "bind_status",
-                          "bind_user"],
+                          "bind_user", "silent"],
     "xnet_stats": ["enabled", "patched", "user", "xmit_usb", "xmit_fallback",
                    "rx_delivered", "rx_filtered", "rx_no_user", "link_polls",
                    "flags_before", "flags_after", "link_notifies", "xmit_dropped",
@@ -346,14 +348,15 @@ def bt_conns(sym):
         rate = a["frame_length"] * 8 * a["rate"] // (a["blocks"] * 8) if a["blocks"] else 0
         print("  a2dp %s %s seid=%d | SBC %d Hz %s blocks=%d bitpool=%d %s = %d kbit/s, "
               "frame %d B x %d/packet (mtu %d) | sink caps %04x bitpool %d-%d | packets=%d "
-              "frames=%d no_credit=%d late=%d rejects=%d last=%#x starts=%d" % (
+              "frames=%d waited=%d late=%d rejects=%d last=%#x starts=%d | bitpool now %d lowest %d downs %d" % (
                   states[a["state"]] if a["state"] < len(states) else a["state"],
                   "out" if a["role_initiator"] else "in", a["remote_seid"], a["rate"],
                   modes.get(a["mode"], a["mode"]), a["blocks"], a["bitpool"],
                   "loudness" if a["allocation"] == 0 else "snr", rate // 1000,
                   a["frame_length"], a["frames_per_packet"], a["media_mtu"], a["caps"],
                   a["caps_bitpool"] >> 8, a["caps_bitpool"] & 255, a["packets"], a["frames"],
-                  a["send_failures"], a["late"], a["rejects"], a["last_reject"], a["starts"]))
+                  a["send_failures"], a["late"], a["rejects"], a["last_reject"], a["starts"],
+                  a["bitpool_now"], a["bitpool_lowest"], a["bitpool_downs"]))
         print("  sdp", read_struct(sym, "sdp_stats"))
     if "hfp_stats" in sym:
         h = read_struct(sym, "hfp_stats")
@@ -365,6 +368,7 @@ def bt_conns(sym):
                   h["codecs"], h["speaker_gain"], h["mic_gain"], h["sco_asked"],
                   h["sco_status"], h["sco_handle"], h["sco_air"]))
         print("  rfcomm", read_struct(sym, "rfcomm_stats"))
+        print("  avrcp", read_struct(sym, "avrcp_stats"))
         u = read_struct(sym, "btusb_stats")
         print("  sco usb starts=%d step=%d in req=%d bytes=%d bad=%d out req=%d last=%#x | %s" % (
             u["sco_starts"], u["sco_step"], u["sco_in_requests"], u["sco_in_bytes"],

@@ -293,14 +293,15 @@ $(BUILD)/test_bluetooth: tests/bluetooth/test_bluetooth.c src/drivers/common/btu
                         src/bluetooth/hci.c src/bluetooth/pair.c src/bluetooth/l2cap.c \
                         src/bluetooth/profiles.c src/bluetooth/sdp.c src/bluetooth/audio/sbc.c \
                         src/bluetooth/audio/a2dp.c src/bluetooth/audio/rfcomm.c \
-                        src/bluetooth/audio/hfp.c src/bluetooth/audio/sco.c $(HEADERS)
+                        src/bluetooth/audio/hfp.c src/bluetooth/audio/sco.c \
+                        src/bluetooth/audio/avrcp.c $(HEADERS)
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -I src/drivers/common/btusb -I src/bluetooth -I src/bluetooth/audio -I src/audio \
 	    -o $@ tests/bluetooth/test_bluetooth.c src/bluetooth/audio/sbc.c \
 	    src/drivers/common/btusb/btusb.c src/bluetooth/hci.c src/bluetooth/pair.c \
 	    src/bluetooth/l2cap.c src/bluetooth/profiles.c src/bluetooth/sdp.c \
 	    src/bluetooth/audio/a2dp.c src/bluetooth/audio/rfcomm.c src/bluetooth/audio/hfp.c \
-	    src/bluetooth/audio/sco.c
+	    src/bluetooth/audio/sco.c src/bluetooth/audio/avrcp.c
 
 $(BUILD)/test_descriptors: tests/drivers/uac/test_descriptors.c src/drivers/uac/descriptors.c \
                            src/drivers/uac/descriptors.h src/drivers/uac/pacer.h

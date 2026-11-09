@@ -59,6 +59,7 @@ void sco_link(u32 h, u32 wideband)
 
     msbc = wideband;
     sco_stats.wideband = wideband;
+    sco_stats.peak_max = 0;
     out_payload = wideband ? SCO_MSBC_PAYLOAD : SCO_PAYLOAD;
     out_in = out_out = 0;
     in_bytes_have = 0;
@@ -116,6 +117,8 @@ static void packet_in(const u8 *p, u32 n)
             peak = a;
     }
     sco_stats.peak_in = peak;
+    if (peak > sco_stats.peak_max)
+        sco_stats.peak_max = peak;
     sco_stats.packets_in++;
     sco_stats.samples_in += samples;
     sco_up(pcm, samples, up, &in_last);
@@ -260,6 +263,8 @@ static void msbc_decode_queued(void)
                 peak = a;
         }
         sco_stats.peak_in = peak;
+        if (peak > sco_stats.peak_max)
+            sco_stats.peak_max = peak;
         sco_stats.packets_in++;
         sco_stats.samples_in += got;
 #if XE_AUDIO

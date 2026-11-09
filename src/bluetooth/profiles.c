@@ -11,25 +11,43 @@ void bt_profiles_init(void)
 {
     sdp_init();
     a2dp_init();
+    avrcp_init();
     hfp_init();
 }
 
-/* A link we made goes on to the audio stream; one the device made is left to it (a headset
- * opens AVDTP itself, after asking SDP). */
+/* A link we made goes on to the audio stream. One the device made is left to it for 3 s (a
+ * headset opens AVDTP itself, after asking SDP); then, if it has not, we do: 027570
+ * reconnecting by itself opened HFP and AVRCP but not A2DP. */
+#define A2DP_WAIT_TICKS 150
+
+static volatile BT_CONN *waiting;
+static u32 waited;
+
 void bt_profiles_ready(volatile BT_CONN *c)
 {
-    if (c->we_called)
+    if (c->we_called) {
         a2dp_connect(c);
+        return;
+    }
+    waiting = c;
+    waited = 0;
 }
 
 void bt_profiles_gone(volatile BT_CONN *c)
 {
+    if (waiting == c)
+        waiting = 0;
     a2dp_gone(c);
     hfp_gone(c);
 }
 
 void bt_profiles_tick(void)
 {
+    if (waiting && ++waited >= A2DP_WAIT_TICKS) {
+        if (waiting->state == BT_CONN_SECURE && a2dp_stats.state == A2DP_IDLE)
+            a2dp_connect(waiting);
+        waiting = 0;
+    }
     a2dp_tick();
     hfp_tick();
 }

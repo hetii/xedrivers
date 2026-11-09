@@ -78,6 +78,11 @@ void audio_voice_init(void);
 void audio_voice_tick(void);
 void audio_voice_answer(void);
 
+/* A microphone that runs on demand is there (1) or gone (0): offered to the title meanwhile,
+ * its requests answered with silence until samples come; audio_voice_stats.queued counts the
+ * requests, which is how its owner knows to start it. Worker thread. */
+void audio_voice_standby(u32 on);
+
 typedef struct {
     u32 hooks;              /* bits: 0 present, 1 submit, 2 battery hooked */
     u32 bind_routine;       /* xam's binding routine is the one checked */
@@ -93,6 +98,7 @@ typedef struct {
     u32 signin;             /* XamUserGetSigninState(0) */
     u32 bind_status;
     u32 bind_user;
+    u32 silent;             /* requests answered with silence (standby) */
 } AUDIO_VOICE_STATS;
 
 extern volatile AUDIO_VOICE_STATS audio_voice_stats;

@@ -56,6 +56,8 @@ static u32 sequence, timestamp, last_tb, rate_hz;
 static u32 per_tick;                    /* samples per time-base tick, x 2^32 */
 static u64 owed_fp;                     /* samples owed since the start, x 2^32 */
 static u64 samples_sent;
+static u32 pending;                     /* bytes of `packet` still to go */
+static u32 quiet_ticks, down_gap;
 static u8 packet[1024];
 static s16 pcm[128 * 2];
 #if XE_AUDIO
@@ -199,6 +201,9 @@ static void start_stream(void)
         a2dp_stats.frames_per_packet = 1;
     rate_hz = rates_hz[rate];
     samples_sent = 0;
+    pending = 0;
+    quiet_ticks = down_gap = 0;
+    a2dp_stats.bitpool_lowest = 0;
     owed_fp = 0;
     per_tick = (u32)((double)rate_hz * 4294967296.0 / (double)TIMEBASE_HZ);
 #if defined(__powerpc__)
@@ -563,9 +568,11 @@ static void one_packet(void)
                 pcm[i] = (s16)(((s32)pcm[2 * i] + pcm[2 * i + 1]) / 2);
         at += sbc_encode(&sbc, pcm, packet + at);
     }
-    if (l2cap_send(media, packet, at)) {
-        a2dp_stats.send_failures++;
-    } else {
+    /* sent now, or held until the controller has room: a packet given up is a gap the
+     * listener hears (6% of them, with a headset at -74 dBm) */
+    pending = at;
+    if (!l2cap_send(media, packet, at)) {
+        pending = 0;
         a2dp_stats.packets++;
         a2dp_stats.frames += n;
     }
@@ -574,9 +581,34 @@ static void one_packet(void)
     samples_sent += n * per;
 }
 
+/* The bitpool follows the radio, as Android's does: down by 4 when a packet had to wait (at
+ * most every 0.5 s, not under 18), up by 1 after 2 s without that, back to what was agreed.
+ * Every SBC frame says its own bitpool, so the sink follows without asking. */
+#define BITPOOL_FLOOR   18u
+#define DOWN_GAP_TICKS  25u
+#define UP_AFTER_TICKS  100u
+
+static void bitpool_tick(u32 waited)
+{
+    if (waited) {
+        quiet_ticks = 0;
+        if (++down_gap >= DOWN_GAP_TICKS && sbc.bitpool > BITPOOL_FLOOR + 4) {
+            sbc.bitpool -= 4;
+            down_gap = 0;
+            a2dp_stats.bitpool_downs++;
+        }
+    } else if (++quiet_ticks >= UP_AFTER_TICKS && sbc.bitpool < config_bitpool) {
+        sbc.bitpool++;
+        quiet_ticks = 0;
+    }
+    a2dp_stats.bitpool_now = sbc.bitpool;
+    if (sbc.bitpool < a2dp_stats.bitpool_lowest || !a2dp_stats.bitpool_lowest)
+        a2dp_stats.bitpool_lowest = sbc.bitpool;
+}
+
 void a2dp_tick(void)
 {
-    u32 now = 0, per;
+    u32 now = 0, per, waited = 0;
     u64 owed;
 
     if (a2dp_stats.state != A2DP_STREAMING || !media)
@@ -592,6 +624,21 @@ void a2dp_tick(void)
         a2dp_stats.late += (u32)(owed - samples_sent);
         samples_sent = owed;
     }
-    while (samples_sent + per <= owed + per / 2 && media)
+    while (media) {
+        if (pending) {
+            if (l2cap_send(media, packet, pending)) {
+                a2dp_stats.send_failures++;     /* no room yet: it waits */
+                waited = 1;
+                break;
+            }
+            pending = 0;
+            a2dp_stats.packets++;
+            a2dp_stats.frames += a2dp_stats.frames_per_packet;
+            continue;
+        }
+        if (samples_sent + per > owed + per / 2)
+            break;
         one_packet();
+    }
+    bitpool_tick(waited);
 }
