@@ -234,12 +234,16 @@ servers (FTP, NFS, XBDM) need not know. A client that opens connections to both 
 uses both cards: each USB host controller has its own ceiling, so two cards on the front
 and the back ports carry nearly twice one.
 
-| 4 TCP streams | one address | both addresses |
+| | one address | both addresses |
 |---|---|---|
-| into the console | 186 Mbit/s (23.3 MB/s) | 349 Mbit/s (43.6 MB/s) |
-| out of the console | 175 Mbit/s (21.8 MB/s) | 343 Mbit/s (42.9 MB/s) |
+| 4 TCP streams into the console | 186 Mbit/s (23.3 MB/s) | 349 Mbit/s (43.6 MB/s) |
+| 4 TCP streams out of the console | 175 Mbit/s (21.8 MB/s) | 343 Mbit/s (42.9 MB/s) |
+| xeftp, 2 sessions, 512 MB to the disk | 181 Mbit/s (22.7 MB/s) | 344 Mbit/s (43.0 MB/s) |
+| xeftp, 2 sessions, 512 MB from the disk | 176 Mbit/s (22.0 MB/s) | 324 Mbit/s (40.5 MB/s) |
+| xenfs, 4 files at once, 512 MB to the disk | 185 Mbit/s (23.1 MB/s) | 285 Mbit/s (35.6 MB/s) |
 
-Two RTL8156B, 2026-11-11. Limits: the address is static (no DHCP for it); the client has to
+Two RTL8156B, 2026-11-11; the file rows with `xectl.py bench xeftp|xenfs --second`, every
+other session or file by the second address (for xenfs a second mount). Limits: the address is static (no DHCP for it); the client has to
 use both addresses itself (two FTP sessions, two mounts); only what a client opens to the
 second address goes that way, nothing the console opens.
 

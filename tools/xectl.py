@@ -1311,8 +1311,9 @@ def console_ports():
 FTP_AUTH = ""        # "user:password@" for a server that wants a login (ftpdll)
 
 
-def xeftp_start(up, name, port, folder, src=None):
-    url = "ftp://%s%s:%d/%s/%s" % (FTP_AUTH, HOST, port, folder, name)
+def xeftp_start(up, name, port, folder, src=None, index=0):
+    host = SECOND_HOST if SECOND_HOST and index % 2 else HOST    # --second: every other session
+    url = "ftp://%s%s:%d/%s/%s" % (FTP_AUTH, host, port, folder, name)
     args = (["-T", src, "-w", "%{size_upload}"] if up else ["-o", os.devnull, "-w", "%{size_download}"])
     return subprocess.Popen(["curl", "-s", "-S", "--connect-timeout", "20", "--max-time", str(GUARD_S),
                              *args, url], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1362,9 +1363,11 @@ def xeftp_run(up, mb, files, port, folder):
     if up:
         src = data_file(piece)
         begin = time.time()
-        xeftp_wait([xeftp_start(True, n, port, folder, src) for n in names], piece << 20)
+        xeftp_wait([xeftp_start(True, n, port, folder, src, i) for i, n in enumerate(names)],
+                   piece << 20)
     else:
-        xeftp_wait([xeftp_start(False, n, port, folder) for n in names], piece << 20)
+        xeftp_wait([xeftp_start(False, n, port, folder, None, i) for i, n in enumerate(names)],
+                   piece << 20)
     seconds = time.time() - begin
     if up:
         for n in names:
@@ -1384,8 +1387,14 @@ def run_guarded(cmd, what, timeout=None):
     return done.stdout
 
 
+MOUNT_DIR2 = MOUNT_DIR + "-2"    # --second: the same export by the second address
+
+
 def xenfs_umount():
     subprocess.run(["sudo", "-n", "umount", "-f", "-l", MOUNT_DIR], capture_output=True, timeout=30)
+    if SECOND_HOST:
+        subprocess.run(["sudo", "-n", "umount", "-f", "-l", MOUNT_DIR2], capture_output=True,
+                       timeout=30)
 
 
 def xenfs_mount(nconnect):
@@ -1394,6 +1403,11 @@ def xenfs_mount(nconnect):
     xenfs_umount()
     run_guarded(["sudo", "-n", "mount", "-t", "nfs", "-o", "vers=3,nolock,nconnect=%d" % nconnect,
                  "%s:/" % HOST, MOUNT_DIR], "mount", 60)
+    if SECOND_HOST:
+        os.makedirs(MOUNT_DIR2, exist_ok=True)
+        run_guarded(["sudo", "-n", "mount", "-t", "nfs", "-o",
+                     "vers=3,nolock,nconnect=%d" % nconnect, "%s:/" % SECOND_HOST, MOUNT_DIR2],
+                    "mount (second address)", 60)
 
 
 def xenfs_run(up, mb, nconnect, folder):
@@ -1424,7 +1438,8 @@ def xenfs_files_run(mb, files, nconnect, folder):
     fsync included, sizes checked. Bytes per second."""
     piece = mb // files
     src = data_file(piece)
-    paths = [os.path.join(MOUNT_DIR, folder, "xectl-xenfs-f%d.bin" % i) for i in range(files)]
+    paths = [os.path.join(MOUNT_DIR2 if SECOND_HOST and i % 2 else MOUNT_DIR, folder,
+                          "xectl-xenfs-f%d.bin" % i) for i in range(files)]
     xenfs_mount(nconnect)
     try:
         begin = time.time()
@@ -1661,7 +1676,8 @@ def bench(sym, argv):
     ap.add_argument("--port", type=int, default=XEFTP_PORT, help="xeftp's port")
     ap.add_argument("--guard", type=int, default=GUARD_S, help="seconds a step of a server bench may take")
     ap.add_argument("--second", default="",
-                    help="tcp: every other stream to this address (multipath=1, second_ip)")
+                    help="tcp, xeftp, xenfs with --files: every other stream, session or file by this "
+                         "address (multipath=1, second_ip)")
     ap.add_argument("--ip", default=os.environ.get("XE_STACK_IP", ""),
                     help="udp: the standalone stack's address (XE_HOST reads its counters)")
     ap.add_argument("--size", type=int, default=1472, help="udp: payload bytes")
