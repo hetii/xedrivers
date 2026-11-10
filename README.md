@@ -242,6 +242,11 @@ and the back ports carry nearly twice one.
 | xeftp, 2 sessions, 512 MB from the disk | 176 Mbit/s (22.0 MB/s) | 324 Mbit/s (40.5 MB/s) |
 | xenfs, 4 files at once, 512 MB to the disk | 185 Mbit/s (23.1 MB/s) | 285 Mbit/s (35.6 MB/s) |
 
+With only the two RTL8156B in the console (the table above had an AIC8800 and an RTL8822BU
+joined beside them, which cost about 3 MB/s a card): 4 TCP streams 400 Mbit/s (49.9 MB/s)
+in and 359 (44.9) out; xeftp, 4 sessions, 342 (42.8) to the disk and 345 (43.1) from it;
+xenfs, 4 files at once, 340 (42.4) to the disk.
+
 Two RTL8156B, 2026-11-11; the file rows with `xectl.py bench xeftp|xenfs --second`, every
 other session or file by the second address (for xenfs a second mount). Limits: the address is static (no DHCP for it); the client has to
 use both addresses itself (two FTP sessions, two mounts); only what a client opens to the
