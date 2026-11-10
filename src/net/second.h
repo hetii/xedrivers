@@ -33,6 +33,7 @@ typedef struct {
     u32 out_dropped;        /* the card took nothing for 200 ms: not left in xnet's queue */
     u32 gave_up;            /* ... nor for 2 s: the second way given up */
     u32 moved;              /* a flow opened anew by the uplink: no longer the second way's */
+    u32 announced;          /* the address said to be a card's, when the card changed */
 } SECOND_STATS;
 
 /* --- pure (tests/net/test_second.c) ----------------------------------------- */
@@ -109,7 +110,7 @@ void second_uplink_slow(const u8 *frame, u32 length);
 /* A frame from a card that is not the uplink: 1 if it was the second way's. DISPATCH. */
 static inline u32 second_rx(NET_DEV *nd, const u8 *frame, u32 length)
 {
-    return nd == second_dev ? second_rx_slow(nd, frame, length) : 0;
+    return second_dev ? second_rx_slow(nd, frame, length) : 0;
 }
 
 /* A frame from xnet: 1 if it went (or was refused, `*sent` 0) by the second card. */

@@ -240,6 +240,38 @@ void second_init(void)
         second_stats.ip = parse_ip(value);
 }
 
+/* The address is this card's now: said to the network (a gratuitous ARP request), or what
+ * was sent to the card before goes on to that one's Ethernet address until the peers ask
+ * again -- with the first card's cable out, a transfer by the second address stood still
+ * though another card had taken the address over (2026-11-11). */
+static u32 announce_left, announced_at;
+
+static void announce(NET_DEV *nd)
+{
+    static u8 frame[ETH_HLEN + 28] __attribute__((aligned(4)));
+    u32 i;
+
+    for (i = 0; i < ETH_ALEN; i++) {
+        frame[i] = 0xFF;
+        frame[ETH_ALEN + i] = nd->mac[i];
+        frame[ETH_HLEN + 8 + i] = nd->mac[i];
+        frame[ETH_HLEN + 18 + i] = 0;
+    }
+    wr16(frame + 12, ETHERTYPE_ARP);
+    wr16(frame + ETH_HLEN, 1);                  /* Ethernet */
+    wr16(frame + ETH_HLEN + 2, ETHERTYPE_IP);
+    frame[ETH_HLEN + 4] = ETH_ALEN;
+    frame[ETH_HLEN + 5] = 4;
+    wr16(frame + ETH_HLEN + 6, 1);              /* a request, for our own address */
+    wr32(frame + ETH_HLEN + 14, second_stats.ip);
+    wr32(frame + ETH_HLEN + 24, second_stats.ip);
+    if (net_dev_tx(nd, frame, sizeof(frame)))
+        second_stats.announced++;
+    announced_at = tb();
+    if (announce_left)
+        announce_left--;
+}
+
 /* The card: one with a link that is neither the uplink nor someone's, on the other host
  * controller if there is one (its own ceiling), else any; none without an uplink. */
 void second_choose(void)
@@ -265,6 +297,10 @@ void second_choose(void)
      * whose address another card now answers for, goes on with its next frame in. */
     if (best != second_dev) {
         second_took(&stuck);
+        if (best) {
+            announce_left = 3;          /* now, and twice more a second apart (second_rx_slow) */
+            announce(best);
+        }
         second_dev = best;
         second_stats.slot = best ? (u32)(best - net_devs) + 1 : 0;
         mem_sync();
@@ -295,20 +331,27 @@ static void arp_in(NET_DEV *nd, const u8 *frame, u32 length)
         second_stats.arp_replies++;
 }
 
+/* Any card that is not the uplink may bring what is for the address: a peer goes on sending
+ * to the card that had it until it asks again (after the cable was back, two of four new
+ * connections never opened: the PC still had the wireless card's address, which no longer
+ * took them). Only the second way's card answers ARP and sends. */
 u32 second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length)
 {
-    u32 peer, ports, proto;
+    u32 peer, ports, proto, mine = nd == second_dev;
 
     if (length < ETH_HLEN + 20)
-        return 1;
+        return mine;
+    if (mine && announce_left && tb() - announced_at >= 1000u * TB_PER_MS)
+        announce(nd);                   /* once more: the first may have met a port not yet up */
     if (rd16(frame + 12) == ETHERTYPE_ARP) {
-        arp_in(nd, frame, length);
-        return 1;
+        if (mine)
+            arp_in(nd, frame, length);
+        return mine;
     }
     if (rd16(frame + 12) != ETHERTYPE_IP || rd32(frame + ETH_HLEN + 16) != second_stats.ip ||
         !second_key(frame, length, 1, &peer, &ports, &proto)) {
-        second_stats.not_ours++;
-        return 1;
+        second_stats.not_ours += mine;
+        return mine;
     }
     if (!second_stats.xnet_ip || !net_rx) {
         second_stats.no_xnet_ip++;
