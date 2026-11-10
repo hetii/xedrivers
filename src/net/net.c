@@ -13,6 +13,7 @@
 #include "bench.h"
 #include "prof.h"
 #include "file.h"
+#include "second.h"
 
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
@@ -313,6 +314,8 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
         return;
     }
     if (uplink() != nd) {
+        if (second_rx(nd, frame, length))
+            return;
         nd->st->rx_not_uplink++;
         return;
     }
@@ -347,7 +350,7 @@ void net_tx_done(NET_DEV *nd)
             nd->claim->tx_idle(nd->claim->context);
         return;
     }
-    if (net_tx_idle && uplink() == nd)
+    if (net_tx_idle && (uplink() == nd || second_is(nd)))
         net_tx_idle();
 }
 
@@ -486,9 +489,12 @@ u32 net_dev_tx_space(NET_DEV *nd)
 u32 net_tx(const u8 *frame, u32 length)
 {
     NET_DEV *nd = uplink();
+    u32 sent;
 
     if (bench_tx_refused())
         return 0;
+    if (second_tx(frame, length, &sent))
+        return sent;
     if (!nd || !nd->st->ready || !nd->usb->active || length < ETH_HLEN ||
         length > ETH_FRAME_MAX) {
         if (nd)
@@ -561,6 +567,7 @@ void net_layer_init(void)
 {
     xnet_title_pool();                  /* before a title's xnet starts */
     file_setting("xedrivers.ini", "uplink", uplink_wanted, sizeof(uplink_wanted));
+    second_init();
     set_mode(xe_config.mode == XE_MODE_XNET ? XE_MODE_DROP : xe_config.mode);
     xe_config.mode = XE_MODE;
 }
@@ -582,6 +589,7 @@ void net_tick(void)
 {
     u32 i;
 
+    second_tick();
     if (net_switching && ++switch_ticks >= SWITCH_GAP_TICKS) {
         net_switching = 0;
         mem_sync();

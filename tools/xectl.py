@@ -62,6 +62,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ELF = os.path.join(ROOT, "build", "plugin.elf")
 HOST = os.environ.get("XE_HOST", "")
+SECOND_HOST = ""    # bench tcp --second: every other stream goes to this address
 XERUNNER = (os.environ.get("XERUNNER") or shutil.which("xerunner") or
             os.path.join(ROOT, "..", "xerunner", ".venv", "bin", "xerunner"))
 RESULTS = os.path.join(ROOT, "docs", "speedtest.jsonl")
@@ -76,6 +77,8 @@ MCU = {"pla": 0x0100, "usb": 0x0000}
 PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up', 'tx_wait', 'turnaround']
 
 STRUCTS = {
+    "second_stats": ["ip", "xnet_ip", "slot", "arp_replies", "in", "out", "out_refused", "flows",
+                     "not_ours", "no_xnet_ip"],
     "usb_stats": ["match_calls", "add_calls", "remove_calls", "close_passes", "submit_direct",
                   "submit_dpc", "dpc_runs", "last_open_status", "scan_found", "reset_status",
                   "unbound_resets", "no_slot", "control_late", "cancels", "nak_reload_set",
@@ -795,6 +798,15 @@ def status(sym):
                   f["data_failed"], f["wait_failed"], f["accept_failed"],
                   f["read_failed"], f["send_failed"], f["no_thread"]))
     if ss:
+        if "second_stats" in sym:
+            sec = read_struct(sym, "second_stats")
+            print("second   ip=%s xnet=%s slot=%s arp=%d in=%d out=%d refused=%d flows=%d "
+                  "not_ours=%d before_xnet=%d" % (
+                      socket.inet_ntoa(struct.pack(">I", sec["ip"])),
+                      socket.inet_ntoa(struct.pack(">I", sec["xnet_ip"])),
+                      sec["slot"] - 1 if sec["slot"] else "none", sec["arp_replies"], sec["in"],
+                      sec["out"], sec["out_refused"], sec["flows"], sec["not_ours"],
+                      sec["no_xnet_ip"]))
         print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
             ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],
             ss["discard_bytes_hi"] << 32 | ss["discard_bytes"], ip(ss["peer_ip"]),
@@ -952,7 +964,7 @@ SO_MAX_PACING_RATE = 47
 
 def tcp_stream(port, begin, end, out, index, up, pace):
     try:
-        s = socket.create_connection((HOST, port), timeout=10)
+        s = socket.create_connection((SECOND_HOST if SECOND_HOST and index % 2 else HOST, port), timeout=10)
     except OSError:
         out[index] = -1                     # never connected
         return
@@ -1648,6 +1660,8 @@ def bench(sym, argv):
     ap.add_argument("--nconnect", default="1,4", help="xenfs: connections; mix: the last")
     ap.add_argument("--port", type=int, default=XEFTP_PORT, help="xeftp's port")
     ap.add_argument("--guard", type=int, default=GUARD_S, help="seconds a step of a server bench may take")
+    ap.add_argument("--second", default="",
+                    help="tcp: every other stream to this address (multipath=1, second_ip)")
     ap.add_argument("--ip", default=os.environ.get("XE_STACK_IP", ""),
                     help="udp: the standalone stack's address (XE_HOST reads its counters)")
     ap.add_argument("--size", type=int, default=1472, help="udp: payload bytes")
@@ -1661,6 +1675,8 @@ def bench(sym, argv):
     a = ap.parse_args(argv)
     if not HOST:
         raise SystemExit("set XE_HOST to the console's address")
+    global SECOND_HOST
+    SECOND_HOST = a.second
     ways = ["down", "up"] if a.which == "both" else [a.which]
     if a.test == "a2dp":
         a2dp_bench(sym, a.seconds, a.record, a.note)

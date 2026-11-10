@@ -114,6 +114,9 @@ SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.gener
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h src/*/*/*/*.h)
 INCLUDES := $(addprefix -I ,$(SRC_DIRS))
 DEBUG    ?= 0
+# multipath=1: a second card answers for `second_ip =` and its traffic is translated to the
+# console's address (src/net/second.h). Off: none of it is in the build.
+multipath ?= 0
 
 KIT      := kit
 PYTHON   ?= python3 -B
@@ -162,7 +165,7 @@ export FIRMWARE
 # console says what it was built from (tools/xectl.py status, bench --record).
 GIT_COMMIT := $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-8),0)
 GIT_DIRTY  := $(if $(shell git status --porcelain --untracked-files=no 2>/dev/null),1,0)
-FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE)/$(NTB_IN_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST)) servers=$(subst $(space),$(comma),$(SERVERS_LIST))
+FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) MULTIPATH=$(multipath) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE)/$(NTB_IN_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST)) servers=$(subst $(space),$(comma),$(SERVERS_LIST))
 
 .PHONY: all firmware clean test lint kit push push-fw deploy
 
@@ -214,6 +217,7 @@ $(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
 	    --base $(BASE) \
 	    $(INCLUDES) -D XE_DEBUG=$(DEBUG) -D XE_MODE=$(MODE_VALUE)u \
 	    -D XE_AUDIO=$(if $(filter uac,$(DRIVERS)),1,0) \
+	    -D XE_MULTIPATH=$(multipath) \
 	    -D XE_ADVERTISE=$(ADV_VALUE)u -D XE_IP=$(IP_VALUE)u \
 	    -D RX_COUNT=$(RX_COUNT) -D TX_COUNT=$(TX_COUNT) -D NTB_SIZE=$(NTB_SIZE) -D NTB_IN_SIZE=$(NTB_IN_SIZE) \
 	    -D NCM_RX_COUNT=$(NCM_RX_COUNT) -D NCM_TX_COUNT=$(NCM_TX_COUNT) \
@@ -230,7 +234,7 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
       $(BUILD)/test_asix $(BUILD)/test_ax88179 $(BUILD)/test_ax88178 $(BUILD)/test_nfs \
       $(BUILD)/test_ftp $(BUILD)/test_pcm $(BUILD)/test_descriptors $(BUILD)/test_bluetooth \
       $(BUILD)/test_aic $(BUILD)/test_wpa $(BUILD)/test_reorder \
-      $(BUILD)/test_bridge $(BUILD)/test_omni $(BUILD)/test_rate $(BUILD)/test_txq
+      $(BUILD)/test_bridge $(BUILD)/test_omni $(BUILD)/test_rate $(BUILD)/test_txq $(BUILD)/test_second
 	@$(BUILD)/test_cdc
 	@$(BUILD)/test_stack
 	@$(BUILD)/test_rtl
@@ -250,6 +254,7 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
 	@$(BUILD)/test_omni
 	@$(BUILD)/test_rate
 	@$(BUILD)/test_txq
+	@$(BUILD)/test_second
 
 HOST_CC := gcc -std=c99 -Wall -Wextra -O2 -I src/core -I src/net -I src/wireless
 
@@ -357,6 +362,10 @@ $(BUILD)/test_omni: tests/wireless/test_omni.c src/wireless/omni.c src/net/txq.c
 $(BUILD)/test_reorder: tests/wireless/test_reorder.c src/wireless/reorder.c $(HEADERS)
 	@mkdir -p $(BUILD)
 	$(HOST_CC) -o $@ tests/wireless/test_reorder.c src/wireless/reorder.c
+
+$(BUILD)/test_second: tests/net/test_second.c src/net/second.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(HOST_CC) -o $@ tests/net/test_second.c src/net/second.c
 
 $(BUILD)/test_txq: tests/net/test_txq.c src/net/txq.c $(HEADERS)
 	@mkdir -p $(BUILD)
