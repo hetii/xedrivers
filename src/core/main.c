@@ -273,6 +273,7 @@ static void worker(void *parameter)
             }
         }
         wp(1, tick);
+        usb_tick();
         net_tick();
         wp(2, tick);
 #if XE_AUDIO

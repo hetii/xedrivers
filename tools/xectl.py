@@ -79,7 +79,8 @@ STRUCTS = {
     "usb_stats": ["match_calls", "add_calls", "remove_calls", "close_passes", "submit_direct",
                   "submit_dpc", "dpc_runs", "last_open_status", "scan_found", "reset_status",
                   "unbound_resets", "no_slot", "control_late", "cancels", "nak_reload_set",
-                  "nak_reload_skipped", "spin_bring_ups", "bring_ups_dimmed"],
+                  "nak_reload_skipped", "spin_bring_ups", "bring_ups_dimmed", "qtd_guard",
+                  "held", "held_now", "held_most"],
     "net_prof": ["enabled", "freq", "stamp", "copy_ticks_hi", "copy_ticks_lo", "copy_bytes_hi", "copy_bytes_lo", "copy_calls", "submit_ticks_hi", "submit_ticks_lo", "submit_bytes_hi", "submit_bytes_lo", "submit_calls", "tx_done_ticks_hi", "tx_done_ticks_lo", "tx_done_bytes_hi", "tx_done_bytes_lo", "tx_done_calls", "rx_done_ticks_hi", "rx_done_ticks_lo", "rx_done_bytes_hi", "rx_done_bytes_lo", "rx_done_calls", "rx_up_ticks_hi", "rx_up_ticks_lo", "rx_up_bytes_hi", "rx_up_bytes_lo", "rx_up_calls", "tx_wait_ticks_hi", "tx_wait_ticks_lo", "tx_wait_bytes_hi", "tx_wait_bytes_lo", "tx_wait_calls", "turnaround_ticks_hi", "turnaround_ticks_lo", "turnaround_bytes_hi", "turnaround_bytes_lo", "turnaround_calls"],
     "xe_state": ["magic", "version", "worker_ticks", "claim_attempts", "claim_found",
                  "build_commit", "build_dirty"],
@@ -813,6 +814,9 @@ def status(sym):
               u["match_calls"], u["add_calls"], u["remove_calls"], u["close_passes"],
               u["cancels"], u["unbound_resets"], u["no_slot"], u["control_late"],
               u["nak_reload_set"], u["nak_reload_skipped"]))
+    if u.get("qtd_guard") or u.get("held"):
+        print("usb qtd  guard=%d held=%d (now %d, most %d): requests that waited for the kernel's "
+              "transfer descriptors" % (u["qtd_guard"], u["held"], u["held_now"], u["held_most"]))
     retries = struct.unpack(">I", read(sym["net_stall_retries"], 4))[0] \
         if "net_stall_retries" in sym else 0
     print("xnet q   stalls=%d depth at the last=%d head drops=%d (last %d B, type %#06x) "

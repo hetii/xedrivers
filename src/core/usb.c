@@ -215,12 +215,134 @@ __asm__(".section .text\n"
         "    blr\n");
 #endif
 
+/* The kernel's EHCI driver takes its transfer descriptors (qTDs) from one free list for
+ * every controller and device, two or more a request, and does not look whether the list
+ * has run out: with none left it writes through a null pointer at DISPATCH_LEVEL, and the
+ * console stops (PANIC_STACK_SWITCH on the UART, from the exception handlers that follow).
+ * The pool is about 250. One card's rings fit; two RTL8156B, an AIC8800 and an RTL8822BU at
+ * once left 124 free when idle, and the first bulk send used them up (2026-11-11: every
+ * `bench tcp down` and an ftpdll download ended that way; 4 left at the lowest with this
+ * guard's first form, and 176 Mbit/s). It is what "RX64+TX128 outstanding requests hang
+ * the console" was.
+ *
+ * So a request is queued only while the list holds what it takes and a reserve for what
+ * else uses it (the kernel's own drivers: storage, pads); the rest wait here, in order,
+ * and go as completions give descriptors back. The list's head is at 0x801A7F80 in kernel
+ * 17559 (the queueing routine at 0x800DF0C8 loads it: lis r11,0x801A / addi r21,r11,0x7F80
+ * / lwz r30,0(r21)), checked against the running kernel before it is believed (usb_init);
+ * on another kernel there is no guard. All of this runs on the USB processor at
+ * DISPATCH_LEVEL, as the kernel's own use of the list does. */
+#define QTD_FREE_LIST   0x801A7F80u
+#define QTD_RESERVE     16u
+
+static URB *held_head, *held_tail;
+
+static u32 qtd_room(const URB *urb)
+{
+#if defined(__powerpc__)
+    u32 need = 3 + urb->Length / 16384u + QTD_RESERVE, n = 0;
+    const u32 *p;
+
+    if (!usb_stats.qtd_guard)
+        return 1;
+    for (p = *(const u32 *volatile *)QTD_FREE_LIST; p && n < need;
+         p = (const u32 *)(unsigned long)*p)
+        n++;
+    return n >= need;
+#else
+    (void)urb;
+    return 1;
+#endif
+}
+
+static void queue_now(URB *urb);
+
+static void hold(URB *urb)
+{
+    urb->Next = 0;
+    if (held_tail)
+        held_tail->Next = urb;
+    else
+        held_head = urb;
+    held_tail = urb;
+    usb_stats.held++;
+    if (++usb_stats.held_now > usb_stats.held_most)
+        usb_stats.held_most = usb_stats.held_now;
+}
+
+static URB *held_pop(void)
+{
+    URB *urb = held_head;
+
+    held_head = urb->Next;
+    if (!held_head)
+        held_tail = 0;
+    urb->Next = 0;
+    usb_stats.held_now--;
+    return urb;
+}
+
+static void held_release(void)
+{
+    while (held_head) {
+        URB *urb = held_head;
+
+        if (!urb->Dev || !urb->Dev->device) {
+            held_pop();
+            urb->Busy = 0;
+            continue;
+        }
+        if (!qtd_room(urb))
+            return;
+        queue_now(held_pop());
+    }
+}
+
+/* A request taken back before it was queued: 1, and it is no longer held. */
+static u32 held_remove(URB *urb)
+{
+    URB *at, *before = 0;
+
+    for (at = held_head; at; before = at, at = at->Next) {
+        if (at != urb)
+            continue;
+        if (before)
+            before->Next = at->Next;
+        else
+            held_head = at->Next;
+        if (held_tail == at)
+            held_tail = before;
+        at->Next = 0;
+        usb_stats.held_now--;
+        return 1;
+    }
+    return 0;
+}
+
+/* Every completion comes through here (urb->Done): the driver's routine, then whatever
+ * waited for the descriptors this one gave back. */
+static void completed(URB *urb, u32 status)
+{
+    urb->Then(urb, status);
+    if (held_head)
+        held_release();
+}
+
 static void submit_now(URB *urb)
 {
     if (!urb->Dev || !urb->Dev->device) {
         urb->Busy = 0;
         return;
     }
+    if (held_head || !qtd_room(urb)) {  /* behind what waits already: the order is kept */
+        hold(urb);
+        return;
+    }
+    queue_now(urb);
+}
+
+static void queue_now(URB *urb)
+{
     mem_sync();                     /* buffer contents visible before the HC looks */
     {
         PROF_START(t);
@@ -281,6 +403,7 @@ static void submit_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
     (void)a2;
 
     usb_stats.dpc_runs++;
+    held_release();
     KeAcquireSpinLockAtRaisedIrql(&submit_lock);
     list = submit_head;
     submit_head = 0;
@@ -347,8 +470,17 @@ static void cancel_dpc_routine(KDPC *dpc, void *context, void *a1, void *a2)
     for (i = 0; i < n; i++)
         if (list[i]->Busy) {
             usb_stats.cancels++;
-            UsbdCancelAsyncTransfer(list[i]);
+            if (held_remove(list[i]))   /* never queued: completed here, as cancelled */
+                list[i]->Then(list[i], 0xC0000120u);
+            else
+                UsbdCancelAsyncTransfer(list[i]);
         }
+}
+
+void usb_tick(void)
+{
+    if (held_head)
+        KeInsertQueueDpc(&submit_dpc, 0, 0);
 }
 
 /* Take back a request the controller holds: it completes, cancelled, as any other
@@ -414,7 +546,8 @@ void usb_prepare(URB *urb, USB_DEV *dev, void *endpoint, URB_COMPLETION done,
     for (i = 0; i < 0x28; i++)
         raw[i] = 0;
     urb->Context = urb;
-    urb->Done = done;
+    urb->Then = done;
+    urb->Done = completed;
     urb->Routine = URB_ENTRY;
     urb->Endpoint = endpoint;
     /* OHCI: a short IN is no error (the kernel's queue reads +0x10: buffer rounding). */
@@ -705,6 +838,12 @@ int usb_register(const USB_CLIENT *who)
     wake_ready = 1;
     usb_dpc_init(&submit_dpc, submit_dpc_routine, 0);
     submit_dpc.TargetNumber = USB_PROCESSOR + 1;
+#if defined(__powerpc__)
+    if (MmIsAddressValid((const void *)0x800DF0D4u) &&
+        *(const u32 *)0x800DF0D4u == 0x3D60801Au && *(const u32 *)0x800DF0DCu == 0x3AAB7F80u &&
+        *(const u32 *)0x800DF0ECu == 0x83D50000u && MmIsAddressValid((const void *)QTD_FREE_LIST))
+        usb_stats.qtd_guard = 1;
+#endif
     usb_dpc_init(&cancel_dpc, cancel_dpc_routine, 0);
     cancel_dpc.TargetNumber = USB_PROCESSOR + 1;
     usb_dpc_init(&wake_dpc, wake_dpc_routine, 0);

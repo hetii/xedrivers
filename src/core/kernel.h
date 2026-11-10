@@ -167,7 +167,8 @@ typedef struct _URB {
     struct USB_DEV *Dev;                        /* the device it goes to (usb_prepare) */
     void          *Owner;                       /* the driver instance it belongs to */
     u32            Stamp;                       /* time base at submission (prof.h) */
-    URB_COMPLETION Done;                        /* +0x40 what usb_prepare was asked to call */
+    URB_COMPLETION Done;                        /* +0x40 called at completion (usb.c) */
+    URB_COMPLETION Then;                        /* what usb_prepare was asked to call */
 } URB;
 
 #if defined(__powerpc__)

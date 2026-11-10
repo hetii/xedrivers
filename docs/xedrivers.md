@@ -149,6 +149,24 @@ wrong way, read 344 Mbit/s where the console received 220. Counted right, the
 RTL8822BU carries 205 Mbit/s (25.6 MB/s) in at 32 streams.
 
 
+### Transfer descriptors
+
+The kernel's EHCI driver takes its transfer descriptors (qTDs) from one free list for
+every controller and device, two or more a request, and never looks whether the list has
+run out: with none left it writes through a null pointer at DISPATCH_LEVEL and the console
+stops (`PANIC_STACK_SWITCH`, then `ATTEMPTED_SWITCH_FROM_DPC` on the UART). The pool is
+about 250. One card's rings fit in it; two RTL8156B, an AIC8800 and an RTL8822BU together
+left 124 free when idle, and the first bulk send out of the console used them up
+(2026-11-11: every `bench tcp down` and an ftpdll download ended that way). It is also
+what the old rule "64 receive and 128 send requests outstanding hang the console" was.
+
+The core now counts the free list before it queues a request (src/core/usb.c, qtd_room)
+and keeps what does not fit waiting, in order, until completions give descriptors back;
+`xectl.py status` says how many requests waited (`usb qtd`). The list's head is at
+0x801A7F80 in kernel 17559; the address is believed only when the code that loads it
+reads as expected, so on another kernel there is no guard. With the four cards: 170
+Mbit/s (21.3 MB/s) out and 177 (22.1) in on the uplink, where it stopped before.
+
 ### Two cards at once
 
 The console's USB ports are on two host controllers, and each has its own ceiling

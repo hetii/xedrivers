@@ -212,8 +212,16 @@ typedef struct {
     u32 nak_reload_skipped; /* bulk endpoints whose handle did not read as an EHCI QH */
     u32 spin_bring_ups;     /* bring-ups whose waits spun (usb_spin_waits) */
     u32 bring_ups_dimmed;   /* bring-ups left on the worker's processor (main.c, pulse) */
+    u32 qtd_guard;          /* 1: the kernel's free transfer descriptors are counted (usb.c) */
+    u32 held;               /* requests that waited for descriptors */
+    u32 held_now;
+    u32 held_most;
 } USB_STATS;
 
 extern volatile USB_STATS usb_stats;
+
+/* The worker's, every tick: requests that wait for the kernel's transfer descriptors are
+ * looked at again even if nothing of ours completes. */
+void usb_tick(void);
 
 #endif /* XE_USB_H */
