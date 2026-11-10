@@ -23,6 +23,7 @@
 #endif
 
 #define CMD_BLAST       4u  /* [1] count, [2] payload bytes, [3] UDP port (stack) */
+#define CMD_STACK_TAKE  27u /* [1] slot, [2] IPv4 address: the stack on that card (stack) */
 #define CMD_TCP_START  14u  /* start the throughput server (tcp, xnet mode) */
 #define CMD_THREAD_PRIO 15u /* [1] thread id (xerunner console list-threads), [2] prio */
 #define CMD_PEEK       16u  /* [1] address, [2] 1 = little-endian (MMIO) -> word */
@@ -70,6 +71,9 @@ u32 bench_command(u32 what, volatile u32 *args)
 #if XE_BENCH_STACK
     case CMD_BLAST:
         args[5] = stack_blast(args[1], args[2], args[3]);
+        return 1;
+    case CMD_STACK_TAKE:
+        args[5] = stack_take(args[1], args[2]);
         return 1;
 #endif
 #if XE_BENCH_DEBUG

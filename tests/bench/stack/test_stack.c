@@ -18,6 +18,10 @@ volatile USB_STATS usb_stats;
 u32 net_tx(const u8 *frame, u32 length) { (void)frame; (void)length; return 0; }
 u32 net_link_up(void) { return 0; }
 u32 net_tx_space(void) { return 0; }
+NET_DEV net_devs[NET_MAX];
+void net_claim(NET_DEV *nd, const NET_CLAIM *claim) { (void)nd; (void)claim; }
+u32 net_dev_tx(NET_DEV *nd, const u8 *frame, u32 length) { (void)nd; (void)frame; (void)length; return 0; }
+u32 net_dev_tx_space(NET_DEV *nd) { (void)nd; return 0; }
 volatile NET_TX_IDLE net_tx_idle;
 u32 net_speed_mbps(void) { return 0; }
 void usb_sleep(u32 ms) { (void)ms; }

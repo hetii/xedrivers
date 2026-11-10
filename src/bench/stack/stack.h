@@ -17,6 +17,11 @@ void stack_input(const u8 *frame, u32 length);
  * Progress: stack_stats.blast_sent / blast_busy. */
 u32  stack_blast(u32 count, u32 payload, u32 port);
 
+/* Thread-only. The stack on the card in `slot` with address `ip`, beside whatever xnet
+ * runs on: how two cards at once are measured (xnet's TCP on one, UDP here on the other).
+ * Until the next bring-up. 0 if there is no such card. */
+u32  stack_take(u32 slot, u32 ip);
+
 typedef struct {
     u32 arp_replies;
     u32 icmp_replies;

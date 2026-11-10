@@ -21,6 +21,8 @@ talks to the console through xerunner's `console read-memory` / `write-memory`.
     xectl.py worker                     where the worker's loop spends its longest moments
     xectl.py dim [SECONDS|wake]         dim the dashboard now (xam 17559's idle timer), or wake it
     xectl.py bt [scan|connect N|disconnect N]  the Bluetooth host; scan ~10 s; connect pairs (Just Works)
+    xectl.py stack SLOT IP              the bench's UDP stack on that card, beside xnet's (bench=stack):
+                                        then `bench udp --ip IP --pace 30` while `bench tcp` runs
     xectl.py history [N]                the last N flight-recorder samples (200 ms)
     xectl.py bench tcp [up|down|both] [--streams 1,4] [--seconds S] [--pace MB/s]
     xectl.py bench xeftp [up|down|both] [--mb 512] [--files 1,2,4] [--port 2121] [--repeat 3]
@@ -66,7 +68,7 @@ RESULTS = os.path.join(ROOT, "docs", "speedtest.jsonl")
 
 CMD = {"ping": 1, "reset": 2, "claim": 3, "blast": 4, "mode": 5, "restart": 6,
        "advertise": 7, "reg_read": 8, "reg_write": 9, "phy_read": 10, "phy_write": 11,
-       "xnet_iface": 13, "tcp_start": 14}
+       "xnet_iface": 13, "tcp_start": 14, "stack_take": 27}
 MODES = {"drop": 0, "standalone": 1, "xnet": 2}
 ADVERT = {"2500": 0x6F, "1000": 0x2F, "100": 0x0F, "default": 0}
 MCU = {"pla": 0x0100, "usb": 0x0000}
@@ -1488,7 +1490,7 @@ def mix_run(mb, nconnect, files, port, folder):
         xeftp_delete(names, port, folder)
 
 
-def udp_run(sym, ip, seconds, size):
+def udp_run(sym, ip, seconds, size, pace=0):
     """UDP into the standalone stack's discard port (bench=stack, MODE=standalone), as
     fast as the PC sends: no xnet in the way, the figure is what the console's stack
     counted over the window. (received bytes/s, sent bytes/s)"""
@@ -1500,7 +1502,12 @@ def udp_run(sym, ip, seconds, size):
         s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 << 20)
         s.settimeout(1)
         payload = b"x" * size
+        begun = time.time()
         while not stop.is_set():
+            # paced (MB/s): a flood fills the PC's own link and starves what runs beside it
+            if pace and sent[0] > (time.time() - begun) * pace * 1e6:
+                time.sleep(0.0005)
+                continue
             try:
                 sent[0] += s.sendto(payload, (ip, 9))
             except OSError:
@@ -1666,7 +1673,7 @@ def bench(sym, argv):
         bench_servers(a, ctx, ways)
         return
     if a.test == "udp":
-        runs = [udp_run(sym, a.ip, a.seconds, a.size) for _ in range(a.repeat)]
+        runs = [udp_run(sym, a.ip, a.seconds, a.size, a.pace or 0) for _ in range(a.repeat)]
         rate = median([r[0] for r in runs])
         print("udp  up   %d B  pc->console  %6.1f Mbit/s (%5.1f MB/s) counted by the console, "
               "PC sent %6.1f Mbit/s (%5.1f MB/s)%s" % (
@@ -1833,6 +1840,10 @@ def main(argv):
         print("status %#x; words: %s" % (st[0], " ".join("%x" % w for w in words)))
         print("64 KB blocks that can be taken (1024 = at least): pool type 2: %d, pool type 1: %d, "
               "physical flags 2: %d, physical flags 1: %d" % blocks)
+    elif what == "stack":
+        # the bench's UDP stack on a second card, beside xnet's: stack SLOT IP
+        ip = struct.unpack(">I", socket.inet_aton(rest[1]))[0]
+        print("taken" if command(sym, CMD["stack_take"], num(rest[0]), ip)[0] else "no such card")
     elif what == "cmd":
         print("result %#x status %#x" % command(sym, num(rest[0]),
                                                 *[num(x) for x in rest[1:]]))

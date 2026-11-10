@@ -18,6 +18,30 @@ volatile STACK_STATS stack_stats;
 static u8 reply[ETH_FRAME_MAX] __attribute__((aligned(4)));
 static u8 peer_mac[ETH_ALEN];
 
+/* The card it runs on: the uplink (standalone mode), or one taken for it beside xnet's
+ * (stack_take), which then keeps its own address and frames. */
+static NET_DEV *own_dev;
+
+static u32 tx(const u8 *frame, u32 length)
+{
+    return own_dev ? net_dev_tx(own_dev, frame, length) : net_tx(frame, length);
+}
+
+static u32 tx_space(void)
+{
+    return own_dev ? net_dev_tx_space(own_dev) : net_tx_space();
+}
+
+static u32 link_up(void)
+{
+    return own_dev ? own_dev->st->link : net_link_up();
+}
+
+static const u8 *own_mac(void)
+{
+    return own_dev ? own_dev->mac : net_mac;
+}
+
 static u32 rd16(const u8 *p)
 {
     return ((u32)p[0] << 8) | p[1];
@@ -75,7 +99,7 @@ static void learn_peer(const u8 *mac, u32 ip)
 static void eth_reply(const u8 *frame, u32 type)
 {
     copy(reply, frame + 6, ETH_ALEN);
-    copy(reply + 6, net_mac, ETH_ALEN);
+    copy(reply + 6, own_mac(), ETH_ALEN);
     wr16(reply + 12, type);
 }
 
@@ -95,10 +119,10 @@ static void arp_input(const u8 *frame, u32 length)
     eth_reply(frame, ETHERTYPE_ARP);
     copy(reply + ETH_HLEN, arp, 6);             /* htype, ptype, hlen, plen */
     wr16(reply + ETH_HLEN + 6, 2);              /* reply */
-    copy(reply + ETH_HLEN + 8, net_mac, ETH_ALEN);
+    copy(reply + ETH_HLEN + 8, own_mac(), ETH_ALEN);
     wr32(reply + ETH_HLEN + 14, stack_ip);
     copy(reply + ETH_HLEN + 18, arp + 8, 10);   /* their sha and spa */
-    if (net_tx(reply, ETH_HLEN + 28))
+    if (tx(reply, ETH_HLEN + 28))
         stack_stats.arp_replies++;
 }
 
@@ -151,7 +175,7 @@ static void ip_input(const u8 *frame, u32 length)
         wr16(reply + ETH_HLEN + 22, 0);
         wr16(reply + ETH_HLEN + 22,
              ip_checksum(reply + ETH_HLEN + 20, total - ihl, 0));
-        if (net_tx(reply, n))
+        if (tx(reply, n))
             stack_stats.icmp_replies++;
         return;
     }
@@ -174,7 +198,7 @@ static void ip_input(const u8 *frame, u32 length)
             wr16(reply + ETH_HLEN + 20, port);          /* swap the ports */
             wr16(reply + ETH_HLEN + 22, rd16(udp));
             wr16(reply + ETH_HLEN + 26, 0);             /* no UDP checksum */
-            if (net_tx(reply, n))
+            if (tx(reply, n))
                 stack_stats.udp_echo++;
         }
     }
@@ -216,22 +240,22 @@ static void blast_fill(void)
     for (;;) {
         if (__sync_lock_test_and_set(&blast_filling, 1))
             return;
-        while (blast_left && net_tx_space()) {
+        while (blast_left && tx_space()) {
             wr32(udp + 8, blast_seq);           /* sequence number, for loss */
             wr16(ip + 4, blast_seq);
             wr16(ip + 10, 0);
             wr16(ip + 10, ip_checksum(ip, 20, 0));
-            if (!net_tx(blast_frame, blast_length))
+            if (!tx(blast_frame, blast_length))
                 break;
             blast_seq = blast_seq + 1;
             blast_left = blast_left - 1;
             stack_stats.blast_sent = blast_seq;
         }
         __sync_lock_release(&blast_filling);
-        if (!blast_left || !net_tx_space() || !net_link_up())
+        if (!blast_left || !tx_space() || !link_up())
             break;
     }
-    if (!blast_left || !net_link_up()) {
+    if (!blast_left || !link_up()) {
         net_tx_idle = 0;
         stack_stats.blast_busy = 0;
     }
@@ -257,12 +281,12 @@ u32 stack_blast(u32 count, u32 payload, u32 port)
 
     if (payload > ETH_FRAME_MAX - ETH_HLEN - 28)
         payload = ETH_FRAME_MAX - ETH_HLEN - 28;
-    if (!stack_stats.peer_ip || !net_link_up())
+    if (!stack_stats.peer_ip || !link_up())
         return 0;
     total = 20 + 8 + payload;
 
     copy(blast_frame, peer_mac, ETH_ALEN);
-    copy(blast_frame + 6, net_mac, ETH_ALEN);
+    copy(blast_frame + 6, own_mac(), ETH_ALEN);
     wr16(blast_frame + 12, ETHERTYPE_IP);
     ip[0] = 0x45;
     ip[1] = 0;
@@ -285,7 +309,43 @@ u32 stack_blast(u32 count, u32 payload, u32 port)
     stack_stats.blast_busy = 1;
     blast_left = count;
     mem_sync();
-    net_tx_idle = blast_fill;
+    if (!own_dev)
+        net_tx_idle = blast_fill;
     blast_fill();
     return 0;
+}
+
+static void take_rx(void *context, const u8 *frame, u32 length)
+{
+    (void)context;
+    stack_input(frame, length);
+}
+
+static void take_link(void *context, u32 up)
+{
+    (void)context;
+    (void)up;
+}
+
+static void take_idle(void *context)
+{
+    (void)context;
+    if (blast_left)
+        blast_fill();
+}
+
+static const NET_CLAIM take_claim = { 0, take_rx, take_link, take_idle };
+
+u32 stack_take(u32 slot, u32 ip)
+{
+    NET_DEV *nd;
+
+    if (slot >= NET_MAX || !net_devs[slot].drv || !net_devs[slot].st->ready)
+        return 0;
+    nd = &net_devs[slot];
+    stack_ip = ip;
+    own_dev = nd;
+    mem_sync();
+    net_claim(nd, &take_claim);
+    return 1;
 }

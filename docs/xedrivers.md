@@ -148,6 +148,27 @@ bench tcp` now counts one window, up at the console). The RTL8156B, counted the 
 wrong way, read 344 Mbit/s where the console received 220. Counted right, the
 RTL8822BU carries 205 Mbit/s (25.6 MB/s) in at 32 streams.
 
+
+### Two cards at once
+
+The console's USB ports are on two host controllers, and each has its own ceiling
+(2026-11-11, bench=stack: xnet's TCP into one card, 4 streams, while the bench's UDP
+stack on a second card, `xectl.py stack SLOT IP`, counts what a paced sender gives it;
+the PC's Ethernet flow control off, or the pause frames one card causes hold the PC's
+whole port and the second card starves):
+
+| TCP into (xnet) | UDP into (stack) | Controllers | TCP | UDP | Sum |
+|---|---|---|---|---|---|
+| RTL8156B | none | | 186 Mbit/s (23.3 MB/s) | | 186 Mbit/s (23.3 MB/s) |
+| RTL8156B | RTL8156B | two | 187 Mbit/s (23.4 MB/s) | 188 Mbit/s (23.5 MB/s) | 375 Mbit/s (46.9 MB/s) |
+| RTL8156B | AIC8800 | two | 186 Mbit/s (23.3 MB/s) | 173 Mbit/s (21.6 MB/s) | 359 Mbit/s (44.9 MB/s) |
+| RTL8156B | RTL8822BU | one | 157 Mbit/s (19.6 MB/s) | 116 Mbit/s (14.5 MB/s) | 273 Mbit/s (34.1 MB/s) |
+
+Alone, the stack counted 188 Mbit/s (23.5 MB/s) on the RTL8156B, 173 (21.7) on the AIC8800
+and 235 (29.4) on the RTL8822BU. So a second card on the other controller nearly doubles
+what comes in, and on the same controller the two share about 34 MB/s. The UDP side has
+no xnet, TCP or disk behind it: what two TCP paths through xnet cost is not in these figures.
+
 ### The kernel's USB stack
 
 Read off xboxkrnl 21256 (retail, with its PDB) and found the same in the
