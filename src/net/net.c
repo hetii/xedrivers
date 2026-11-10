@@ -327,6 +327,7 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
         nd->st->rx_not_uplink++;
         return;
     }
+    second_uplink_rx(frame, length);
     if (net_rx) {
         PROF_START(t);
         net_rx(frame, length);

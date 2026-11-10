@@ -64,15 +64,18 @@ static u32 same(const SECOND_FLOW *f, u32 peer_ip, u32 ports, u32 proto)
     return f->proto == proto && f->peer_ip == peer_ip && f->ports == ports;
 }
 
-/* Two places a flow can be; a new one takes the free one, else the first (the oldest there
- * is not known and need not be: a flow thrown out is learned again by its next frame in). */
-void second_learn(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto, const u8 *peer_mac)
+/* Two places a flow can be. A new one takes the free one, else that of the flow unused
+ * longer: thrown out, a flow is learned again by its next frame in. */
+void second_learn(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto, const u8 *peer_mac,
+                  u32 now)
 {
     u32 b = bucket(peer_ip, ports, proto), i;
     SECOND_FLOW *f = &t->flow[b], *g = &t->flow[(b + 1) & (SECOND_FLOWS - 1)];
 
     if (!same(f, peer_ip, ports, proto)) {
-        if (same(g, peer_ip, ports, proto) || (f->proto && !g->proto))
+        if (same(g, peer_ip, ports, proto))
+            f = g;
+        else if (f->proto && (!g->proto || now - g->seen > now - f->seen))
             f = g;
     }
     if (!same(f, peer_ip, ports, proto)) {
@@ -83,17 +86,58 @@ void second_learn(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto, const u8 *
     }
     for (i = 0; i < ETH_ALEN; i++)
         f->peer_mac[i] = peer_mac[i];
+    f->seen = now;
     f->proto = proto;
 }
 
-const SECOND_FLOW *second_find(const SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto)
+static SECOND_FLOW *place(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto)
 {
     u32 b = bucket(peer_ip, ports, proto);
-    const SECOND_FLOW *f = &t->flow[b], *g = &t->flow[(b + 1) & (SECOND_FLOWS - 1)];
+    SECOND_FLOW *f = &t->flow[b], *g = &t->flow[(b + 1) & (SECOND_FLOWS - 1)];
 
     if (same(f, peer_ip, ports, proto))
         return f;
     return same(g, peer_ip, ports, proto) ? g : 0;
+}
+
+const SECOND_FLOW *second_find(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto, u32 now)
+{
+    SECOND_FLOW *f = place(t, peer_ip, ports, proto);
+
+    if (!f)
+        return 0;
+    if (proto != PROTO_TCP && now - f->seen > SECOND_IDLE) {
+        f->proto = 0;
+        return 0;
+    }
+    f->seen = now;
+    return f;
+}
+
+u32 second_forget(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto)
+{
+    SECOND_FLOW *f = place(t, peer_ip, ports, proto);
+
+    if (!f)
+        return 0;
+    f->proto = 0;
+    return 1;
+}
+
+u32 second_refused(SECOND_STUCK *s, u32 now, u32 hold, u32 quit)
+{
+    if (!s->refusing) {
+        s->refusing = 1;
+        s->since = now;
+    }
+    if (now - s->since >= quit)
+        return SECOND_QUIT;
+    return now - s->since >= hold ? SECOND_DROP : SECOND_WAIT;
+}
+
+void second_took(SECOND_STUCK *s)
+{
+    s->refusing = 0;
 }
 
 void second_rewrite(u8 *frame, u32 dest, u32 ip_new, const u8 *mac)
@@ -126,6 +170,43 @@ volatile SECOND_STATS second_stats;
 
 static SECOND_TABLE table;
 NET_DEV *volatile second_dev;
+
+/* A card that stops taking frames -- its link there, its ring never emptied -- must not hold
+ * xnet's queue, which is the uplink's as well: a frame it refuses goes back to the queue only
+ * while that has lasted under 200 ms (a busy card takes the next within one), is dropped after,
+ * as the wire would have lost it, and after 2 s the card is given up until its link has been
+ * down. */
+#define TB_PER_MS       49875u
+#define HOLD_TICKS      (200u * TB_PER_MS)
+#define QUIT_TICKS      (2000u * TB_PER_MS)
+
+static SECOND_STUCK stuck;
+static NET_DEV *volatile gave_up_on;
+
+static u32 tb(void)
+{
+#if defined(__powerpc__)
+    u32 t;
+
+    __asm__ volatile("mftb %0" : "=r"(t));
+    return t;
+#else
+    return 0;
+#endif
+}
+
+/* The table's tick: 2^26 of the time base's, 1.35 s. */
+static u32 table_now(void)
+{
+#if defined(__powerpc__)
+    u32 hi, lo;
+
+    __asm__ volatile("mftbu %0\n\tmftb %1" : "=&r"(hi), "=r"(lo));
+    return hi << 6 | lo >> 26;
+#else
+    return 0;
+#endif
+}
 static u8 arp_reply[ETH_HLEN + 28] __attribute__((aligned(4)));
 
 /* "a.b.c.d", host order; 0 for anything else. */
@@ -168,17 +249,22 @@ void second_choose(void)
 
     if (!second_stats.ip)
         return;
+    if (gave_up_on && (!gave_up_on->st->ready || !gave_up_on->st->link))
+        gave_up_on = 0;                 /* its link has been down: it may be tried again */
     for (i = 0; active && i < NET_MAX; i++) {
         NET_DEV *nd = &net_devs[i];
 
         if (i + 1 == active || !nd->drv || nd->drv->kind == XE_KIND_AUDIO || nd->claim ||
-            !nd->st->ready || !nd->st->link)
+            !nd->st->ready || !nd->st->link || nd == gave_up_on)
             continue;
         if (!best || ((nd->st->where ^ net_devs[active - 1].st->where) & 3u) >
                      ((best->st->where ^ net_devs[active - 1].st->where) & 3u))
             best = nd;
     }
+    /* The table is kept across a change: a connection whose card went and came back, or
+     * whose address another card now answers for, goes on with its next frame in. */
     if (best != second_dev) {
+        second_took(&stuck);
         second_dev = best;
         second_stats.slot = best ? (u32)(best - net_devs) + 1 : 0;
         mem_sync();
@@ -228,7 +314,7 @@ u32 second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length)
         second_stats.no_xnet_ip++;
         return 1;
     }
-    second_learn(&table, peer, ports, proto, frame + ETH_ALEN);
+    second_learn(&table, peer, ports, proto, frame + ETH_ALEN, table_now());
     second_stats.flows = table.learned;
     mem_sync();
     /* in place: the frame is the card's receive buffer, ours until we return */
@@ -250,7 +336,7 @@ u32 second_tx_slow(const u8 *frame, u32 length, u32 *sent)
     if (source != second_stats.ip) {
         if (source && source != second_stats.xnet_ip)
             second_stats.xnet_ip = source;
-        f = second_find(&table, peer, ports, proto);
+        f = second_find(&table, peer, ports, proto, table_now());
         if (!f)
             return 0;
         /* in place, in xnet's own packet: a retransmission of it comes with our address
@@ -265,11 +351,45 @@ u32 second_tx_slow(const u8 *frame, u32 length, u32 *sent)
         }
     }
     *sent = nd->st->ready && net_dev_tx_space(nd) ? net_dev_tx(nd, frame, length) : 0;
-    if (*sent)
+    if (*sent) {
+        second_took(&stuck);
         second_stats.out++;
-    else
+        return 1;
+    }
+    switch (second_refused(&stuck, tb(), HOLD_TICKS, QUIT_TICKS)) {
+    case SECOND_WAIT:
         second_stats.out_refused++;
-    return 1;
+        return 1;
+    case SECOND_QUIT:
+        gave_up_on = nd;
+        second_dev = 0;
+        second_stats.slot = 0;
+        second_stats.gave_up++;
+        mem_sync();
+        second_took(&stuck);
+        /* fall through */
+    default:
+        second_stats.out_dropped++;
+        *sent = 1;                      /* not xnet's to send again: TCP does that */
+        return 1;
+    }
+}
+
+/* A SYN without ACK from the uplink: the peer opens a connection to the console's own
+ * address. If the table has those addresses and ports from an earlier one by the second
+ * way, the answers would leave by the wrong card. */
+void second_uplink_slow(const u8 *frame, u32 length)
+{
+    const u8 *ip = frame + ETH_HLEN;
+    u32 peer, ports, proto;
+
+    if (length < ETH_HLEN + 40 || rd16(frame + 12) != ETHERTYPE_IP || ip[9] != PROTO_TCP)
+        return;
+    if ((ip[(ip[0] & 0x0Fu) * 4 + 13] & 0x12u) != 0x02u)
+        return;
+    if (second_key(frame, length, 1, &peer, &ports, &proto) &&
+        second_forget(&table, peer, ports, proto))
+        second_stats.moved++;
 }
 
 #endif /* XE_MULTIPATH */

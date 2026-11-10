@@ -103,20 +103,50 @@ int main(void)
     f[14 + 9] = 1; CHECK(second_key(f, n, 1, &peer, &ports, &proto) && ports == 0 && proto == 1);
 
     /* the table */
-    CHECK(!second_find(&t, P, 1, 6));
-    second_learn(&t, P, 1, 6, peer_mac);
-    fl = second_find(&t, P, 1, 6);
+    CHECK(!second_find(&t, P, 1, 6, 0));
+    second_learn(&t, P, 1, 6, peer_mac, 0);
+    fl = second_find(&t, P, 1, 6, 0);
     CHECK(fl && !memcmp(fl->peer_mac, peer_mac, 6) && t.learned == 1);
-    second_learn(&t, P, 1, 6, mac);                     /* again: the way back follows */
-    fl = second_find(&t, P, 1, 6);
+    second_learn(&t, P, 1, 6, mac, 1);                  /* again: the way back follows */
+    fl = second_find(&t, P, 1, 6, 1);
     CHECK(fl && !memcmp(fl->peer_mac, mac, 6) && t.learned == 1);
-    CHECK(!second_find(&t, P, 1, 17) && !second_find(&t, P, 2, 6) && !second_find(&t, P + 1, 1, 6));
-    for (i = 0; i < 1000; i++)                          /* far more than it holds */
-        second_learn(&t, P + i, i, 6, peer_mac);
-    CHECK(second_find(&t, P + 999, 999, 6));
+    CHECK(!second_find(&t, P, 1, 17, 1) && !second_find(&t, P, 2, 6, 1) &&
+          !second_find(&t, P + 1, 1, 6, 1));
+    /* a TCP connection may be idle for ever; anything else is forgotten */
+    CHECK(second_find(&t, P, 1, 6, 1000000));
+    second_learn(&t, P, 7, 17, peer_mac, 10);
+    CHECK(second_find(&t, P, 7, 17, 10 + SECOND_IDLE));
+    CHECK(!second_find(&t, P, 7, 17, 10 + 2 * SECOND_IDLE + 1));
+    CHECK(!second_find(&t, P, 7, 17, 11));              /* and stays forgotten */
+    /* forgotten on demand */
+    CHECK(second_forget(&t, P, 1, 6) && !second_find(&t, P, 1, 6, 1) && !second_forget(&t, P, 1, 6));
+    /* far more than it holds: the newest are there, and the one in use all along is kept */
+    memset(&t, 0, sizeof(t));
+    second_learn(&t, P, 4242, 6, peer_mac, 0);
+    for (i = 0; i < 1000; i++) {
+        second_learn(&t, P + 1 + i, i, 6, peer_mac, 1 + i);
+        CHECK(second_find(&t, P, 4242, 6, 1 + i));      /* used now: never the older of two */
+    }
+    CHECK(second_find(&t, P + 1000, 999, 6, 1001));
     for (i = 0, n = 0; i < 1000; i++)
-        n += second_find(&t, P + i, i, 6) != 0;
-    CHECK(n > 16 && n <= SECOND_FLOWS);
+        n += second_find(&t, P + 1 + i, i, 6, 1001) != 0;
+    CHECK(n > SECOND_FLOWS / 2 && n < SECOND_FLOWS);
+
+    /* a card that takes nothing */
+    {
+        SECOND_STUCK st = { 0, 0 };
+
+        CHECK(second_refused(&st, 0xFFFFFF00u, 100, 1000) == SECOND_WAIT);  /* the clock wraps */
+        CHECK(second_refused(&st, 0xFFFFFF00u + 99, 100, 1000) == SECOND_WAIT);
+        CHECK(second_refused(&st, 0xFFFFFF00u + 100, 100, 1000) == SECOND_DROP);
+        CHECK(second_refused(&st, 0xFFFFFF00u + 999, 100, 1000) == SECOND_DROP);
+        CHECK(second_refused(&st, 0xFFFFFF00u + 1000, 100, 1000) == SECOND_QUIT);
+        second_took(&st);                                   /* one frame taken: from the start */
+        CHECK(second_refused(&st, 5000, 100, 1000) == SECOND_WAIT);
+        CHECK(second_refused(&st, 5050, 100, 1000) == SECOND_WAIT);
+        second_took(&st);
+        CHECK(second_refused(&st, 5200, 100, 1000) == SECOND_WAIT);
+    }
 
     printf(fails ? "%d second tests FAILED\n" : "all second tests passed\n", fails);
     return fails != 0;

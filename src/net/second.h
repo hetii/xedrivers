@@ -30,16 +30,21 @@ typedef struct {
     u32 flows;              /* learned */
     u32 not_ours;           /* on the second card, for neither address */
     u32 no_xnet_ip;         /* came before xnet had said its address */
+    u32 out_dropped;        /* the card took nothing for 200 ms: not left in xnet's queue */
+    u32 gave_up;            /* ... nor for 2 s: the second way given up */
+    u32 moved;              /* a flow opened anew by the uplink: no longer the second way's */
 } SECOND_STATS;
 
 /* --- pure (tests/net/test_second.c) ----------------------------------------- */
 
-#define SECOND_FLOWS 64u    /* a power of two */
+#define SECOND_FLOWS 128u   /* a power of two */
+#define SECOND_IDLE  45u    /* table ticks (1.35 s each) a flow without a connection is kept */
 
 typedef struct {
     u32 peer_ip;
     u32 ports;              /* peer's << 16 | ours */
     u32 proto;              /* 0: free */
+    u32 seen;               /* table tick of its last frame, either way */
     u8  peer_mac[ETH_ALEN]; /* where its frames came from: the way back */
 } SECOND_FLOW;
 
@@ -47,6 +52,16 @@ typedef struct {
     SECOND_FLOW flow[SECOND_FLOWS];
     u32 learned;
 } SECOND_TABLE;
+
+/* A card that takes nothing: how long since, and what to do with the frame it refused. */
+typedef struct {
+    u32 refusing;           /* since `since`, without one frame taken in between */
+    u32 since;
+} SECOND_STUCK;
+
+#define SECOND_WAIT 0u      /* back to xnet's queue: the card is only busy */
+#define SECOND_DROP 1u      /* gone, as lost on the wire: the queue is the uplink's too */
+#define SECOND_QUIT 2u      /* and the second way is given up */
 
 /* The checksum at `sum` (big endian) after 32 bits of what it covers changed. */
 void second_fix(u8 *sum, u32 was, u32 is);
@@ -56,8 +71,19 @@ void second_fix(u8 *sum, u32 was, u32 is);
  * came in (the peer is its source). */
 u32  second_key(const u8 *frame, u32 length, u32 in, u32 *peer_ip, u32 *ports, u32 *proto);
 
-void second_learn(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto, const u8 *peer_mac);
-const SECOND_FLOW *second_find(const SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto);
+/* `now` is a tick of any length that SECOND_IDLE is counted in. A table that is full where
+ * a new flow belongs gives it the place of the one unused longer. */
+void second_learn(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto, const u8 *peer_mac,
+                  u32 now);
+/* The flow, used now; 0 for none, and for one that is no TCP connection and was idle for
+ * SECOND_IDLE (a TCP connection may be idle for as long as it likes). */
+const SECOND_FLOW *second_find(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto, u32 now);
+u32  second_forget(SECOND_TABLE *t, u32 peer_ip, u32 ports, u32 proto);
+
+/* The card had no room at `now`: SECOND_WAIT until that has lasted `hold`, SECOND_DROP
+ * after, SECOND_QUIT once it has lasted `quit`. A frame it takes ends it (second_took). */
+u32  second_refused(SECOND_STUCK *s, u32 now, u32 hold, u32 quit);
+void second_took(SECOND_STUCK *s);
 
 /* The frame's source or destination address (`dest`) and Ethernet address rewritten, the IP
  * and TCP/UDP checksums kept right. */
@@ -78,6 +104,7 @@ void second_init(void);                         /* thread: the ini */
 void second_choose(void);
 u32  second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length);
 u32  second_tx_slow(const u8 *frame, u32 length, u32 *sent);
+void second_uplink_slow(const u8 *frame, u32 length);
 
 /* A frame from a card that is not the uplink: 1 if it was the second way's. DISPATCH. */
 static inline u32 second_rx(NET_DEV *nd, const u8 *frame, u32 length)
@@ -89,6 +116,14 @@ static inline u32 second_rx(NET_DEV *nd, const u8 *frame, u32 length)
 static inline u32 second_tx(const u8 *frame, u32 length, u32 *sent)
 {
     return second_dev ? second_tx_slow(frame, length, sent) : 0;
+}
+
+/* A frame from the uplink, before xnet has it: a connection opened anew by that way is
+ * not the second way's any more, whatever the table still says of its addresses. */
+static inline void second_uplink_rx(const u8 *frame, u32 length)
+{
+    if (second_dev)
+        second_uplink_slow(frame, length);
 }
 
 /* Its completions wake xnet's queue too. */
@@ -104,6 +139,7 @@ static inline u32  second_rx(NET_DEV *nd, const u8 *frame, u32 length)
 static inline u32  second_tx(const u8 *frame, u32 length, u32 *sent)
 { (void)frame; (void)length; (void)sent; return 0; }
 static inline u32  second_is(const NET_DEV *nd) { (void)nd; return 0; }
+static inline void second_uplink_rx(const u8 *frame, u32 length) { (void)frame; (void)length; }
 #endif
 
 #endif /* XE_SECOND_H */
