@@ -220,6 +220,29 @@ Ethernet card, a USB Wi-Fi card, then the onboard port.
 While a cable or a phone is the uplink, a Wi-Fi card joins its network on its own address,
 not the console's: two devices with one address on one network take each other's traffic.
 
+### Two cards at once (multipath=1)
+
+Built only with `make multipath=1`; a plain build has none of it.
+
+- `second_ip = 192.168.1.211` gives a second card (one that is not the uplink, on the other
+  USB host controller when there is one) an address of its own on the network. Without the
+  key nothing is done.
+
+What a client sends to that address is handed to the console's network stack as if it had
+come for the console's own address, and the answers leave by the second card. The console's
+servers (FTP, NFS, XBDM) need not know. A client that opens connections to both addresses
+uses both cards: each USB host controller has its own ceiling, so two cards on the front
+and the back ports carry nearly twice one.
+
+| 4 TCP streams | one address | both addresses |
+|---|---|---|
+| into the console | 186 Mbit/s (23.3 MB/s) | 349 Mbit/s (43.6 MB/s) |
+| out of the console | 175 Mbit/s (21.8 MB/s) | 343 Mbit/s (42.9 MB/s) |
+
+Two RTL8156B, 2026-11-11. Limits: the address is static (no DHCP for it); the client has to
+use both addresses itself (two FTP sessions, two mounts); only what a client opens to the
+second address goes that way, nothing the console opens.
+
 ### Wi-Fi
 
 | Key | Default | What it does |
