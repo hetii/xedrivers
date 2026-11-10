@@ -12,6 +12,7 @@
 #include "xnet.h"
 #include "bench.h"
 #include "prof.h"
+#include "file.h"
 
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
@@ -98,6 +99,23 @@ static u32 socket_rank(const NET_DEV *nd)
     return (where & 1u) << 3 | ((where >> 2) & 7u);
 }
 
+/* `uplink =` in xedrivers.ini, a driver's name (rtl8156, rtw8822b, aic8800, ...): the card
+ * to use whenever it has a link, whatever the others are; without it the order below. Read
+ * once (net_layer_init). */
+static char uplink_wanted[12];
+static u32 steal_hold;                  /* worker ticks the wanted card leaves the address be */
+
+static u32 wanted(const NET_DEV *nd)
+{
+    const char *a = uplink_wanted, *b = nd->drv ? nd->drv->name : "";
+
+    if (!*a)
+        return 0;
+    while (*a && *a == *b)
+        a++, b++;
+    return *a == *b;
+}
+
 /* 1 if `a` should be the uplink rather than `b` (both with a link up). */
 static NET_DEV *console_mac_owner;
 volatile u32 net_console_mac_handovers;
@@ -128,6 +146,8 @@ static void owner_watch(void)
 {
     u32 i;
 
+    if (steal_hold)
+        steal_hold--;
     if (!console_mac_owner || console_mac_owner->st->link) {
         owner_unlinked = 0;
         return;
@@ -141,23 +161,57 @@ static void owner_watch(void)
             nd->st->ready && nd->st->link) {
             console_mac_owner = 0;
             owner_unlinked = 0;
+            steal_hold = 2 * OWNER_UNLINKED_TICKS;
             net_console_mac_handovers++;
             return;
         }
     }
 }
 
+/* A cable or a phone with a link is the uplink before any wireless card (better), and it
+ * carries the console's address. A wireless card joined on that address too would take it
+ * in the network's forwarding tables with every frame it sends, and what is meant for the
+ * console would go to a card whose frames are dropped: with an RTL8156B and an RTL8822BU
+ * on one network the console answered for 5 s after a boot and then no more (2026-11-11;
+ * the station removed at the access point, it answered again within 3 s). */
+static u32 cable_up(void)
+{
+    u32 i;
+
+    for (i = 0; i < NET_MAX; i++) {
+        const NET_DEV *nd = &net_devs[i];
+
+        if (nd->drv && nd->drv->kind > XE_KIND_WIFI && nd->drv->kind != XE_KIND_AUDIO &&
+            nd->st->ready && nd->st->link && !nd->claim)
+            return 1;
+    }
+    return 0;
+}
+
 const u8 *net_join_mac(NET_DEV *nd)
 {
     if (!net_console_mac_known)
         return nd->mac;
-    if (!console_mac_owner || console_mac_owner == nd)
+    if (cable_up() && !wanted(nd)) {
+        if (console_mac_owner == nd)
+            console_mac_owner = 0;
+        return nd->mac;                 /* its own, until the cable goes */
+    }
+    if (!console_mac_owner || console_mac_owner == nd) {
         console_mac_owner = nd;
+    } else if (wanted(nd) && !wanted(console_mac_owner) && !steal_hold) {
+        console_mac_owner = nd;         /* the other card's bridge sees it and joins anew */
+        net_console_mac_handovers++;
+    }
     return console_mac_owner == nd ? net_console_mac : nd->mac;
 }
 
 static u32 better(const NET_DEV *a, const NET_DEV *b, const NET_DEV *current)
 {
+    /* a wireless card not on the console's address cannot carry xnet, wanted or not */
+    if (wanted(a) != wanted(b) &&
+        !((wanted(a) ? a : b)->drv->kind == XE_KIND_WIFI && (wanted(a) ? a : b) != console_mac_owner))
+        return wanted(a);
     if (a->drv->kind != b->drv->kind)
         return a->drv->kind > b->drv->kind;
     /* two wireless cards: xnet sends from the console's address, which only one joined on */
@@ -506,6 +560,7 @@ static u32 set_mode(u32 mode)
 void net_layer_init(void)
 {
     xnet_title_pool();                  /* before a title's xnet starts */
+    file_setting("xedrivers.ini", "uplink", uplink_wanted, sizeof(uplink_wanted));
     set_mode(xe_config.mode == XE_MODE_XNET ? XE_MODE_DROP : xe_config.mode);
     xe_config.mode = XE_MODE;
 }

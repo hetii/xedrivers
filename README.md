@@ -208,6 +208,18 @@ wifi_ssid = home_5g, home_2.4g
 wifi_pass = passphrase
 ```
 
+### Which card
+
+With several cards the uplink is chosen by kind, then by link speed: a phone, a USB
+Ethernet card, a USB Wi-Fi card, then the onboard port.
+
+- `uplink = rtw8822b` (a driver's name: `rtl8156`, `cdc`, `rndis`, `rtw8822b`, `aic8800`,
+  ...) uses that card whenever it has a link, whatever else is plugged in. Without a link
+  the usual order applies.
+
+While a cable or a phone is the uplink, a Wi-Fi card joins its network on its own address,
+not the console's: two devices with one address on one network take each other's traffic.
+
 ### Wi-Fi
 
 | Key | Default | What it does |
