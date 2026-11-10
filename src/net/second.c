@@ -125,7 +125,7 @@ void second_rewrite(u8 *frame, u32 dest, u32 ip_new, const u8 *mac)
 volatile SECOND_STATS second_stats;
 
 static SECOND_TABLE table;
-static NET_DEV *volatile dev;
+NET_DEV *volatile second_dev;
 static u8 arp_reply[ETH_HLEN + 28] __attribute__((aligned(4)));
 
 /* "a.b.c.d", host order; 0 for anything else. */
@@ -160,8 +160,8 @@ void second_init(void)
 }
 
 /* The card: one with a link that is neither the uplink nor someone's, on the other host
- * controller if there is one (its own ceiling), else any. The worker's. */
-void second_tick(void)
+ * controller if there is one (its own ceiling), else any; none without an uplink. */
+void second_choose(void)
 {
     u32 active = net_active, i;
     NET_DEV *best = 0;
@@ -178,16 +178,11 @@ void second_tick(void)
                      ((best->st->where ^ net_devs[active - 1].st->where) & 3u))
             best = nd;
     }
-    if (best != dev) {
-        dev = best;
+    if (best != second_dev) {
+        second_dev = best;
         second_stats.slot = best ? (u32)(best - net_devs) + 1 : 0;
         mem_sync();
     }
-}
-
-u32 second_is(const NET_DEV *nd)
-{
-    return nd == dev;
 }
 
 static void arp_in(NET_DEV *nd, const u8 *frame, u32 length)
@@ -214,12 +209,12 @@ static void arp_in(NET_DEV *nd, const u8 *frame, u32 length)
         second_stats.arp_replies++;
 }
 
-u32 second_rx(NET_DEV *nd, const u8 *frame, u32 length)
+u32 second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length)
 {
     u32 peer, ports, proto;
 
-    if (nd != dev || !second_stats.ip || length < ETH_HLEN + 20)
-        return 0;
+    if (length < ETH_HLEN + 20)
+        return 1;
     if (rd16(frame + 12) == ETHERTYPE_ARP) {
         arp_in(nd, frame, length);
         return 1;
@@ -243,13 +238,13 @@ u32 second_rx(NET_DEV *nd, const u8 *frame, u32 length)
     return 1;
 }
 
-u32 second_tx(const u8 *frame, u32 length, u32 *sent)
+u32 second_tx_slow(const u8 *frame, u32 length, u32 *sent)
 {
-    NET_DEV *nd = dev;
+    NET_DEV *nd = second_dev;
     const SECOND_FLOW *f;
     u32 peer, ports, proto, source;
 
-    if (!nd || !second_stats.ip || !second_key(frame, length, 0, &peer, &ports, &proto))
+    if (!nd || !second_key(frame, length, 0, &peer, &ports, &proto))
         return 0;
     source = rd32(frame + ETH_HLEN + 12);
     if (source != second_stats.ip) {

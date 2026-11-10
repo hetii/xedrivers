@@ -243,7 +243,7 @@ static u32 switch_ticks;
 /* Pick the uplink again; on a change, tell the consumer -- xnet then asks for the
  * link and runs DHCP on whatever it is now (or the onboard port). Any IRQL up to
  * DISPATCH. */
-static void choose(void)
+static void choose_uplink(void)
 {
     NET_DEV *current = uplink(), *best = 0;
     u32 i;
@@ -279,6 +279,14 @@ static void choose(void)
     net_active = best ? (u32)(best - net_devs) + 1 : 0;
     if (net_link_cb)
         net_link_cb(best != 0);
+}
+
+/* Whenever a link, a claim or the uplink changes: the uplink, then the second way's card
+ * (second.h), which is one of those left. */
+static void choose(void)
+{
+    choose_uplink();
+    second_choose();
 }
 
 /* --- frames and link, from the drivers -------------------------------------- */
@@ -589,7 +597,6 @@ void net_tick(void)
 {
     u32 i;
 
-    second_tick();
     if (net_switching && ++switch_ticks >= SWITCH_GAP_TICKS) {
         net_switching = 0;
         mem_sync();

@@ -68,16 +68,37 @@ void second_rewrite(u8 *frame, u32 dest, u32 ip, const u8 *mac);
 #if XE_MULTIPATH
 extern volatile SECOND_STATS second_stats;
 
+/* The second way's card, 0 while there is none (no `second_ip`, or no card left for it):
+ * what every frame is tested against, here, so that a console with one card pays a load
+ * and a compare a frame and no call. */
+extern NET_DEV *volatile second_dev;
+
 void second_init(void);                         /* thread: the ini */
-void second_tick(void);                         /* worker: which card */
+/* net.c, choose(): a link, a claim or the uplink changed. Any IRQL up to DISPATCH. */
+void second_choose(void);
+u32  second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length);
+u32  second_tx_slow(const u8 *frame, u32 length, u32 *sent);
+
 /* A frame from a card that is not the uplink: 1 if it was the second way's. DISPATCH. */
-u32  second_rx(NET_DEV *nd, const u8 *frame, u32 length);
+static inline u32 second_rx(NET_DEV *nd, const u8 *frame, u32 length)
+{
+    return nd == second_dev ? second_rx_slow(nd, frame, length) : 0;
+}
+
 /* A frame from xnet: 1 if it went (or was refused, `*sent` 0) by the second card. */
-u32  second_tx(const u8 *frame, u32 length, u32 *sent);
-u32  second_is(const NET_DEV *nd);              /* its completions wake xnet's queue too */
+static inline u32 second_tx(const u8 *frame, u32 length, u32 *sent)
+{
+    return second_dev ? second_tx_slow(frame, length, sent) : 0;
+}
+
+/* Its completions wake xnet's queue too. */
+static inline u32 second_is(const NET_DEV *nd)
+{
+    return nd == second_dev;
+}
 #else
 static inline void second_init(void) { }
-static inline void second_tick(void) { }
+static inline void second_choose(void) { }
 static inline u32  second_rx(NET_DEV *nd, const u8 *frame, u32 length)
 { (void)nd; (void)frame; (void)length; return 0; }
 static inline u32  second_tx(const u8 *frame, u32 length, u32 *sent)
