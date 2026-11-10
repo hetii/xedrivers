@@ -3,6 +3,10 @@
 
 #include "second.h"
 
+/* Nothing of this file in a plugin built without multipath=1; the host tests take the
+ * pure half always. */
+#if XE_MULTIPATH || !defined(__powerpc__)
+
 #define ETHERTYPE_IP  0x0800u
 #define ETHERTYPE_ARP 0x0806u
 #define PROTO_ICMP    1u
@@ -274,3 +278,5 @@ u32 second_tx(const u8 *frame, u32 length, u32 *sent)
 }
 
 #endif /* XE_MULTIPATH */
+
+#endif /* XE_MULTIPATH || host */
