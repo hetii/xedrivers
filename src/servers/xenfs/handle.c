@@ -46,13 +46,20 @@ s32 handle_init(u32 wanted)
     count = wanted ? wanted : HANDLES_DEFAULT;
     if (count < 16)
         count = 16;
-    nodes = (NODE *)srv_alloc(count * sizeof(NODE));
-    buckets = (u32 *)srv_alloc(count * sizeof(u32));
-    if (!nodes || !buckets) {
+    /* The table is 80 bytes a name from the pool, 1.3 MB by default: with four cards'
+     * drivers loaded the pool had no such piece and the server never started (2026-11-11).
+     * So half as many, and half again, down to 256, before giving up. */
+    for (;;) {
+        nodes = (NODE *)srv_alloc(count * sizeof(NODE));
+        buckets = (u32 *)srv_alloc(count * sizeof(u32));
+        if (nodes && buckets)
+            break;
         srv_free(nodes);
         srv_free(buckets);
         nodes = 0;
-        return -1;
+        if (count <= 256)
+            return -1;
+        count /= 2;
     }
     for (i = 0; i < count; i++)
         buckets[i] = NONE;
