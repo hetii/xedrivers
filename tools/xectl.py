@@ -1716,11 +1716,45 @@ def a2dp_bench(sym, seconds, record, note):
         print("      kept in %s" % os.path.relpath(A2DP_RESULTS, ROOT))
 
 
+def disk_run(sym, a):
+    """The console's hard disk with no network in the way (bench=disk): --mb in all, in
+    --files files written at once, one run for each --chunk-kb; read back, then deleted."""
+    names = ("state", "status", "files", "file_kb", "chunk_kb", "write_ms", "read_ms",
+             "slowest_ms", "written_kb", "read_kb")
+    for files in [int(x) for x in (a.files if a.files != "1,2" else "1").split(",")]:
+        for chunk in [int(x) for x in a.chunk_kb.split(",")]:
+            result, _ = command(sym, 28, a.mb, chunk, files)
+            if result:
+                raise SystemExit("disk: not started (%d)" % result)
+            deadline = time.time() + 900
+            while True:
+                time.sleep(2)
+                st = dict(zip(names, struct.unpack(">10I", read(sym["disk_stats"], 40))))
+                if st["state"] == 3:
+                    break
+                if time.time() > deadline:
+                    raise SystemExit("disk: not done in 900 s (%r)" % st)
+            for k in ("write_ms", "read_ms", "slowest_ms"):
+                st[k] = st[k] * 0.8192          # the plugin counts the system time >> 13
+            if st["status"]:
+                print("disk x%d %5d KB a call  FAILED: status %#x after %d MB" % (
+                    files, chunk, st["status"], st["written_kb"] >> 10))
+                continue
+            size = st["file_kb"] * files * 1024
+            rate = lambda ms: "%6.1f Mbit/s (%5.1f MB/s)" % (
+                size * 8 / 1e3 / max(ms, 1), size / 1e3 / max(ms, 1))
+            print("disk x%d %5d KB a call  %d MB  write %s  read %s  slowest write %d ms" % (
+                files, chunk, size >> 20, rate(st["write_ms"]), rate(st["read_ms"]),
+                st["slowest_ms"]))
+
+
 def bench(sym, argv):
     global GUARD_S
     ap = argparse.ArgumentParser(prog="xectl.py bench")
     ap.add_argument("test", choices=["tcp", "udp", "ftpdll", "xeftp", "xenfs", "mix", "sockets",
-                                     "a2dp"])
+                                     "a2dp", "disk"])
+    ap.add_argument("--chunk-kb", default="4,16,64,256,1024",
+                    help="disk: kilobytes a write, one run for each")
     ap.add_argument("which", nargs="?", default="both", choices=["down", "up", "both"])
     ap.add_argument("--streams", default="1,4")
     ap.add_argument("--seconds", type=float, default=10)
@@ -1754,6 +1788,8 @@ def bench(sym, argv):
     SECOND_HOST = a.second
     PIECES = max(1, a.pieces)
     ways = ["down", "up"] if a.which == "both" else [a.which]
+    if a.test == "disk":
+        return disk_run(sym, a)
     if a.test == "a2dp":
         a2dp_bench(sym, a.seconds, a.record, a.note)
         return

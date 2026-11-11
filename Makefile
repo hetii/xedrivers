@@ -61,7 +61,7 @@ IP_VALUE   := $(shell python3 -c "import ipaddress,sys; print(hex(int(ipaddress.
 comma      := ,
 empty      :=
 space      := $(empty) $(empty)
-BENCH_ALL  := history stack debug prof tcp trace
+BENCH_ALL  := history stack debug prof tcp trace disk
 BENCH_ASKED := $(subst $(comma), ,$(bench))
 BENCH_LIST := $(sort $(if $(filter all,$(BENCH_ASKED)),$(BENCH_ALL),$(BENCH_ASKED)))
 $(if $(filter-out $(BENCH_ALL),$(BENCH_LIST)),\
@@ -74,7 +74,8 @@ BENCH_FLAGS := -D XE_BENCH=$(if $(BENCH_LIST),1,0) \
 -D XE_BENCH_TRACE=$(call bench_on,trace) \
                -D XE_BENCH_STACK=$(call bench_on,stack) \
                -D XE_BENCH_DEBUG=$(call bench_on,debug) \
-               -D XE_PROF=$(call bench_on,prof) -D XE_TCP=$(call bench_on,tcp)
+               -D XE_PROF=$(call bench_on,prof) -D XE_TCP=$(call bench_on,tcp) \
+               -D XE_BENCH_DISK=$(call bench_on,disk)
 
 # servers= names the file servers to build in, comma-separated, each a directory of
 # src/servers/ on the platform of src/servers/common/: xenfs (NFSv3 with MOUNT and a
