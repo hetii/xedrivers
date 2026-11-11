@@ -1357,10 +1357,62 @@ def xeftp_delete(names, port, folder):
                         "ftp://%s%s:%d/" % (FTP_AUTH, HOST, port)], capture_output=True, timeout=90)
 
 
+def xeftp_shared_run(up, mb, files, port, folder):
+    """With --second: `mb` MiB as 8 pieces a session from one common list, `files` sessions
+    (every other one to the second address) each taking the next piece when its last is
+    done. So the faster way carries more, as a client that shares its work out would;
+    halves, one an address, end only when the slower way has carried its half. Bytes per
+    second over the wall clock; the pieces of an upload stay for the download."""
+    count = files * 8
+    piece = max(1, mb // count)
+    names = ["xectl-xeftp-s%d-%d.bin" % (count, i) for i in range(count)]
+    src = data_file(piece) if up else None
+    todo, lock, errors = list(names), threading.Lock(), []
+
+    def session(index):
+        host = SECOND_HOST if index % 2 else HOST
+        while True:
+            with lock:
+                if not todo or errors:
+                    return
+                name = todo.pop(0)
+            url = "ftp://%s%s:%d/%s/%s" % (FTP_AUTH, host, port, folder, name)
+            args = (["-T", src, "-w", "%{size_upload}"] if up
+                    else ["-o", os.devnull, "-w", "%{size_download}"])
+            try:
+                out = subprocess.run(["curl", "-s", "-S", "--connect-timeout", "20", "--max-time",
+                                      str(GUARD_S), *args, url], capture_output=True, text=True,
+                                     timeout=GUARD_S + 30)
+            except subprocess.TimeoutExpired:
+                errors.append("curl hung on %s" % name)
+                return
+            if out.returncode or int(out.stdout.strip() or 0) != piece << 20:
+                errors.append("%s by %s: %s" % (name, host, (out.stderr or out.stdout).strip()[:80]))
+                return
+            with lock:
+                per_host[index % 2] += 1
+
+    per_host = [0, 0]
+    begin = time.time()
+    threads = [threading.Thread(target=session, args=(i,)) for i in range(files)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    seconds = time.time() - begin
+    if errors:
+        raise BenchFailed(errors[0])
+    print("     pieces of %d MB: %d by %s, %d by %s" % (piece, per_host[0], HOST, per_host[1],
+                                                       SECOND_HOST))
+    return (piece << 20) * count / seconds
+
+
 def xeftp_run(up, mb, files, port, folder):
     """`mb` MiB in all over `files` sessions at once, to or from the disk, by xeftp
     (our server), with curl. Whole transfer, wall clock, sizes checked. Bytes per
     second. The files of an upload stay for the download."""
+    if SECOND_HOST:
+        return xeftp_shared_run(up, mb, files, port, folder)
     piece = mb // files
     names = ["xectl-xeftp-%d-%d.bin" % (files, i) for i in range(files)]
     begin = time.time()
