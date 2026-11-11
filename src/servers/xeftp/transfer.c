@@ -237,6 +237,7 @@ static void stor(SESSION *s, const char *path, u32 append)
     SRV_STAT st;
     SRV_SOCK d;
     s32 e, n, w = 0;
+    u32 have = 0;
 
     s->rest_lo = s->rest_hi = 0;
     e = srv_open(ftp_cfg.root, path, SRV_WRITE | SRV_CREATE | (append || at ? 0 : SRV_TRUNC),
@@ -258,15 +259,30 @@ static void stor(SESSION *s, const char *path, u32 append)
             n = -1;
             break;
         }
-        n = srv_recv(d, s->buf, DATA_BUF);
-        if (n <= 0)
+        /* A whole buffer a write: the stack hands over what has come, a few kilobytes
+         * at a time, and the disk takes 18.8 MB/s in writes of 4 KB, 35.4 of 16 KB and
+         * 59.9 of 64 KB (xectl bench disk). */
+        n = srv_recv(d, s->buf + have, DATA_BUF - have);
+        if (n < 0)
             break;
-        w = srv_write(f, (u32)at, (u32)(at >> 32), s->buf, (u32)n);
-        if (w != n)
+        have += (u32)n;
+        if (n > 0 && have < DATA_BUF)
+            continue;
+        if (have) {
+            w = srv_write(f, (u32)at, (u32)(at >> 32), s->buf, have);
+            if (w != (s32)have) {
+                n = 1;                      /* read below as: the write failed */
+                break;
+            }
+            at += have;
+            add(&ftp_stats.received_lo, &ftp_stats.received_hi, have);
+            have = 0;
+        }
+        if (n == 0)
             break;
-        at += (u32)n;
-        add(&ftp_stats.received_lo, &ftp_stats.received_hi, (u32)n);
     }
+    if (n < 0 && have)                      /* aborted: what came is kept, for REST */
+        srv_write(f, (u32)at, (u32)(at >> 32), s->buf, have);
     e = srv_flush(f);
     srv_fclose(f);
     srv_close(d);
