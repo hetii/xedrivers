@@ -14,6 +14,7 @@
 #include "prof.h"
 #include "file.h"
 #include "second.h"
+#include "acks.h"
 
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
@@ -291,6 +292,8 @@ static void choose(void)
 
 /* --- frames and link, from the drivers -------------------------------------- */
 
+static u32 uplink_tx(const u8 *frame, u32 length);
+
 static void set_link(NET_DEV *nd, u32 up)
 {
     if (nd->st->link == up)
@@ -328,6 +331,8 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
         return;
     }
     second_uplink_rx(frame, length);
+    if (net_ack_holding)
+        acks_flush(uplink_tx, 0);
     if (net_rx) {
         PROF_START(t);
         net_rx(frame, length);
@@ -495,15 +500,11 @@ u32 net_dev_tx_space(NET_DEV *nd)
     return nd->drv && nd->st->ready && nd->drv->tx_space(nd);
 }
 
-u32 net_tx(const u8 *frame, u32 length)
+/* The uplink's own transmit, for a held acknowledgement (acks.h) as for a frame. */
+static u32 uplink_tx(const u8 *frame, u32 length)
 {
     NET_DEV *nd = uplink();
-    u32 sent;
 
-    if (bench_tx_refused())
-        return 0;
-    if (second_tx(frame, length, &sent))
-        return sent;
     if (!nd || !nd->st->ready || !nd->usb->active || length < ETH_HLEN ||
         length > ETH_FRAME_MAX) {
         if (nd)
@@ -511,6 +512,19 @@ u32 net_tx(const u8 *frame, u32 length)
         return 0;
     }
     return nd->drv->xmit(nd, frame, length);
+}
+
+u32 net_tx(const u8 *frame, u32 length)
+{
+    u32 sent;
+
+    if (bench_tx_refused())
+        return 0;
+    if (second_tx(frame, length, &sent))
+        return sent;
+    if ((net_ack_thin > 1 || net_ack_holding) && acks_tx(frame, length, uplink_tx))
+        return 1;
+    return uplink_tx(frame, length);
 }
 
 u32 net_tx_space(void)
@@ -577,6 +591,7 @@ void net_layer_init(void)
     xnet_title_pool();                  /* before a title's xnet starts */
     file_setting("xedrivers.ini", "uplink", uplink_wanted, sizeof(uplink_wanted));
     second_init();
+    acks_init();
     set_mode(xe_config.mode == XE_MODE_XNET ? XE_MODE_DROP : xe_config.mode);
     xe_config.mode = XE_MODE;
 }
@@ -598,6 +613,8 @@ void net_tick(void)
 {
     u32 i;
 
+    if (net_ack_holding)
+        acks_flush(uplink_tx, 1);       /* nothing came in to send them by: at most a tick late */
     if (net_switching && ++switch_ticks >= SWITCH_GAP_TICKS) {
         net_switching = 0;
         mem_sync();
