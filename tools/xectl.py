@@ -78,6 +78,8 @@ MCU = {"pla": 0x0100, "usb": 0x0000}
 PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up', 'tx_wait', 'turnaround']
 
 STRUCTS = {
+    "net_win_stats": ["opened", "not_taken", "patched", "held", "released", "probed", "no_room",
+                      "dropped", "held_now", "held_most"],
     "second_stats": ["ip", "xnet_ip", "slot", "arp_replies", "in", "out", "out_refused", "flows",
                      "not_ours", "no_xnet_ip", "out_dropped", "gave_up", "moved", "announced", "queued",
                      "queued_most"],
@@ -800,6 +802,13 @@ def status(sym):
                   f["data_failed"], f["wait_failed"], f["accept_failed"],
                   f["read_failed"], f["send_failed"], f["no_thread"]))
     if ss:
+        if "net_win_stats" in sym:
+            w = read_struct(sym, "net_win_stats")
+            print("window   extra=%d KB opened=%d not_taken=%d patched=%d held=%d released=%d probed=%d "
+                  "no_room=%d dropped=%d held_now=%d (most %d)" % (
+                      struct.unpack(">I", read(sym["net_win_extra_kb"], 4))[0], w["opened"],
+                      w["not_taken"], w["patched"], w["held"], w["released"], w["probed"],
+                      w["no_room"], w["dropped"], w["held_now"], w["held_most"]))
         if "second_stats" in sym:
             sec = read_struct(sym, "second_stats")
             print("second   ip=%s xnet=%s slot=%s arp=%d in=%d out=%d refused=%d flows=%d "

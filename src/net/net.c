@@ -15,6 +15,7 @@
 #include "file.h"
 #include "second.h"
 #include "acks.h"
+#include "window.h"
 
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
@@ -332,7 +333,15 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
         return;
     }
     second_uplink_rx(frame, length);
+    net_up(frame, length);
+}
+
+/* A frame for xnet, by whichever card it came. */
+void net_up(const u8 *frame, u32 length)
+{
     net_rx_note(frame, length);
+    if (net_win_extra_kb && window_rx(frame, length))
+        return;                             /* beyond xnet's window: kept until it has room */
     if (net_rx) {
         PROF_START(t);
         net_rx(frame, length);
@@ -531,6 +540,19 @@ u32 net_tx(const u8 *frame, u32 length)
         return 0;
     /* thinned before the second way rewrites the frame: a held acknowledgement is xnet's
      * own, and takes its way out when it goes */
+    if (net_win_extra_kb) {
+        /* the window xnet states is made larger in its own frame, and put back once the
+         * card (or the held acknowledgement) has its copy: xnet may send the frame again */
+        WIN_PATCH patch;
+        u32 sent;
+
+        window_tx((u8 *)frame, length, &patch);
+        sent = ((net_ack_thin > 1 || net_ack_holding) && acks_tx(frame, length, route_tx)) ||
+               route_tx(frame, length);
+        if (patch.n)
+            win_restore((u8 *)frame, &patch);
+        return sent;
+    }
     if ((net_ack_thin > 1 || net_ack_holding) && acks_tx(frame, length, route_tx))
         return 1;
     return route_tx(frame, length);
@@ -609,6 +631,7 @@ void net_layer_init(void)
     file_setting("xedrivers.ini", "uplink", uplink_wanted, sizeof(uplink_wanted));
     second_init();
     acks_init();
+    window_init();
     set_mode(xe_config.mode == XE_MODE_XNET ? XE_MODE_DROP : xe_config.mode);
     xe_config.mode = XE_MODE;
 }
@@ -632,6 +655,8 @@ void net_tick(void)
 
     if (net_ack_holding)
         acks_flush(route_tx, 1);        /* nothing came in to send them by: at most a tick late */
+    if (net_win_extra_kb)
+        window_tick();
     if (net_switching && ++switch_ticks >= SWITCH_GAP_TICKS) {
         net_switching = 0;
         mem_sync();
