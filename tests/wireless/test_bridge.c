@@ -82,7 +82,7 @@ static void scan_done(u32 n)
 
 int main(void)
 {
-    WL_BRIDGE b;
+    static WL_BRIDGE b;            /* zeroed, as a driver's is: no device, no <driver>_ssid read */
     u32 i;
 
     wl_load_config();

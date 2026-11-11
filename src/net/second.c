@@ -378,7 +378,7 @@ u32 second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length)
  * here, rewritten in the copy (xnet's packet is left as it was), and xnet is told it went;
  * the queue empties as the card takes frames. Full, a frame is dropped as the wire would
  * drop it: TCP slows that connection, and no other. */
-#define QUEUE           64u             /* frames, a power of two: 97 KB */
+#define QUEUE           256u            /* frames, a power of two: 389 KB */
 
 static u8 queue_frame[QUEUE][ETH_FRAME_MAX] __attribute__((aligned(4)));
 static u16 queue_length[QUEUE];
