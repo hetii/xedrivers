@@ -191,6 +191,10 @@ void net_claim(NET_DEV *nd, const NET_CLAIM *claim);
 /* Queue one frame on this device rather than the uplink, and whether it has a free
  * slot: for its claimant. As net_tx and net_tx_space. */
 u32  net_dev_tx(NET_DEV *nd, const u8 *frame, u32 length);
+
+/* A frame is about to be handed to xnet, by the uplink or the second way: what the
+ * acknowledgement thinning wants to know of it (acks.h). DISPATCH. */
+void net_rx_note(const u8 *frame, u32 length);
 u32  net_dev_tx_space(NET_DEV *nd);
 
 /* DMA memory. The scratch block is allocated once and never moves -- for control

@@ -293,6 +293,7 @@ static void choose(void)
 /* --- frames and link, from the drivers -------------------------------------- */
 
 static u32 uplink_tx(const u8 *frame, u32 length);
+static u32 route_tx(const u8 *frame, u32 length);
 
 static void set_link(NET_DEV *nd, u32 up)
 {
@@ -331,10 +332,7 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
         return;
     }
     second_uplink_rx(frame, length);
-    if (net_ack_thin > 1)
-        acks_rx(frame, length);
-    if (net_ack_holding)
-        acks_flush(uplink_tx, 0);
+    net_rx_note(frame, length);
     if (net_rx) {
         PROF_START(t);
         net_rx(frame, length);
@@ -516,17 +514,33 @@ static u32 uplink_tx(const u8 *frame, u32 length)
     return nd->drv->xmit(nd, frame, length);
 }
 
-u32 net_tx(const u8 *frame, u32 length)
+/* By the second way if the frame's connection came in by it (second.h), else the uplink. */
+static u32 route_tx(const u8 *frame, u32 length)
 {
     u32 sent;
 
-    if (bench_tx_refused())
-        return 0;
     if (second_tx(frame, length, &sent))
         return sent;
-    if ((net_ack_thin > 1 || net_ack_holding) && acks_tx(frame, length, uplink_tx))
-        return 1;
     return uplink_tx(frame, length);
+}
+
+u32 net_tx(const u8 *frame, u32 length)
+{
+    if (bench_tx_refused())
+        return 0;
+    /* thinned before the second way rewrites the frame: a held acknowledgement is xnet's
+     * own, and takes its way out when it goes */
+    if ((net_ack_thin > 1 || net_ack_holding) && acks_tx(frame, length, route_tx))
+        return 1;
+    return route_tx(frame, length);
+}
+
+void net_rx_note(const u8 *frame, u32 length)
+{
+    if (net_ack_thin > 1)
+        acks_rx(frame, length);
+    if (net_ack_holding)
+        acks_flush(route_tx, 0);
 }
 
 u32 net_tx_space(void)
@@ -616,7 +630,7 @@ void net_tick(void)
     u32 i;
 
     if (net_ack_holding)
-        acks_flush(uplink_tx, 1);       /* nothing came in to send them by: at most a tick late */
+        acks_flush(route_tx, 1);        /* nothing came in to send them by: at most a tick late */
     if (net_switching && ++switch_ticks >= SWITCH_GAP_TICKS) {
         net_switching = 0;
         mem_sync();

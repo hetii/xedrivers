@@ -363,6 +363,7 @@ u32 second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length)
     /* in place: the frame is the card's receive buffer, ours until we return */
     second_rewrite((u8 *)(unsigned long)frame, 1, second_stats.xnet_ip, net_console_mac);
     second_stats.in++;
+    net_rx_note(frame, length);
     net_rx(frame, length);
     return 1;
 }
