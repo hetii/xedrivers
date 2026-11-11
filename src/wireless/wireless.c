@@ -259,18 +259,34 @@ static u32 named(const WL_BSS *b)
     return 0;
 }
 
+static u32 is_only(const WL_BSS *b, const char *only, u32 only_len)
+{
+    u32 k;
+
+    if (b->ssid_len != only_len)
+        return 0;
+    for (k = 0; k < only_len && b->ssid[k] == only[k]; k++)
+        ;
+    return k == only_len;
+}
+
 s32 wl_pick(u32 *secured)
+{
+    return wl_pick_only(secured, 0, 0);
+}
+
+s32 wl_pick_only(u32 *secured, const char *only, u32 only_len)
 {
     s32 best = -1;
     u32 i;
 
     *secured = 0;
-    if (!wl_config.count)
+    if (!wl_config.count && !only_len)
         return -1;
     for (i = 0; i < wl_stats.bss_count; i++) {
         const WL_BSS *b = &wl_bss[i];
 
-        if (!named(b))
+        if (only_len ? !is_only(b, only, only_len) : !named(b))
             continue;
         if (b->security & ~(u8)WL_SEC_WPA2) {
             *secured = 1;               /* WPA2 with a pre-shared key, or open */

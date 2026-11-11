@@ -105,6 +105,9 @@ void wl_load_config(void);
  * point. Returns its index, or -1 when it was not seen; *secured is set when it
  * was, but only with a security this driver cannot join yet. */
 s32 wl_pick(u32 *secured);
+/* The same among the access points of one network only (`only`, `only_len` bytes; 0: the
+ * networks configured): a card told its own network by `<driver>_ssid =`. */
+s32 wl_pick_only(u32 *secured, const char *only, u32 only_len);
 
 /* --- a card, as the layer above it sees one ------------------------------------ */
 
@@ -138,6 +141,12 @@ typedef struct {
     u32 off;                /* left by command: no automatic join until asked */
     NET_DEV *nd;            /* the card's device, 0 in tests */
     const u8 *joined_as;    /* the address net_join_mac gave for the last join */
+    /* `<driver>_ssid =` in WL_SETTINGS (aic8800_ssid, rtw8822b_ssid): this card joins that
+     * network and no other -- two cards on two bands do not share a channel's air (on one
+     * channel two addresses gave 158 Mbit/s where one card alone gave 198). Read once. */
+    char only[WL_SSID_MAX + 1];
+    u32 only_len;
+    u32 only_read;
 } WL_BRIDGE;
 
 typedef struct WL_LINK WL_LINK;

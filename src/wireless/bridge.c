@@ -12,6 +12,8 @@
 #include "bridge.h"
 #include "wpa.h"
 #include "net.h"
+#include "file.h"
+#include "driver.h"
 
 #define RETRY_TICKS 250             /* 5 s of 20 ms worker ticks */
 
@@ -62,7 +64,18 @@ void wl_bridge_tick(WL_BRIDGE *b, const WL_CARD *card)
     }
     b->scanned = 0;
     b->wait = RETRY_TICKS;
-    pick = wl_pick(&secured);
+    if (!b->only_read && b->nd && b->nd->drv) {
+        char key[24];
+        u32 k;
+
+        for (k = 0; k < 16 && b->nd->drv->name[k]; k++)
+            key[k] = b->nd->drv->name[k];
+        key[k] = '_'; key[k + 1] = 's'; key[k + 2] = 's'; key[k + 3] = 'i'; key[k + 4] = 'd';
+        key[k + 5] = 0;
+        b->only_len = file_setting(WL_SETTINGS, key, b->only, sizeof(b->only));
+        b->only_read = 1;
+    }
+    pick = wl_pick_only(&secured, b->only, b->only_len);
     if (pick < 0) {
         wl_bridge_stats.missed++;
         if (secured)
