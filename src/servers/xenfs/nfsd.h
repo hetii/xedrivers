@@ -126,7 +126,8 @@ u32  portmap_call(CONN *c, u32 vers, u32 proc, XIN *a, XOUT *r);
  * as stale rather than as another file. Index 0 is the root's. */
 
 #define FH_SIZE         8u
-#define HANDLES_DEFAULT 16384u      /* names a client may hold handles to (80 B each) */
+#define HANDLES_DEFAULT 4096u       /* names a client may hold handles to (84 B each: 344 KB;
+                                     * 16384 took 1.4 MB of a system memory that runs out) */
 
 /* The table of `count` nodes (0: the default); 0 on success. Called again it keeps
  * what it has. */

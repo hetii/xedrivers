@@ -33,6 +33,7 @@
 #define CMD_PEEK       16u  /* [1] address, [2] 1 = little-endian (MMIO) -> word */
 #define CMD_POKE       17u  /* [1] address, [2] 1 = little-endian, [3] word */
 #define CMD_VOICE      26u  /* debug_voice: a microphone request as a title makes it */
+#define CMD_HOLD       29u  /* [1] 1 physical / 0 pool, [2] kind: debug_hold -> address */
 #define CMD_MEMORY     25u  /* debug_memory: statistics, and what can be taken */
 #define CMD_CONFIG     18u  /* [1] category, [2] setting -> size, bytes in
                              * debug_config_value */
@@ -118,6 +119,9 @@ u32 bench_command(u32 what, volatile u32 *args)
         return 1;
     case CMD_MEMORY:
         args[5] = debug_memory();
+        return 1;
+    case CMD_HOLD:
+        args[5] = debug_hold(args[1], args[2]);
         return 1;
 #endif
 #if XE_TCP

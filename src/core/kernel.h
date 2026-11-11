@@ -234,6 +234,7 @@ extern void *UsbdGetPortDeviceNode(void *hub, u32 port);
  * alignment: (flags, size, protect). Never from DllMain.
  * xerunner: dllmain-pool-allocation@1 */
 extern void *MmAllocatePhysicalMemory(u32 flags, u32 size, u32 protect);
+extern void  MmFreePhysicalMemory(u32 flags, void *base);     /* 189 */
 extern int   MmIsAddressValid(const void *address);
 
 /* (start, length): dcbst+icbi over the range, then hwsync+isync. Read off ordinal

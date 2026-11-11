@@ -9,6 +9,8 @@
  * be taken, and given back at once (at most 1024 each): pool types 2 and 1, physical
  * flags 2 and 1 (0 gave the same as 2). */
 u32 debug_memory(void);
+u32 debug_hold(u32 physical, u32 kind);
+extern volatile u32 debug_hold_at[4];
 extern volatile u32 debug_memory_stats[32];
 extern volatile u32 debug_memory_blocks[4];
 u32 debug_peek(u32 address, u32 little);

@@ -22,12 +22,6 @@
 
 #define SCRATCH_BYTES 16384
 
-/* A slot's ring block, at least: the most any driver asks (rndis, 16 receive and
- * 16 transmit buffers of 16 and 24 KB), so whichever device comes next to the slot
- * fits -- an AIC8800 leaves and comes back as another product, a phone replaces a
- * card. */
-#define NET_RINGS_MIN (16 * 16384 + 16 * 24576 + 2 * 2048)
-
 volatile NET_RX net_rx;
 volatile NET_LINK net_link_cb;
 volatile NET_TX_IDLE net_tx_idle;
@@ -424,16 +418,21 @@ void *net_dma_scratch(u32 bytes)
 }
 
 /* A slot's block stays with the slot: the next device in it, of whatever driver,
- * carves it again; NET_RINGS_MIN makes it big enough for any of them. */
+ * carves it again, and it is taken anew only when that one wants more. It is what the
+ * device asks for and no more: sized for the largest driver (659 KB) it took 467 KB of
+ * the console's system memory an RTL8156B never used, and that memory runs out
+ * (window.h). */
 u32 net_dma_begin(NET_DEV *nd, u32 total)
 {
+    if (nd->rings && total > nd->rings_size) {
+        MmFreePhysicalMemory(2, nd->rings);     /* the next device in the slot wants more */
+        nd->rings = 0;
+    }
     if (!nd->rings) {
-        u32 size = total > NET_RINGS_MIN ? total : NET_RINGS_MIN;
-
-        nd->rings = (u8 *)MmAllocatePhysicalMemory(2, size, 4);
+        nd->rings = (u8 *)MmAllocatePhysicalMemory(2, total, 4);
         if (!nd->rings)
             return 0;
-        nd->rings_size = size;
+        nd->rings_size = total;
     }
     nd->rings_used = 0;
     return total <= nd->rings_size;

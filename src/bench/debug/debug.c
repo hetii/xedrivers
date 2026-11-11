@@ -288,6 +288,24 @@ static u32 probe(u32 physical, u32 kind)
     return n;
 }
 
+/* A 64 KB block taken and kept, filled with words that say where they are: does memory
+ * of this kind outlive the program the console runs? Its address (0: none given). */
+volatile u32 debug_hold_at[4];
+
+u32 debug_hold(u32 physical, u32 kind)
+{
+    u32 *p = physical ? (u32 *)MmAllocatePhysicalMemory(kind, PROBE_BLOCK, 4)
+                      : (u32 *)ExAllocatePoolTypeWithTag(PROBE_BLOCK, 0x646C6F68u, kind);
+    u32 i;
+
+    if (!p)
+        return 0;
+    for (i = 0; i < PROBE_BLOCK / 4; i++)
+        p[i] = (u32)p + i * 4 ^ 0x5A5A5A5Au;
+    debug_hold_at[(physical ? 2 : 0) + (kind & 1)] = (u32)p;
+    return (u32)p;
+}
+
 u32 debug_memory(void)
 {
     static u32 stats[32];

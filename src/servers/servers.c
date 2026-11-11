@@ -6,7 +6,7 @@
  *   nfs        = 0 | 1          (1) serve NFS
  *   nfs_root   = * | <object path>  (*) every volume (Hdd1, Usb0...), or one directory
  *   nfs_allow  = a.b.c.d/n      (anyone) the clients let in
- *   nfs_handles = <count>       (16384) names clients may hold handles to, 80 B each
+ *   nfs_handles = <count>       (4096) names clients may hold handles to, 84 B each
  *   ftp        = 0 | 1          (1) serve FTP
  *   ftp_root   = * | <object path>  (*) every volume, or one directory, served as /
  *   ftp_port   = <port>         (21) taken from another server only once it lets go
