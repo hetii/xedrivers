@@ -69,6 +69,23 @@ int main(void)
     due = ack_due(&t, 2500, 1000, 1); CHECK(due && due->held == n && !memcmp(due->frame, f, n));
     due = ack_due(&t, 3100, 1000, 0); CHECK(due != 0);
     ack_sent(&t, due, 3100); CHECK(!t.held_now && !ack_due(&t, 9999, 1000, 1));
+    /* the peer pushed: the next acknowledgement is not kept, the one after is again */
+    {
+        static u8 in[200];
+        u32 m = tcp(in, 0xC0A801D2, 40000, 1, 0x18, 100, 0);    /* to us: ports the other way round */
+
+        in[14 + 12] = (u8)(P >> 24); in[14 + 13] = (u8)(P >> 16); in[14 + 14] = (u8)(P >> 8); in[14 + 15] = (u8)P;
+        in[14 + 20 + 0] = 0x9C; in[14 + 20 + 1] = 0x40; in[14 + 20 + 2] = 5202 >> 8; in[14 + 20 + 3] = 5202 & 255;
+        n = tcp(f, P, 5202, 901000, 0x10, 0, 0); CHECK(!ack_out(&t, f, n, 8, 5000, 1000, &flush));
+        n = tcp(f, P, 5202, 901100, 0x10, 0, 0); CHECK(ack_out(&t, f, n, 8, 5001, 1000, &flush));
+        ack_in(&t, in, m);
+        n = tcp(f, P, 5202, 901200, 0x10, 0, 0); CHECK(!ack_out(&t, f, n, 8, 5002, 1000, &flush) && !t.held_now);
+        n = tcp(f, P, 5202, 901300, 0x10, 0, 0); CHECK(ack_out(&t, f, n, 8, 5003, 1000, &flush));
+        in[14 + 20 + 13] = 0x10;                                /* no PSH: nothing changes */
+        ack_in(&t, in, m);
+        n = tcp(f, P, 5202, 901400, 0x10, 0, 0); CHECK(ack_out(&t, f, n, 8, 5004, 1000, &flush));
+        ack_sent(&t, ack_due(&t, 0, 0, 1), 5005);
+    }
     /* another connection that falls on a place holding one: that one has to go first */
     memset(&t, 0, sizeof(t));
     for (i = 0; i < 64; i++) {

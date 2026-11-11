@@ -78,6 +78,7 @@ u32 ack_out(ACK_TABLE *t, const u8 *frame, u32 length, u32 thin, u32 now, u32 ho
         f->ports = ports;
         f->last = number - 1;
         f->skipped = 0;
+        f->push = 0;
         f->sent_at = now - hold - 1;            /* its first goes at once */
     }
     if (kind == 1 || thin < 2 || number == f->last) {
@@ -90,7 +91,8 @@ u32 ack_out(ACK_TABLE *t, const u8 *frame, u32 length, u32 thin, u32 now, u32 ho
         return 0;
     }
     f->last = number;
-    if (f->skipped + 1 >= thin || now - f->sent_at > hold) {
+    if (f->push || f->skipped + 1 >= thin || now - f->sent_at > hold) {
+        f->push = 0;
         let_go(t, f);
         f->skipped = 0;
         f->sent_at = now;
@@ -105,6 +107,28 @@ u32 ack_out(ACK_TABLE *t, const u8 *frame, u32 length, u32 thin, u32 now, u32 ho
     f->held = length;
     f->skipped++;
     return 1;
+}
+
+void ack_in(ACK_TABLE *t, const u8 *frame, u32 length)
+{
+    const u8 *ip = frame + ETH_HLEN, *tcp;
+    u32 ihl, peer, ports;
+    ACK_FLOW *f;
+
+    if (length < ETH_HLEN + 40 || rd16(frame + 12) != 0x0800 || (ip[0] >> 4) != 4 ||
+        ip[9] != 6 || (rd16(ip + 6) & 0x1FFFu))
+        return;
+    ihl = (ip[0] & 0x0Fu) * 4;
+    if (ihl < 20 || length < ETH_HLEN + ihl + 20)
+        return;
+    tcp = ip + ihl;
+    if (!(tcp[13] & 0x09u))                     /* PSH or FIN */
+        return;
+    peer = rd32(ip + 12);
+    ports = rd16(tcp + 2) << 16 | rd16(tcp);    /* ours, the peer's: as on the way out */
+    f = place(t, peer, ports);
+    if (f->peer_ip == peer && f->ports == ports)
+        f->push = 1;
 }
 
 ACK_FLOW *ack_due(ACK_TABLE *t, u32 now, u32 hold, u32 force)
@@ -136,8 +160,9 @@ void ack_sent(ACK_TABLE *t, ACK_FLOW *flow, u32 now)
 #define TB_PER_US 50u           /* the time base, near enough: 49.875 MHz */
 
 volatile ACK_STATS net_ack_stats;
-volatile u32 net_ack_thin;
+volatile u32 net_ack_thin = ACK_THIN;
 volatile u32 net_ack_holding;
+volatile u32 net_ack_hold_us = ACK_HOLD_US;
 
 static ACK_TABLE table;
 static KSPIN_LOCK lock;
@@ -188,7 +213,7 @@ u32 acks_tx(const u8 *frame, u32 length, u32 (*send)(const u8 *, u32))
         return 0;
     for (;;) {
         irql = KfAcquireSpinLock(&lock);
-        kept = ack_out(&table, frame, length, thin, tb(), ACK_HOLD_US * TB_PER_US, &flush);
+        kept = ack_out(&table, frame, length, thin, tb(), net_ack_hold_us * TB_PER_US, &flush);
         if (!flush)
             break;
         send_held(flush, send, irql);           /* releases the lock */
@@ -203,11 +228,17 @@ u32 acks_tx(const u8 *frame, u32 length, u32 (*send)(const u8 *, u32))
     return kept;
 }
 
+/* No lock: one word written, and a push missed costs one acknowledgement its hold. */
+void acks_rx(const u8 *frame, u32 length)
+{
+    ack_in(&table, frame, length);
+}
+
 void acks_flush(u32 (*send)(const u8 *, u32), u32 force)
 {
     for (;;) {
         u32 irql = KfAcquireSpinLock(&lock);
-        ACK_FLOW *f = ack_due(&table, tb(), ACK_HOLD_US * TB_PER_US, force);
+        ACK_FLOW *f = ack_due(&table, tb(), net_ack_hold_us * TB_PER_US, force);
 
         if (!f) {
             KfReleaseSpinLock(&lock, irql);

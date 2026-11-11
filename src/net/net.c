@@ -331,6 +331,8 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
         return;
     }
     second_uplink_rx(frame, length);
+    if (net_ack_thin > 1)
+        acks_rx(frame, length);
     if (net_ack_holding)
         acks_flush(uplink_tx, 0);
     if (net_rx) {

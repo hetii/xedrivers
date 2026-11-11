@@ -1219,6 +1219,8 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
     more only with --accept-lower REASON -- a drop is a regression until shown
     otherwise. The file holds the current figure for each set of conditions; git
     log -p the older ones."""
+    if SECOND_HOST and "two addresses" not in test:
+        test += ", two addresses"       # another thing measured: never the one-address baseline
     if ctx.get("kind") == "wifi":
         ctx["router"] = router_state(ctx["band_ghz"])  # read now: busy covers this result
     row = {"date": time.strftime("%Y-%m-%d"), "commit": ctx["commit"],
