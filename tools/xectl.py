@@ -78,7 +78,8 @@ PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up', 'tx_wait', 'turna
 
 STRUCTS = {
     "second_stats": ["ip", "xnet_ip", "slot", "arp_replies", "in", "out", "out_refused", "flows",
-                     "not_ours", "no_xnet_ip", "out_dropped", "gave_up", "moved", "announced"],
+                     "not_ours", "no_xnet_ip", "out_dropped", "gave_up", "moved", "announced", "queued",
+                     "queued_most"],
     "usb_stats": ["match_calls", "add_calls", "remove_calls", "close_passes", "submit_direct",
                   "submit_dpc", "dpc_runs", "last_open_status", "scan_found", "reset_status",
                   "unbound_resets", "no_slot", "control_late", "cancels", "nak_reload_set",
@@ -801,12 +802,13 @@ def status(sym):
         if "second_stats" in sym:
             sec = read_struct(sym, "second_stats")
             print("second   ip=%s xnet=%s slot=%s arp=%d in=%d out=%d refused=%d flows=%d "
-                  "not_ours=%d before_xnet=%d dropped=%d gave_up=%d moved=%d announced=%d" % (
+                  "not_ours=%d before_xnet=%d dropped=%d gave_up=%d moved=%d announced=%d queued=%d (most %d)" % (
                       socket.inet_ntoa(struct.pack(">I", sec["ip"])),
                       socket.inet_ntoa(struct.pack(">I", sec["xnet_ip"])),
                       sec["slot"] - 1 if sec["slot"] else "none", sec["arp_replies"], sec["in"],
                       sec["out"], sec["out_refused"], sec["flows"], sec["not_ours"],
-                      sec["no_xnet_ip"], sec["out_dropped"], sec["gave_up"], sec["moved"], sec["announced"]))
+                      sec["no_xnet_ip"], sec["out_dropped"], sec["gave_up"], sec["moved"], sec["announced"],
+                      sec["queued"], sec["queued_most"]))
         print("stack    arp=%d icmp=%d echo=%d discard=%d/%dB peer=%s blast=%d busy=%d" % (
             ss["arp_replies"], ss["icmp_replies"], ss["udp_echo"], ss["discard_frames"],
             ss["discard_bytes_hi"] << 32 | ss["discard_bytes"], ip(ss["peer_ip"]),

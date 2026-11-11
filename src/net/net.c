@@ -364,7 +364,8 @@ void net_tx_done(NET_DEV *nd)
             nd->claim->tx_idle(nd->claim->context);
         return;
     }
-    if (net_tx_idle && (uplink() == nd || second_is(nd)))
+    second_tx_done(nd);
+    if (net_tx_idle && uplink() == nd)
         net_tx_idle();
 }
 

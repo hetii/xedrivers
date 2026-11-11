@@ -26,14 +26,16 @@ typedef struct {
     u32 arp_replies;
     u32 in;                 /* frames handed to xnet */
     u32 out;                /* frames sent for it */
-    u32 out_refused;        /* the card had no room */
+    u32 out_refused;        /* (no longer counted: frames wait in the second way's own queue) */
     u32 flows;              /* learned */
     u32 not_ours;           /* on the second card, for neither address */
     u32 no_xnet_ip;         /* came before xnet had said its address */
-    u32 out_dropped;        /* the card took nothing for 200 ms: not left in xnet's queue */
-    u32 gave_up;            /* ... nor for 2 s: the second way given up */
+    u32 out_dropped;        /* the second way's queue was full */
+    u32 gave_up;            /* ... for 2 s without a frame taken: the second way given up */
     u32 moved;              /* a flow opened anew by the uplink: no longer the second way's */
     u32 announced;          /* the address said to be a card's, when the card changed */
+    u32 queued;             /* frames waiting for the second card now */
+    u32 queued_most;
 } SECOND_STATS;
 
 /* --- pure (tests/net/test_second.c) ----------------------------------------- */
@@ -106,6 +108,7 @@ void second_choose(void);
 u32  second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length);
 u32  second_tx_slow(const u8 *frame, u32 length, u32 *sent);
 void second_uplink_slow(const u8 *frame, u32 length);
+void second_drain(void);
 
 /* A frame from a card that is not the uplink: 1 if it was the second way's. DISPATCH. */
 static inline u32 second_rx(NET_DEV *nd, const u8 *frame, u32 length)
@@ -127,10 +130,16 @@ static inline void second_uplink_rx(const u8 *frame, u32 length)
         second_uplink_slow(frame, length);
 }
 
-/* Its completions wake xnet's queue too. */
 static inline u32 second_is(const NET_DEV *nd)
 {
     return nd == second_dev;
+}
+
+/* A transmit of `nd` completed: the second way's queue goes on if it is its card. */
+static inline void second_tx_done(const NET_DEV *nd)
+{
+    if (nd == second_dev)
+        second_drain();
 }
 #else
 static inline void second_init(void) { }
@@ -141,6 +150,7 @@ static inline u32  second_tx(const u8 *frame, u32 length, u32 *sent)
 { (void)frame; (void)length; (void)sent; return 0; }
 static inline u32  second_is(const NET_DEV *nd) { (void)nd; return 0; }
 static inline void second_uplink_rx(const u8 *frame, u32 length) { (void)frame; (void)length; }
+static inline void second_tx_done(const NET_DEV *nd) { (void)nd; }
 #endif
 
 #endif /* XE_SECOND_H */

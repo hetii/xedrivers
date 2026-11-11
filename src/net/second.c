@@ -171,16 +171,15 @@ volatile SECOND_STATS second_stats;
 static SECOND_TABLE table;
 NET_DEV *volatile second_dev;
 
-/* A card that stops taking frames -- its link there, its ring never emptied -- must not hold
- * xnet's queue, which is the uplink's as well: a frame it refuses goes back to the queue only
- * while that has lasted under 200 ms (a busy card takes the next within one), is dropped after,
- * as the wire would have lost it, and after 2 s the card is given up until its link has been
- * down. */
+/* A card that stops taking frames altogether -- its link there, its ring never emptied --
+ * is given up once the second way's queue (below) has been full for 2 s without one frame
+ * taken, until its link has been down. */
 #define TB_PER_MS       49875u
 #define HOLD_TICKS      (200u * TB_PER_MS)
 #define QUIT_TICKS      (2000u * TB_PER_MS)
 
 static SECOND_STUCK stuck;
+static void queue_forget(void);
 static NET_DEV *volatile gave_up_on;
 
 static u32 tb(void)
@@ -296,6 +295,9 @@ void second_choose(void)
     /* The table is kept across a change: a connection whose card went and came back, or
      * whose address another card now answers for, goes on with its next frame in. */
     if (best != second_dev) {
+        second_dev = 0;                 /* nothing more goes by the old card */
+        mem_sync();
+        queue_forget();                 /* its frames carry its address */
         second_took(&stuck);
         if (best) {
             announce_left = 3;          /* now, and twice more a second apart (second_rx_slow) */
@@ -368,55 +370,108 @@ u32 second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length)
     return 1;
 }
 
+/* The second way's own transmit queue. xnet has one queue for all it sends; a frame the
+ * second card had no room for used to go back to its head, and everything behind waited,
+ * the uplink's frames too: with an AIC8800 on 2.4 GHz as the second way and warm, four
+ * streams out by two addresses fell from 196 to 79 Mbit/s though the RTL8822BU that
+ * carried half of them was idle (2026-11-12). So a frame for the second way is copied
+ * here, rewritten in the copy (xnet's packet is left as it was), and xnet is told it went;
+ * the queue empties as the card takes frames. Full, a frame is dropped as the wire would
+ * drop it: TCP slows that connection, and no other. */
+#define QUEUE           64u             /* frames, a power of two: 97 KB */
+
+static u8 queue_frame[QUEUE][ETH_FRAME_MAX] __attribute__((aligned(4)));
+static u16 queue_length[QUEUE];
+static volatile u32 queue_in, queue_out, queue_busy;
+static KSPIN_LOCK queue_lock;           /* those who put in; one takes out (queue_busy) */
+
+static void queue_forget(void)
+{
+    u32 irql = KfAcquireSpinLock(&queue_lock);
+
+    queue_out = queue_in;
+    KfReleaseSpinLock(&queue_lock, irql);
+}
+
+/* Whoever finds the flag taken leaves the work to its holder, which looks again after
+ * letting go: a transfer that completes inside the card's transmit comes back here. */
+void second_drain(void)
+{
+    NET_DEV *nd;
+
+    for (;;) {
+        if (__sync_lock_test_and_set(&queue_busy, 1))
+            return;
+        nd = second_dev;
+        while (nd && queue_out != queue_in && nd->st->ready && net_dev_tx_space(nd)) {
+            u32 at = queue_out & (QUEUE - 1);
+
+            if (!net_dev_tx(nd, queue_frame[at], queue_length[at]))
+                break;
+            queue_out = queue_out + 1;
+            second_took(&stuck);
+            second_stats.out++;
+        }
+        second_stats.queued = queue_in - queue_out;
+        __sync_lock_release(&queue_busy);
+        nd = second_dev;
+        if (!nd || queue_out == queue_in || !nd->st->ready || !net_dev_tx_space(nd))
+            return;
+    }
+}
+
 u32 second_tx_slow(const u8 *frame, u32 length, u32 *sent)
 {
     NET_DEV *nd = second_dev;
     const SECOND_FLOW *f;
-    u32 peer, ports, proto, source;
+    u32 peer, ports, proto, source, irql, at, i, full;
+    u8 *copy;
 
-    if (!nd || !second_key(frame, length, 0, &peer, &ports, &proto))
+    if (!nd || length > ETH_FRAME_MAX || !second_key(frame, length, 0, &peer, &ports, &proto))
         return 0;
     source = rd32(frame + ETH_HLEN + 12);
-    if (source != second_stats.ip) {
-        if (source && source != second_stats.xnet_ip)
-            second_stats.xnet_ip = source;
-        f = second_find(&table, peer, ports, proto, table_now());
-        if (!f)
-            return 0;
-        /* in place, in xnet's own packet: a retransmission of it comes with our address
-         * already there, and is sent as it is (above) */
-        second_rewrite((u8 *)(unsigned long)frame, 0, second_stats.ip, nd->mac);
-        {
-            u32 i;
-            u8 *out = (u8 *)(unsigned long)frame;
+    if (source && source != second_stats.ip && source != second_stats.xnet_ip)
+        second_stats.xnet_ip = source;
+    f = second_find(&table, peer, ports, proto, table_now());
+    if (!f)
+        return 0;
+    *sent = 1;                          /* from here on it is ours, sent or dropped */
 
-            for (i = 0; i < ETH_ALEN; i++)
-                out[i] = f->peer_mac[i];
-        }
+    irql = KfAcquireSpinLock(&queue_lock);
+    full = queue_in - queue_out >= QUEUE;
+    if (!full) {
+        at = queue_in & (QUEUE - 1);
+        copy = queue_frame[at];
+        for (i = 0; i < length; i++)
+            copy[i] = frame[i];
+        second_rewrite(copy, 0, second_stats.ip, nd->mac);
+        for (i = 0; i < ETH_ALEN; i++)
+            copy[i] = f->peer_mac[i];
+        queue_length[at] = (u16)length;
+        mem_sync();
+        queue_in = queue_in + 1;
+        if (queue_in - queue_out > second_stats.queued_most)
+            second_stats.queued_most = queue_in - queue_out;
     }
-    *sent = nd->st->ready && net_dev_tx_space(nd) ? net_dev_tx(nd, frame, length) : 0;
-    if (*sent) {
-        second_took(&stuck);
-        second_stats.out++;
+    KfReleaseSpinLock(&queue_lock, irql);
+
+    if (!full) {
+        second_drain();
         return 1;
     }
-    switch (second_refused(&stuck, tb(), HOLD_TICKS, QUIT_TICKS)) {
-    case SECOND_WAIT:
-        second_stats.out_refused++;
-        return 1;
-    case SECOND_QUIT:
+    /* full: the card takes frames too slowly, or none at all */
+    second_stats.out_dropped++;
+    if (second_refused(&stuck, tb(), HOLD_TICKS, QUIT_TICKS) == SECOND_QUIT) {
         gave_up_on = nd;
         second_dev = 0;
         second_stats.slot = 0;
         second_stats.gave_up++;
         mem_sync();
         second_took(&stuck);
-        /* fall through */
-    default:
-        second_stats.out_dropped++;
-        *sent = 1;                      /* not xnet's to send again: TCP does that */
-        return 1;
+        queue_out = queue_in;           /* what it held goes with it */
     }
+    second_drain();
+    return 1;
 }
 
 /* A SYN without ACK from the uplink: the peer opens a connection to the console's own
