@@ -261,7 +261,9 @@ static void stor(SESSION *s, const char *path, u32 append)
         }
         /* A whole buffer a write: the stack hands over what has come, a few kilobytes
          * at a time, and the disk takes 18.8 MB/s in writes of 4 KB, 35.4 of 16 KB and
-         * 59.9 of 64 KB (xectl bench disk). */
+         * 59.9 of 64 KB (xectl bench disk). Larger is worse: nothing is taken off
+         * the socket while a write runs, and four sessions by two cards did 372 Mbit/s
+         * (46.5 MB/s) with 64 KB, 280 (35.0) with 256 KB, 220 (27.4) with 16 KB. */
         n = srv_recv(d, s->buf + have, DATA_BUF - have);
         if (n < 0)
             break;
