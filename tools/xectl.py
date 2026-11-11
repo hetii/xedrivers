@@ -63,6 +63,7 @@ ROOT = os.path.dirname(HERE)
 ELF = os.path.join(ROOT, "build", "plugin.elf")
 HOST = os.environ.get("XE_HOST", "")
 SECOND_HOST = ""    # bench tcp --second: every other stream goes to this address
+PIECES = 8          # bench xeftp --second: pieces a session (--pieces); 1 is a file a session
 XERUNNER = (os.environ.get("XERUNNER") or shutil.which("xerunner") or
             os.path.join(ROOT, "..", "xerunner", ".venv", "bin", "xerunner"))
 RESULTS = os.path.join(ROOT, "docs", "speedtest.jsonl")
@@ -1360,10 +1361,10 @@ def xeftp_delete(names, port, folder):
 def xeftp_shared_run(up, mb, files, port, folder):
     """With --second: `mb` MiB as 8 pieces a session from one common list, `files` sessions
     (every other one to the second address) each taking the next piece when its last is
-    done. So the faster way carries more, as a client that shares its work out would;
+    done; --pieces sets how many a session (1: a file each, as without --second). So the faster way carries more, as a client that shares its work out would;
     halves, one an address, end only when the slower way has carried its half. Bytes per
     second over the wall clock; the pieces of an upload stay for the download."""
-    count = files * 8
+    count = files * PIECES
     piece = max(1, mb // count)
     names = ["xectl-xeftp-s%d-%d.bin" % (count, i) for i in range(count)]
     src = data_file(piece) if up else None
@@ -1731,6 +1732,8 @@ def bench(sym, argv):
     ap.add_argument("--nconnect", default="1,4", help="xenfs: connections; mix: the last")
     ap.add_argument("--port", type=int, default=XEFTP_PORT, help="xeftp's port")
     ap.add_argument("--guard", type=int, default=GUARD_S, help="seconds a step of a server bench may take")
+    ap.add_argument("--pieces", type=int, default=8,
+                    help="xeftp --second: pieces a session from the common list (1: a file each)")
     ap.add_argument("--second", default="",
                     help="tcp, xeftp, xenfs with --files: every other stream, session or file by this "
                          "address (multipath=1, second_ip)")
@@ -1747,8 +1750,9 @@ def bench(sym, argv):
     a = ap.parse_args(argv)
     if not HOST:
         raise SystemExit("set XE_HOST to the console's address")
-    global SECOND_HOST
+    global SECOND_HOST, PIECES
     SECOND_HOST = a.second
+    PIECES = max(1, a.pieces)
     ways = ["down", "up"] if a.which == "both" else [a.which]
     if a.test == "a2dp":
         a2dp_bench(sym, a.seconds, a.record, a.note)
