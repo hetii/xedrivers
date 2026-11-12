@@ -5,7 +5,7 @@
  * load by length and CRC-32: that recording keeps no firmware), and the chip's
  * answers are replayed from the recording.
  *
- * Needs the firmware files (AIC_FW, default build/xedrivers/firmware/aic8800D80,
+ * Needs the firmware files (AIC_FW, default build/xedrivers/firmware/aic8800,
  * which make fetches); without them the test says so and passes. Run by `make test`. */
 
 #include <stdio.h>
@@ -791,7 +791,7 @@ int main(void)
 
     test_wifi();
     test_frames();
-    fw_dir = getenv("AIC_FW") ? getenv("AIC_FW") : "build/xedrivers/firmware/aic8800D80";
+    fw_dir = getenv("AIC_FW") ? getenv("AIC_FW") : "build/xedrivers/firmware/aic8800";
     snprintf(probe, sizeof(probe), "%s/fmacfw_8800d80_u02.bin", fw_dir);
     f = fopen(probe, "rb");
     if (f) {

@@ -27,7 +27,8 @@
 #include "softmac.h"
 
 #define RTW_VENDOR          0x0BDAu
-#define RTW_FW_FILE         "firmware\\rtw88\\rtw8822b_fw.bin"  /* FIRMWARE_DIR (file.h), as in linux-firmware */
+#define RTW_FW_FILE         "firmware\\rtw8822b\\rtw8822b_fw.bin"     /* FIRMWARE_DIR (file.h) */
+#define RTW_TABLES_FILE     "firmware\\rtw8822b\\rtw8822b_tables.bin" /* built from tables/ */
 #define RTW_FW_MAX          (256u * 1024)
 
 #define RTW_TX_DESC_SIZE    48
@@ -71,6 +72,7 @@ enum {
     RTW_STEP_LLT,               /* the chip's own linked list of pages */
     RTW_STEP_H2C_QUEUE,
     RTW_STEP_RF_MODE,           /* the radio's mode table did not take */
+    RTW_STEP_TABLES,            /* rtw8822b_tables.bin missing, short, or not this build's */
     RTW_STEP_UP,                /* not a failure: powered, firmware running */
 };
 
@@ -170,8 +172,7 @@ typedef struct RTW {
     u8 *reg_buf;                /* DMA: one register's bytes, and 0x4e0's */
     u8 *bulk_buf;               /* DMA: one bulk transfer out, a firmware page */
     u8 *efuse;                  /* the logical map, RTW_EFUSE_LOGICAL bytes */
-    u8 *fw;                     /* the firmware image, kept for a later bring-up */
-    u32 fw_size;
+    u32 fw_size;                /* of the last image downloaded (it is read anew each bring-up) */
     u32 rsvd_boundary;          /* the reserved pages' first, once the queues are set */
     u32 rsvd_h2cq_addr;         /* the firmware's command queue's first page */
     u32 channel;                /* tuned to, 0 before the first */

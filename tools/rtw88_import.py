@@ -43,7 +43,7 @@ with open(os.path.join(out, "rtw_reg.h"), "w") as f:
 # bind them to rtw88's parsers are replaced by RTW_TABLE entries.
 src = open(os.path.join(rtw, "rtw8822b_table.c")).read()
 arrays = re.findall(r"static const u32 (\w+)\[\] = \{(.*?)\};", src, re.S)
-with open(os.path.join(out, "rtw8822b_table.c"), "w") as f:
+with open(os.path.join(out, "tables", "rtw8822b_table.c"), "w") as f:   # packed, not built in (Makefile)
     f.write(HEAD % ("rtw8822b_table.c", rev))
     f.write('#include "rtw8822b_table.h"\n\n')
     for name, data in arrays:

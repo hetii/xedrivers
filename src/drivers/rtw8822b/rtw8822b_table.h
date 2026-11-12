@@ -7,16 +7,9 @@
 
 #include "kernel.h"
 
-typedef struct {
-    const u32 *data;
-    u32 size;           /* words */
-} RTW_TABLE;
-
-extern const RTW_TABLE rtw8822b_mac_tbl;
-extern const RTW_TABLE rtw8822b_agc_tbl;
-extern const RTW_TABLE rtw8822b_bb_tbl;
-extern const RTW_TABLE rtw8822b_rf_a_tbl;
-extern const RTW_TABLE rtw8822b_rf_b_tbl;
+/* The register tables themselves (MAC, BB, AGC, RF A, RF B) are not built into the
+ * plugin: tables/rtw8822b_table.c is packed into firmware\\rtw8822b\\rtw8822b_tables.bin
+ * (tables/pack.c) and read at the card's start (rtw_phy.c). */
 
 /* One step of a power sequence, rtw88's struct rtw_pwr_seq_cmd: write `value`
  * under `mask` to the byte at `offset`, poll for it, or wait. */

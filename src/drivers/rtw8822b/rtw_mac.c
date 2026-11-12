@@ -7,6 +7,9 @@
 #include "file.h"
 #include "rtw8822b_defs.h"
 
+extern void *ExAllocatePoolTypeWithTag(u32 bytes, u32 tag, u32 pool);
+extern void ExFreePool(void *p);
+
 #define PWR_POLL_READS      2000    /* RTW_PWR_POLLING_CNT reads 50 us apart: 1 s */
 #define RTW_PWR_CMD_WRITE   0x01
 #define RTW_PWR_CMD_POLLING 0x02
@@ -374,42 +377,50 @@ static u32 size_ok(const u8 *fw, u32 size)
     return size > FW_HDR_SIZE && FW_HDR_SIZE + dmem + imem + emem == size;
 }
 
-static u32 load_file(RTW *r)
+/* The image, read anew for each download into memory taken for it, and given back after:
+ * kept for the next bring-up it held 256 KB of the system's memory for good. */
+static u8 *load_file(RTW *r, u32 *size)
 {
     void *f = file_open(RTW_FW_FILE);
+    u8 *fw;
     u32 n, got = 0;
 
+    *size = 0;
     if (!f)
         return 0;
-    while (got < RTW_FW_MAX && (n = file_read(f, r->fw + got, RTW_FW_MAX - got, got)) != 0)
-        got += n;
+    fw = (u8 *)ExAllocatePoolTypeWithTag(RTW_FW_MAX, 0x46575452u /* "RTWF" */, 2);
+    if (fw) {
+        while (got < RTW_FW_MAX && (n = file_read(f, fw + got, RTW_FW_MAX - got, got)) != 0)
+            got += n;
+    }
     file_close(f);
-    return got;
+    *size = got;
+    return fw;
 }
 
-/* __rtw_download_firmware. The image comes from firmware\\rtw88\\rtw8822b_fw.bin beside the plugin;
- * it stays in memory for a later bring-up. */
+/* __rtw_download_firmware, from firmware\\rtw8822b\\rtw8822b_fw.bin beside the plugin. */
 u32 rtw_download_firmware(RTW *r)
 {
     BACKUP bckp[BACKUPS];
-    u32 status;
+    u32 status, size;
+    u8 *fw = load_file(r, &size);
 
-    if (!r->fw_size) {
-        r->fw_size = load_file(r);
-        r->st->fw_size = r->fw_size;
-        if (!r->fw_size || !size_ok(r->fw, r->fw_size)) {
-            r->fw_size = 0;
-            return RTW_STEP_FW_FILE;
-        }
-        r->st->fw_version = (u32)(r->fw[4] | r->fw[5] << 8) << 16 | (u32)r->fw[6] << 8 |
-                            r->fw[7];
-        r->st->fw_h2c_version = (u32)(r->fw[0x1C] | r->fw[0x1D] << 8);
+    r->fw_size = size;
+    r->st->fw_size = size;
+    if (!fw || !size || !size_ok(fw, size)) {
+        if (fw)
+            ExFreePool(fw);
+        r->fw_size = 0;
+        return RTW_STEP_FW_FILE;
     }
+    r->st->fw_version = (u32)(fw[4] | fw[5] << 8) << 16 | (u32)fw[6] << 8 | fw[7];
+    r->st->fw_h2c_version = (u32)(fw[0x1C] | fw[0x1D] << 8);
 
     wlan_cpu_enable(r, 0);
     reg_backup(r, bckp);
     reset_platform(r);
-    status = start_download(r, r->fw);
+    status = start_download(r, fw);
+    ExFreePool(fw);
     if (status) {
         rtw_write8_clr(r, REG_MCUFW_CTRL, BIT_MCUFWDL_EN);
         rtw_write8_set(r, REG_SYS_FUNC_EN + 1, BIT_FEN_CPUEN);

@@ -2,7 +2,8 @@
 #
 #   make                 build the package build/xedrivers/: xedrivers.xex, the plugin
 #                        for people (no tuning), and firmware/ (FIRMWARE below:
-#                        fetched, pinned by hash, laid out as linux-firmware)
+#                        fetched, pinned by hash, a directory a driver; and data
+#                        of ours read once at a card's start, built from src/)
 #   make bench=history,stack   ... with the tuning tools named (src/bench/<name>):
 #                        history, stack, debug, prof, tcp, or bench=all
 #   make MODE=xnet ADVERTISE=2500 IP=10.36.0.2
@@ -134,7 +135,7 @@ SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c \
             $(if $(filter 1,$(stack)),$(wildcard src/stack/*.c src/stack/port/*.c src/stack/winsock/*.c) $(LWIP_SRC))
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h src/*/*/*/*.h)
-INCLUDES := $(addprefix -I ,$(SRC_DIRS)) -I src/stack \
+INCLUDES := $(addprefix -I ,$(SRC_DIRS)) -I src/stack -I $(BUILD)/gen \
             $(if $(filter 1,$(stack)),-I src/stack/winsock -I src/stack/port/include -I $(LWIP_ROOT)/include)
 DEBUG    ?= 0
 # multipath=1: a second card answers for `second_ip =` and its traffic is translated to the
@@ -159,8 +160,8 @@ PKG := $(BUILD)/$(NAME)
 XEX := $(PKG)/$(NAME).xex
 FW_DIR := $(PKG)/firmware
 
-# The firmware the drivers load: its path under firmware/ (as in linux-firmware,
-# src/core/file.h), SHA-256, and where it comes from, at a fixed commit. Nothing is
+# The firmware the drivers load: its path under firmware/ (a directory a driver, named
+# as in src/drivers/: src/core/file.h), SHA-256, and where it comes from, at a fixed commit. Nothing is
 # taken from this machine's /lib/firmware, so every build packs the same bytes.
 # These are the files the drivers were tested with:
 # - RTL8822BU: linux-firmware a50c068b ("rtw88: 8822b: Update firmware to
@@ -173,13 +174,13 @@ LINUX_FW := https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmw
 LINUX_FW_COMMIT := a50c068b4977be0845596e8294b47199ed2c5e2b
 AIC_FW   := https://raw.githubusercontent.com/radxa-pkg/aic8800/d9c72efd382ccdbf2f1fdb09d2d4f3cc212edd9d/src/USB/driver_fw/fw
 define FIRMWARE
-rtw88/rtw8822b_fw.bin a72da690597bfa99d8eb6fc2ab090d18d8ad92ac2befd35db1c9e3662d8d8418 $(LINUX_FW)/rtw88/rtw8822b_fw.bin?id=$(LINUX_FW_COMMIT)
-aic8800D80/fw_patch_table_8800d80_u02.bin 9decb77435b7e9713e33e32da483d683b7329ed93b672b2d1b134031d7da5f67 $(AIC_FW)/aic8800D80/fw_patch_table_8800d80_u02.bin
-aic8800D80/fw_adid_8800d80_u02.bin a526cbd02fcdc495f049f3ad6b5933cb08cd984b16790c716a060d582fee1a56 $(AIC_FW)/aic8800D80/fw_adid_8800d80_u02.bin
-aic8800D80/fw_patch_8800d80_u02.bin f0e2f5bbc17bc327ca7f1574ff55370dfd863d931514347bb4abc18a74f6218f $(AIC_FW)/aic8800D80/fw_patch_8800d80_u02.bin
-aic8800D80/fw_patch_8800d80_u02_ext0.bin ca738f5ea5aca6021c4f48b60ff35e835dfdaf072a8490e3ba8ba0a42440e3e5 $(AIC_FW)/aic8800D80/fw_patch_8800d80_u02_ext0.bin
-aic8800D80/fmacfw_8800d80_u02.bin 23f2bed2ac0e8f7bda8f36df7defd30d9b928c97867f6f0f01f28d89dd78d670 $(AIC_FW)/aic8800D80/fmacfw_8800d80_u02.bin
-aic8800D80/fmacfw_8800d80_h_u02.bin c5c8c774dfae93aed71f8da7489e35159192135e4929591ea8a945b76deba6bd $(AIC_FW)/aic8800D80/fmacfw_8800d80_h_u02.bin
+rtw8822b/rtw8822b_fw.bin a72da690597bfa99d8eb6fc2ab090d18d8ad92ac2befd35db1c9e3662d8d8418 $(LINUX_FW)/rtw88/rtw8822b_fw.bin?id=$(LINUX_FW_COMMIT)
+aic8800/fw_patch_table_8800d80_u02.bin 9decb77435b7e9713e33e32da483d683b7329ed93b672b2d1b134031d7da5f67 $(AIC_FW)/aic8800D80/fw_patch_table_8800d80_u02.bin
+aic8800/fw_adid_8800d80_u02.bin a526cbd02fcdc495f049f3ad6b5933cb08cd984b16790c716a060d582fee1a56 $(AIC_FW)/aic8800D80/fw_adid_8800d80_u02.bin
+aic8800/fw_patch_8800d80_u02.bin f0e2f5bbc17bc327ca7f1574ff55370dfd863d931514347bb4abc18a74f6218f $(AIC_FW)/aic8800D80/fw_patch_8800d80_u02.bin
+aic8800/fw_patch_8800d80_u02_ext0.bin ca738f5ea5aca6021c4f48b60ff35e835dfdaf072a8490e3ba8ba0a42440e3e5 $(AIC_FW)/aic8800D80/fw_patch_8800d80_u02_ext0.bin
+aic8800/fmacfw_8800d80_u02.bin 23f2bed2ac0e8f7bda8f36df7defd30d9b928c97867f6f0f01f28d89dd78d670 $(AIC_FW)/aic8800D80/fmacfw_8800d80_u02.bin
+aic8800/fmacfw_8800d80_h_u02.bin c5c8c774dfae93aed71f8da7489e35159192135e4929591ea8a945b76deba6bd $(AIC_FW)/aic8800D80/fmacfw_8800d80_h_u02.bin
 endef
 export FIRMWARE
 
@@ -190,14 +191,26 @@ GIT_COMMIT := $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-8),0)
 GIT_DIRTY  := $(if $(shell git status --porcelain --untracked-files=no 2>/dev/null),1,0)
 FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) MULTIPATH=$(multipath) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE)/$(NTB_IN_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST)) servers=$(subst $(space),$(comma),$(SERVERS_LIST))
 
-.PHONY: all firmware clean test lint kit push push-fw deploy
+.PHONY: all firmware tables clean test lint kit push push-fw deploy
 
 # The package: what goes into Usb:\plugin\xedrivers\ (or Hdd:), and what a release
 # ships. The firmware is checked first and fetched where missing or wrong.
-all: firmware $(XEX)
+all: firmware tables $(XEX)
 
 # A file in place with the right hash is kept; any other is fetched and checked.
 # (git.kernel.org refuses some clients without a User-Agent of their own.)
+# Data of ours a driver reads once, at its card's start, kept out of the plugin's
+# memory: the RTL8822BU's register tables (163 KB), packed from their source into
+# firmware/rtw8822b/rtw8822b_tables.bin; the driver checks it against the sum in the
+# generated header (rtw_phy.c).
+RTW_TABLES_BIN := $(FW_DIR)/rtw8822b/rtw8822b_tables.bin
+RTW_TABLES_H   := $(BUILD)/gen/rtw8822b_tables.h
+tables: $(RTW_TABLES_BIN)
+$(RTW_TABLES_BIN) $(RTW_TABLES_H) &: src/drivers/rtw8822b/tables/pack.c src/drivers/rtw8822b/tables/rtw8822b_table.c
+	@mkdir -p $(dir $(RTW_TABLES_BIN)) $(BUILD)/gen
+	$(HOST_CC) -I src/drivers/rtw8822b -I src/drivers/rtw8822b/tables -o $(BUILD)/rtw_tables_pack src/drivers/rtw8822b/tables/pack.c
+	$(BUILD)/rtw_tables_pack $(RTW_TABLES_BIN) $(RTW_TABLES_H)
+
 firmware:
 	@echo "$$FIRMWARE" | while read path sum url; do \
 	    f=$(FW_DIR)/$$path; \
@@ -247,7 +260,7 @@ $(BUILD)/drivers.generated.c: $(BUILD)/flags
 	   echo 'const u32 xe_driver_count = sizeof(xe_drivers) / sizeof(xe_drivers[0]);'; \
 	} > $@
 
-$(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) \
+$(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) $(RTW_TABLES_H) \
         $(KIT)/plugin.py $(KIT)/write.py $(KIT)/kcall.S
 	@mkdir -p $(BUILD) $(PKG)
 	$(PYTHON) $(KIT)/plugin.py $(SRC) $(addprefix --ordinals ,$(TABLES)) \
@@ -284,7 +297,7 @@ test: firmware $(BUILD)/test_cdc $(BUILD)/test_stack $(BUILD)/test_rtl $(BUILD)/
 	@$(BUILD)/test_pcm
 	@$(BUILD)/test_descriptors
 	@$(BUILD)/test_bluetooth
-	@AIC_FW=$(FW_DIR)/aic8800D80 $(BUILD)/test_aic
+	@AIC_FW=$(FW_DIR)/aic8800 $(BUILD)/test_aic
 	@$(BUILD)/test_wpa
 	@$(BUILD)/test_reorder
 	@$(BUILD)/test_bridge
@@ -452,10 +465,13 @@ push: all
 	     modprobe g_mass_storage file=/dev/loop0 removable=1 ro=0 stall=0 && sleep 2 && \
 	     echo attached, link \$$(cat /sys/class/udc/*/current_speed)"
 
-push-fw: firmware
+# The medium's firmware/ becomes the package's: what is not in it any more (a directory
+# renamed, as rtw88 -> rtw8822b) goes.
+push-fw: firmware tables
 	tar -C $(FW_DIR) -cf - . | ssh -o StrictHostKeyChecking=no $(PI) \
 	    "rmmod g_mass_storage 2>/dev/null; losetup -d /dev/loop0 2>/dev/null; \
 	     mkdir -p $(PI_MNT) && mount -o loop $(PI_IMG) $(PI_MNT) && \
+	     rm -rf $(PI_MNT)/plugin/$(NAME)/firmware && \
 	     mkdir -p $(PI_MNT)/plugin/$(NAME)/firmware && \
 	     tar --no-same-owner -C $(PI_MNT)/plugin/$(NAME)/firmware -xf - && \
 	     sync && find $(PI_MNT)/plugin/$(NAME)/firmware -type f && umount $(PI_MNT) && \

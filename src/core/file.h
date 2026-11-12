@@ -1,10 +1,11 @@
 /* Reading files: xedrivers.ini and the drivers' firmware, beside the plugin.
  *
  * The plugin lives in a directory of its own, e.g. Usb:\plugin\xedrivers\xedrivers.xex,
- * with xedrivers.ini beside it and the firmware under firmware\, laid out as
- * linux-firmware: firmware\rtw88\rtw8822b_fw.bin, firmware\aic8800D80\..., so a copy
- * of Linux's tree, or of its subdirectories, can be dropped in as it is. The files
- * must be uncompressed (distributions ship some as .zst).
+ * with xedrivers.ini beside it and what the drivers read from disk under firmware\, a
+ * directory a driver named as in src/drivers/: firmware\rtw8822b\rtw8822b_fw.bin,
+ * firmware\aic8800\... (the vendors' files, as Linux loads them; uncompressed --
+ * distributions ship some as .zst), and data of ours built from src/, such as
+ * firmware\rtw8822b\rtw8822b_tables.bin. Only what is read once, at a card's start.
  *
  * Paths are kernel object names ("\\Device\\Mass0\\plugin\\xedrivers\\x.bin"). A file is
  * looked for in every directory of file_dirs, in order: the plugin's own directory
@@ -17,7 +18,7 @@
 
 #include "kernel.h"
 
-/* Firmware files are named by their path in linux-firmware, under this. */
+/* What a driver reads from disk lives under this, in a directory named as the driver. */
 #define FIRMWARE_DIR "firmware\\"
 
 /* Learn the plugin's own directory from DllMain's `instance`, its loader entry. */

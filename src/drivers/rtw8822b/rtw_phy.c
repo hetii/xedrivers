@@ -6,6 +6,11 @@
 #include "wireless.h"
 #include "rtw8822b_defs.h"
 #include "rtw8822b_txpwr.h"
+#include "file.h"
+#include "rtw8822b_tables.h"      /* generated: RTW_TABLES_SUM (Makefile, tables/pack.c) */
+
+extern void *ExAllocatePoolTypeWithTag(u32 bytes, u32 tag, u32 pool);
+extern void ExFreePool(void *p);
 
 #define RFREG_MASK          0xFFFFFu
 #define MASKBYTE0           0x000000FFu
@@ -125,9 +130,9 @@ static u32 positive(RTW *r, u32 cond)
 
 /* rtw_parse_tbl_phy_cond: pairs of words, an address and its value, between
  * if/elif/else/endif pairs whose top bit marks them. */
-static void load_table(RTW *r, const RTW_TABLE *t, u32 kind)
+static void load_table(RTW *r, const u32 *data, u32 words, u32 kind)
 {
-    const u32 *p = t->data, *end = t->data + t->size;
+    const u32 *p = data, *end = data + words;
     u32 matched = 1, skipped = 0, pos = 0;
 
     for (; p + 1 < end + 1 && p < end; p += 2) {
@@ -252,6 +257,60 @@ static u32 config_trx_mode(RTW *r)
     return 0;
 }
 
+static u32 fnv(u32 h, const u32 *w, u32 n)
+{
+    u32 i, k;
+
+    for (i = 0; i < n; i++)
+        for (k = 0; k < 4; k++) {
+            h ^= (w[i] >> (24 - 8 * k)) & 0xFF;
+            h *= 16777619u;
+        }
+    return h;
+}
+
+/* rtw_phy_load_tables, from firmware\\rtw8822b\\rtw8822b_tables.bin (tables/pack.c), read
+ * here once a bring-up -- one table at a time into memory taken for it and given back:
+ * MAC, BB, AGC, RF A, RF B (no AGC table of a BT path and no RF calibration table on this
+ * chip). The file is this build's or nothing: its entries' sum is RTW_TABLES_SUM, each
+ * table's its own. Built into the plugin they held 163 KB of the system's memory for good. */
+static u32 load_tables(RTW *r)
+{
+    static const u32 kind[5] = { CFG_MAC, CFG_BB, CFG_AGC, CFG_RF_A, CFG_RF_B };
+    u32 head[4 + 5 * 4], i;
+    void *f = file_open(RTW_TABLES_FILE);
+
+    if (!f)
+        return RTW_STEP_TABLES;
+    if (file_read(f, head, sizeof(head), 0) != sizeof(head) || head[0] != 0x52545754u ||
+        head[1] != 1 || head[2] != 5 || head[3] != RTW_TABLES_SUM ||
+        fnv(2166136261u, head + 4, 5 * 4) != RTW_TABLES_SUM) {
+        file_close(f);
+        return RTW_STEP_TABLES;
+    }
+    for (i = 0; i < 5; i++) {
+        const u32 *e = head + 4 + i * 4;
+        u32 bytes = e[2] * 4, got = 0, n;
+        u32 *t = (u32 *)ExAllocatePoolTypeWithTag(bytes, 0x54575452u /* "RTWT" */, 2);
+
+        if (!t) {
+            file_close(f);
+            return RTW_STEP_TABLES;
+        }
+        while (got < bytes && (n = file_read(f, (u8 *)t + got, bytes - got, e[1] + got)) != 0)
+            got += n;
+        if (got != bytes || e[0] != i || fnv(2166136261u, t, e[2]) != e[3]) {
+            ExFreePool(t);
+            file_close(f);
+            return RTW_STEP_TABLES;
+        }
+        load_table(r, t, e[2], kind[i]);
+        ExFreePool(t);
+    }
+    file_close(f);
+    return 0;
+}
+
 /* rtw8822b_phy_set_param */
 u32 rtw_phy_set_param(RTW *r)
 {
@@ -268,11 +327,9 @@ u32 rtw_phy_set_param(RTW *r)
 
     /* rtw_phy_load_tables: no AGC table of a BT path and no RF calibration table
      * on this chip */
-    load_table(r, &rtw8822b_mac_tbl, CFG_MAC);
-    load_table(r, &rtw8822b_bb_tbl, CFG_BB);
-    load_table(r, &rtw8822b_agc_tbl, CFG_AGC);
-    load_table(r, &rtw8822b_rf_a_tbl, CFG_RF_A);
-    load_table(r, &rtw8822b_rf_b_tbl, CFG_RF_B);
+    step = load_tables(r);
+    if (step)
+        return step;
 
     rtw_write32_mask(r, 0x24, 0x7E000000, cap);
     rtw_write32_mask(r, 0x28, 0x7E, cap);
