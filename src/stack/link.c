@@ -27,7 +27,7 @@
 #if XE_STACK
 
 #define RX_RING     512u                /* received frames waiting for lwIP, a power of two */
-#define TX_QUEUE    128u                /* copies, made by lwIP's thread: references made the USB
+#define TX_QUEUE    256u                /* copies, made by lwIP's thread: references made the USB
                                          * processor copy, and two cards sent 20% less */
 #define SLOT        1536u
 #define SMALL       384u                /* frames up to this move out of the pool (loop) */

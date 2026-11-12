@@ -68,12 +68,12 @@ s32 ws_select(u32 caller, s32 nfds, WS_FD_SET *readfds, WS_FD_SET *writefds,
     if (n < 0)
         return ws_fail_errno();
     if (!n && timeout && !timeout->sec && !timeout->usec) {
-        /* a poll that found nothing: give the processor away once. XBDM polls its UDP
-         * socket so in a loop of its own, 680 000 times a second on lwIP (xnet's select
-         * waits on a kernel object even then) */
-        s64 now = 0;
+        /* a poll that found nothing waits 1 ms. XBDM polls its UDP socket so in a loop of
+         * its own, 680 000 times a second on lwIP (xnet's select waits on a kernel object
+         * even then), each poll taking the lock the USB processor takes for every frame */
+        s64 a_while = -10000;               /* 1 ms */
 
-        KeDelayExecutionThread(0, 0, &now);
+        KeDelayExecutionThread(0, 0, &a_while);
     }
     back(readfds, &r);
     back(writefds, &w);

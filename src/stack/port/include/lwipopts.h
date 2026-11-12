@@ -64,7 +64,7 @@
 #define LWIP_WND_SCALE                  1
 #define TCP_RCV_SCALE                   3
 #define TCP_WND                         (192 * 1024)    /* eight of them nearly fit the pool */
-#define TCP_SND_BUF                     (64 * 1024)     /* four senders of 128 KB ran a 256 KB heap dry and timed out */
+#define TCP_SND_BUF                     (64 * 1024)     /* four senders of 128 KB ran a 256 KB heap dry and timed out; 128 KB with a heap of 1 MB left xenfs no system memory */
 #define TCP_SND_QUEUELEN                ((4 * TCP_SND_BUF) / TCP_MSS)
 #define TCP_SNDLOWAT                    32768   /* a 16-bit field in lwIP */
 #define TCP_QUEUE_OOSEQ                 1
