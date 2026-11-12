@@ -15,6 +15,7 @@
 #include "cdc_net.h"
 #include "net.h"
 #include "config.h"
+#include "file.h"
 
 #define RTL_VENDOR  0x0BDAu
 #define RTL_PRODUCT 0x8156u
@@ -46,6 +47,59 @@ static u32 advertise(NET_DEV *nd, u32 bits)
     return rs->advertise_status;
 }
 
+/* xedrivers.ini, read at each bring-up (worker thread):
+ *   rtl_pause = on | off   pause frames (802.3x) advertised by the PHY, both ways; unset:
+ *                          the card's own (it advertises them). Off, a card whose
+ *                          receive FIFO fills drops rather than stopping its link partner
+ *                          -- a pause that reaches the PC through a switch stops all it
+ *                          sends, to the other card as well.
+ *   rtl_fifo_full = N, rtl_fifo_empty = N   the receive FIFO's pause on / pause off
+ *                          thresholds (PLA_RX_FIFO_FULL 0xc0a6 and _EMPTY 0xc0aa), in
+ *                          16-byte units; the card's own 0x200 / 0x300, Linux's 512 / 1024. */
+static u32 setting(const char *key, u32 *value)
+{
+    char v[16];
+    u32 n = 0, i = 0, base = 10;
+
+    if (!file_setting("xedrivers.ini", key, v, sizeof(v)) || !v[0])
+        return 0;
+    if (v[0] == 'o') {                  /* on / off */
+        *value = v[1] == 'n';
+        return 1;
+    }
+    if (v[0] == '0' && (v[1] == 'x' || v[1] == 'X')) {
+        base = 16;
+        i = 2;
+    }
+    for (; v[i]; i++) {
+        u32 d = v[i] >= '0' && v[i] <= '9' ? (u32)(v[i] - '0') :
+                v[i] >= 'a' && v[i] <= 'f' ? (u32)(v[i] - 'a' + 10) :
+                v[i] >= 'A' && v[i] <= 'F' ? (u32)(v[i] - 'A' + 10) : 99;
+        if (d >= base)
+            break;
+        n = n * base + d;
+    }
+    *value = n;
+    return 1;
+}
+
+static void flow_settings(NET_DEV *nd)
+{
+    volatile RTL_STATS *rs = &rtl_stats[nd->usb->index];
+    u32 v, adv;
+
+    if (setting("rtl_fifo_full", &v))
+        rtl_write_word(nd->usb, RTL_PLA, 0xC0A6u, v);
+    if (setting("rtl_fifo_empty", &v))
+        rtl_write_word(nd->usb, RTL_PLA, 0xC0AAu, v);
+    if (setting("rtl_pause", &v) && NT_SUCCESS(rtl_phy_read(nd->usb, RTL_OCP_MII_ADVERTISE, &adv))) {
+        adv = v ? adv | 0x0C00u : adv & ~0x0C00u;      /* PAUSE, ASYM_PAUSE */
+        if (NT_SUCCESS(rtl_phy_write(nd->usb, RTL_OCP_MII_ADVERTISE, adv)) && !xe_config.advertise)
+            rtl_phy_write(nd->usb, RTL_OCP_MII_BMCR, 0x1200u);    /* ANENABLE | ANRESTART */
+        rs->pause_set = 1 + v;
+    }
+}
+
 static u32 rtl8156_start(NET_DEV *nd)
 {
     volatile RTL_STATS *rs = &rtl_stats[nd->usb->index];
@@ -58,6 +112,7 @@ static u32 rtl8156_start(NET_DEV *nd)
 
     if (NT_SUCCESS(rtl_read_dword(nd->usb, RTL_PLA, RTL_PLA_TCR0, &tcr0)))
         rs->chip_version = tcr0 >> 16;
+    flow_settings(nd);                  /* before the advertisement's renegotiation */
     if (xe_config.advertise)
         rs->advertise_status = rtl_set_advertise(nd->usb, xe_config.advertise, 1);
     return 0;
