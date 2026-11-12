@@ -188,7 +188,8 @@ export FIRMWARE
 # kept in the image (xe_state.build_commit / build_dirty) so what runs on the
 # console says what it was built from (tools/xectl.py status, bench --record).
 GIT_COMMIT := $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-8),0)
-GIT_DIRTY  := $(if $(shell git status --porcelain --untracked-files=no 2>/dev/null),1,0)
+# docs/ is left out: results recorded there (xectl bench --record) do not change the build.
+GIT_DIRTY  := $(if $(shell git status --porcelain --untracked-files=no -- . ':!docs' 2>/dev/null),1,0)
 FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) STACK=$(stack) MULTIPATH=$(multipath) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE)/$(NTB_IN_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST)) servers=$(subst $(space),$(comma),$(SERVERS_LIST))
 
 .PHONY: all firmware tables clean test lint kit push push-fw deploy
