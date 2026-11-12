@@ -2,8 +2,9 @@
  *
  * Every frame the uplink (or the second way, second.c) brings is the stack's once it is up.
  * In: the cards deliver at DISPATCH_LEVEL on the USB processor, and lwIP is thread-level
- * code. So a frame that is the stack's is copied into a ring there and a thread hands
- * the ring to lwIP (tcpip_input, which with core locking does the work in that thread).
+ * code. So a frame is copied into a buffer of lwIP's pool there, the buffer put in a ring,
+ * and a thread hands the ring to lwIP (tcpip_input, which with core locking does the work
+ * in that thread).
  * Out: lwIP's frames go into a queue the uplink is fed from -- by the thread that queued
  * one, and by the card's transmit completion when it had no room.
  */
@@ -25,8 +26,9 @@
 
 #if XE_STACK
 
-#define RX_RING     128u                /* frames, a power of two */
-#define TX_QUEUE    128u
+#define RX_RING     512u                /* received frames waiting for lwIP, a power of two */
+#define TX_QUEUE    128u                /* copies, made by lwIP's thread: references made the USB
+                                         * processor copy, and two cards sent 20% less */
 #define SLOT        1536u
 
 volatile IPSTACK_STATS ipstack_stats;
@@ -36,8 +38,7 @@ volatile u32 ipstack_servers;
 static struct netif nif;
 static KEVENT wake;
 
-static u8 rx_frame[RX_RING][SLOT] __attribute__((aligned(4)));
-static u16 rx_length[RX_RING];
+static struct pbuf *rx_pbuf[RX_RING];   /* lwIP's own buffers, filled on the USB processor */
 static volatile u32 rx_in, rx_out;
 static volatile u32 rx_idle;            /* the thread waits: a frame put in wakes it */
 static KSPIN_LOCK rx_lock;              /* two cards may bring frames at once */
@@ -128,27 +129,32 @@ void ipstack_tx_done(void)
 
 /* --- in ----------------------------------------------------------------------- */
 
+/* On the USB processor: the frame goes straight into a buffer of lwIP's pool (the pool's
+ * guard is a spin lock, sysarch.c), and the ring holds the buffer -- one copy, as xnet
+ * makes, and the ring is a word a frame. */
 static void put(const u8 *frame, u32 length)
 {
-    u32 irql, at, i, waiting;
-    u8 *to;
+    struct pbuf *p;
+    u32 irql, waiting;
 
     if (length > SLOT)
         return;
+    p = pbuf_alloc(PBUF_RAW, (u16_t)length, PBUF_POOL);
+    if (!p) {
+        ipstack_stats.rx_no_pbuf++;
+        return;
+    }
+    pbuf_take(p, frame, (u16_t)length);
     irql = KfAcquireSpinLock(&rx_lock);
     waiting = rx_in - rx_out;
     if (waiting >= RX_RING) {
         KfReleaseSpinLock(&rx_lock, irql);
         ipstack_stats.rx_dropped++;
+        pbuf_free(p);
         return;
     }
-    at = rx_in & (RX_RING - 1);
-    to = rx_frame[at];
-    for (i = 0; i + 4 <= length; i += 4)
-        *(u32 *)(to + i) = *(const u32 *)(frame + i);
-    for (; i < length; i++)
-        to[i] = frame[i];
-    rx_length[at] = (u16)length;
+    rx_pbuf[rx_in & (RX_RING - 1)] = p;
+    mem_sync();
     rx_in = rx_in + 1;
     if (waiting + 1 > ipstack_stats.rx_most)
         ipstack_stats.rx_most = waiting + 1;
@@ -209,20 +215,14 @@ static void loop(void *arg)
         if (++ticks % 10 == 0 || !have_mac)
             watch_link();               /* every 100 ms or so */
         while (rx_out != rx_in) {
-            u32 at = rx_out & (RX_RING - 1), length = rx_length[at];
-            struct pbuf *p = pbuf_alloc(PBUF_RAW, (u16_t)length, PBUF_POOL);
+            struct pbuf *p = rx_pbuf[rx_out & (RX_RING - 1)];
 
-            if (!p) {
-                ipstack_stats.rx_no_pbuf++;
-            } else {
-                pbuf_take(p, rx_frame[at], (u16_t)length);
-                if (nif.input(p, &nif) != ERR_OK) {
-                    pbuf_free(p);
-                    ipstack_stats.rx_refused++;
-                }
-                ipstack_stats.rx++;
-            }
             rx_out = rx_out + 1;
+            if (nif.input(p, &nif) != ERR_OK) {
+                pbuf_free(p);
+                ipstack_stats.rx_refused++;
+            }
+            ipstack_stats.rx++;
         }
         ipstack_stats.pbufs_used = lwip_stats.memp[MEMP_PBUF_POOL]->used;
         ipstack_stats.pbufs_most = lwip_stats.memp[MEMP_PBUF_POOL]->max;

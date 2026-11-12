@@ -1,7 +1,6 @@
 /* lwIP's operating system layer on the console's kernel: semaphores are the kernel's
  * own, a mailbox is a ring behind one, a thread is ExCreateThread pinned as the file
- * servers' are, the lightweight protection is a critical section (it nests, and no
- * lwIP function is called above thread level: link.c brings frames in on a thread). */
+ * servers' are, the lightweight protection is a spin lock (below). */
 #include "lwip/opt.h"
 #include "lwip/sys.h"
 #include "lwip/err.h"
@@ -14,9 +13,6 @@ extern void *ExAllocatePoolTypeWithTag(u32 bytes, u32 tag, u32 pool);
 extern void ExFreePool(void *p);
 extern u32  KeSetPriorityThread(void *thread, u32 priority);
 extern u32  KeSetAffinityThread(void *thread, u32 affinity, u32 *previous);
-extern void RtlInitializeCriticalSection(void *section);
-extern void RtlEnterCriticalSection(void *section);
-extern void RtlLeaveCriticalSection(void *section);
 
 #define STATUS_TIMEOUT  0x102u
 #define TAG             0x70697773u     /* "swip" */
@@ -217,21 +213,38 @@ u32_t sys_now(void)
     return (u32_t)((u64)t / 10000u);
 }
 
-static u32 section[8] __attribute__((aligned(8)));
+/* A spin lock, not a critical section: link.c takes receive buffers from lwIP's pool on the
+ * USB processor at DISPATCH_LEVEL, and the pool is guarded by this. lwIP's protected
+ * stretches are a few instructions and wait for nothing, and they may nest: the processor
+ * that holds the lock (DISPATCH_LEVEL, nobody else runs there) only counts. */
+static KSPIN_LOCK guard;
+static volatile u32 holder = 0xFFFFFFFFu, depth;
+#define NESTED  0xFFFFFFFFu
 
 void sys_init(void)
 {
-    RtlInitializeCriticalSection(section);
 }
 
 sys_prot_t sys_arch_protect(void)
 {
-    RtlEnterCriticalSection(section);
-    return 0;
+    u32 irql;
+
+    if (holder == ke_processor() && ke_irql() >= 2) {
+        depth++;
+        return NESTED;
+    }
+    irql = KfAcquireSpinLock(&guard);
+    holder = ke_processor();
+    depth = 1;
+    return irql;
 }
 
 void sys_arch_unprotect(sys_prot_t was)
 {
-    (void)was;
-    RtlLeaveCriticalSection(section);
+    if (was == NESTED) {
+        depth--;
+        return;
+    }
+    holder = 0xFFFFFFFFu;
+    KfReleaseSpinLock(&guard, was);
 }

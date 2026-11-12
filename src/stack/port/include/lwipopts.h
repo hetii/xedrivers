@@ -22,15 +22,15 @@
 #define MEM_SIZE                        (640 * 1024)    /* what is being sent lives here: 8 connections' TCP_SND_BUF and some */
 #define MEMP_NUM_PBUF                   64
 #define MEMP_NUM_UDP_PCB                8
-#define MEMP_NUM_TCP_PCB                24
-#define MEMP_NUM_TCP_PCB_LISTEN         12
+#define MEMP_NUM_TCP_PCB                48      /* TIME_WAIT ones are taken back when short */
+#define MEMP_NUM_TCP_PCB_LISTEN         32      /* every server, and a PASV listener a FTP transfer: 12 gave 425 */
 #define MEMP_NUM_TCP_SEG                512
 #define MEMP_NUM_NETBUF                 32
-#define MEMP_NUM_NETCONN                40
+#define MEMP_NUM_NETCONN                64
 #define MEMP_NUM_TCPIP_MSG_API          16
 #define MEMP_NUM_TCPIP_MSG_INPKT        64
 #define MEMP_NUM_SYS_TIMEOUT            16
-#define PBUF_POOL_SIZE                  768     /* a received frame each: 1.2 MB */
+#define PBUF_POOL_SIZE                  768     /* a received frame each: 1.2 MB; 512 ran dry by two cards, 1024 left no system memory for xenfs */
 #define PBUF_POOL_BUFSIZE               1536
 
 /* --- protocols -------------------------------------------------------------- */
@@ -63,12 +63,12 @@
 #define TCP_MSS                         1460
 #define LWIP_WND_SCALE                  1
 #define TCP_RCV_SCALE                   3
-#define TCP_WND                         (256 * 1024)
+#define TCP_WND                         (192 * 1024)    /* eight of them nearly fit the pool */
 #define TCP_SND_BUF                     (64 * 1024)     /* four senders of 128 KB ran a 256 KB heap dry and timed out */
 #define TCP_SND_QUEUELEN                ((4 * TCP_SND_BUF) / TCP_MSS)
 #define TCP_SNDLOWAT                    32768   /* a 16-bit field in lwIP */
 #define TCP_QUEUE_OOSEQ                 1
-#define TCP_OOSEQ_MAX_PBUFS             300
+#define TCP_OOSEQ_MAX_PBUFS             64      /* a connection's holes may not hold the pool */
 #define LWIP_TCP_SACK_OUT               1
 #define LWIP_TCP_MAX_SACK_NUM           4
 #define LWIP_TCP_TIMESTAMPS             0

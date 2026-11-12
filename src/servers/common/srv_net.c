@@ -33,6 +33,7 @@ extern int NetDll_select(u32 caller, int nfds, void *readfds, void *writefds, vo
 #define SOCK_STREAM     1
 #define SOCK_DGRAM      2
 #define IPPROTO_TCP     6
+#define TCP_NODELAY     1
 #define IPPROTO_UDP     17
 #define SOL_SOCKET      0xFFFF
 #define SO_REUSEADDR    0x0004
@@ -132,6 +133,14 @@ SRV_SOCK srv_accept(SRV_SOCK listener, u32 *peer)
         u32 ms = SEND_TIMEOUT_MS;
 
         NetDll_setsockopt(CALLER_SYSAPP, s, SOL_SOCKET, SO_SNDTIMEO, &ms, 4);
+    }
+    {
+        /* a reply goes out in pieces (an RPC header, then the data): without this the
+         * last piece waits for the peer's delayed acknowledgement -- NFS read by four
+         * connections 73.9 Mbit/s on the own stack, 169.9 with it */
+        u32 one = 1;
+
+        NetDll_setsockopt(CALLER_SYSAPP, s, IPPROTO_TCP, TCP_NODELAY, &one, 4);
     }
     if (peer)
         *peer = a.address;

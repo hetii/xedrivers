@@ -21,7 +21,10 @@
 # would hold -- a single plugin, so one line.
 
 NAME     := xedrivers
-BASE     := 0x91C00000
+# The plugin's load address. stack=1 starts 1 MB lower: from 0x91C00000 the image has 3 MB
+# before launch.xex (0x91F00000), and lwIP's buffers with multipath=1 made 3.2 MB, which
+# never loaded; below lies Nova.xex (Aurora's, up to 0x91AA5000) and nothing else.
+BASE     := $(if $(filter 1,$(stack)),0x91B00000,0x91C00000)
 ORDINALS := 21256.0
 
 # Modes. MODE: who gets the frames -- standalone (the built-in responder on IP),
