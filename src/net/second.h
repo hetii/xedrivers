@@ -26,7 +26,7 @@ typedef struct {
     u32 arp_replies;
     u32 in;                 /* frames handed to xnet */
     u32 out;                /* frames sent for it */
-    u32 out_refused;        /* (no longer counted: frames wait in the second way's own queue) */
+    u32 out_refused;        /* stack=1: frames the full queue refused (they wait in the stack's own) */
     u32 flows;              /* learned */
     u32 not_ours;           /* on the second card, for neither address */
     u32 no_xnet_ip;         /* came before xnet had said its address */

@@ -377,7 +377,14 @@ u32 second_rx_slow(NET_DEV *nd, const u8 *frame, u32 length)
  * here, rewritten in the copy (xnet's packet is left as it was), and xnet is told it went;
  * the queue empties as the card takes frames. Full, a frame is dropped as the wire would
  * drop it: TCP slows that connection, and no other. */
+#if XE_STACK
+/* The own stack has a queue of its own before this one (src/stack/link.c), and a frame it
+ * is refused waits there: here a short one will do, and full it refuses -- the frame is
+ * not lost. 256 here as well left the NFS server no system memory for a thread. */
+#define QUEUE           64u
+#else
 #define QUEUE           256u            /* frames, a power of two: 389 KB */
+#endif
 
 static u8 queue_frame[QUEUE][ETH_FRAME_MAX] __attribute__((aligned(4)));
 static u16 queue_length[QUEUE];
@@ -458,6 +465,13 @@ u32 second_tx_slow(const u8 *frame, u32 length, u32 *sent)
         second_drain();
         return 1;
     }
+#if XE_STACK
+    *sent = 0;                          /* the own stack keeps it and sends it again */
+    second_stats.out_refused++;
+    second_drain();
+    if (second_refused(&stuck, tb(), HOLD_TICKS, QUIT_TICKS) != SECOND_QUIT)
+        return 1;
+#endif
     /* full: the card takes frames too slowly, or none at all */
     second_stats.out_dropped++;
     if (second_refused(&stuck, tb(), HOLD_TICKS, QUIT_TICKS) == SECOND_QUIT) {

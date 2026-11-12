@@ -23,6 +23,7 @@
 
 #include "ipstack.h"
 #include "file.h"
+extern volatile u32 ipstack_cpu;
 
 #if XE_STACK
 
@@ -294,6 +295,9 @@ void ipstack_init(void)
 
     if (file_setting("xedrivers.ini", "stack_servers", value, sizeof(value)))
         ipstack_servers = value[0] == '1';
+    if (file_setting("xedrivers.ini", "stack_cpu", value, sizeof(value)) &&
+        value[0] >= '0' && value[0] <= '5')
+        ipstack_cpu = (u32)(value[0] - '0');    /* the hardware thread of lwIP's threads */
     KeInitializeEvent(&wake, 1, 0);
     tcpip_init(started, 0);
 }

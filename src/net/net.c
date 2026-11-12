@@ -390,8 +390,8 @@ void net_tx_done(NET_DEV *nd)
         return;
     }
     second_tx_done(nd);
-    if (uplink() == nd)
-        ipstack_tx_done();
+    if (uplink() == nd || second_is(nd))
+        ipstack_tx_done();              /* the own stack's queue waits for either card */
     if (net_tx_idle && uplink() == nd)
         net_tx_idle();
 }
