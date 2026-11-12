@@ -1347,6 +1347,8 @@ def keep(ctx, test, streams, direction, bytes_per_s, a, runs=None):
     full = dict(row, **shape(test, streams), second_host=SECOND_HOST or None,
                 runs_mbit_s=[round(r * 8 / 1e6, 1) for r in (runs or [bytes_per_s])],
                 median_of=len(runs or [bytes_per_s]), time=time.strftime("%H:%M:%S"))
+    if SECOND_HOST and test.startswith("xeftp"):
+        full["pieces_per_session"] = PIECES
     for k in ("stack", "build", "cards", "pc_flow_control"):
         row.pop(k, None)                # kept in the runs log; the table keys stay as they were
     if test.startswith(("xeftp", "xenfs", "mix")) and ctx.get("servers"):
@@ -1761,6 +1763,47 @@ def udp_run(sym, ip, seconds, size, pace=0):
     return (last - first) / (end - begin), (sent1 - sent0) / (end - begin)
 
 
+def udp_down_run(sym, ip, seconds, size):
+    """UDP out of the standalone stack's generator (stack_blast) to this PC, as fast as the
+    card takes it: the figure is what the PC received between its first and last datagram.
+    (received bytes/s, datagrams the console said it sent, datagrams received)"""
+    port = 5009
+    r = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    r.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 32 << 20)
+    r.bind(("", port))
+    r.settimeout(3)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for _ in range(5):                  # the generator answers the last peer that spoke
+        s.sendto(b"x", (ip, 9))
+        time.sleep(0.05)
+    count = int(seconds * 260e6 / 8 / (size + 42))     # more than the card can send in that time
+    got, first, last = 0, None, None
+    done = threading.Event()
+    t = threading.Thread(target=lambda: (command(sym, CMD["blast"], count, size, port, wait=seconds * 4 + 30),
+                                         done.set()), daemon=True)
+    t.start()
+    n = 0
+    while True:
+        try:
+            b = r.recv(65536)
+        except socket.timeout:
+            if done.is_set() or first is not None:
+                break
+            continue
+        now = time.time()
+        if first is None:
+            first = now
+        else:
+            got += len(b)
+        last = now
+        n += 1
+    sent = read_struct(sym, "stack_stats")["blast_sent"]
+    r.close()
+    if first is None or last <= first:
+        raise SystemExit("udp down: nothing received")
+    return got / (last - first), sent, n
+
+
 def bench_servers(a, ctx, ways):
     """xeftp, xenfs and mix: a run that fails gives no figure; it is said, with what
     still answers, and kept as 0 with the reason (once, as a new row)."""
@@ -1957,6 +2000,15 @@ def bench(sym, argv):
     if a.test in ("xeftp", "xenfs", "mix"):
         GUARD_S = a.guard
         bench_servers(a, ctx, ways)
+        return
+    if a.test == "udp" and a.which == "down":
+        runs = [udp_down_run(sym, a.ip, a.seconds, a.size) for _ in range(a.repeat)]
+        rate = median([r[0] for r in runs])
+        print("udp  down %d B  console->pc  %6.1f Mbit/s (%5.1f MB/s) received by the PC; console "
+              "sent %d, PC got %d datagrams%s" % (
+                  a.size, rate * 8 / 1e6, rate / 1e6, runs[-1][1], runs[-1][2],
+                  "  median of %d" % a.repeat if a.repeat > 1 else ""))
+        keep(ctx, "udp generator %d B" % a.size, 1, DIRECTION["down"], rate, a, [r[0] for r in runs])
         return
     if a.test == "udp":
         runs = [udp_run(sym, a.ip, a.seconds, a.size, a.pace or 0) for _ in range(a.repeat)]
