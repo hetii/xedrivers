@@ -61,6 +61,9 @@ typedef struct {
     u32  (*match)(const u8 *interface, const u8 *device);
     void (*attached)(USB_DEV *dev);
     void (*detached)(USB_DEV *dev);
+    /* The device's last endpoint is closed and the kernel told: nothing of it completes
+     * any more, and what was taken for it may go. DISPATCH_LEVEL; 0: not wanted. */
+    void (*gone)(USB_DEV *dev);
 } USB_CLIENT;
 
 /* The entry for a routine the kernel calls at DISPATCH_LEVEL: why, in usb.c. `load` puts

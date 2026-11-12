@@ -55,8 +55,15 @@
 volatile RTW_STATS rtw_stats[USB_MAX_DEVICES];
 volatile WL_STA_STATS rtw_sta_stats[USB_MAX_DEVICES];
 
-static RTW rtw_inst[RTW_MAX];
-static u8 efuse_maps[RTW_MAX][RTW_EFUSE_LOGICAL];
+/* A card's state (211 KB with its efuse map) is taken when it starts and given back when it
+ * is gone (rtw8822b_release): with no RTL8822BU in the console the driver holds none. */
+extern void *ExAllocatePoolTypeWithTag(u32 bytes, u32 tag, u32 pool);
+extern void ExFreePool(void *p);
+
+typedef struct {
+    RTW r;
+    u8 efuse[RTW_EFUSE_LOGICAL];
+} RTW_SLOT;
 
 /* The products rtw88_8822bu takes that are known here; more as they are tried. */
 static u32 rtw8822b_match(const u8 *device, const u8 *interface)
@@ -84,31 +91,39 @@ static void op_set_aggregation(void *c, u32 tid, u32 on);
 
 static RTW *take_instance(NET_DEV *nd)
 {
+    RTW_SLOT *slot = (RTW_SLOT *)nd->priv;
+    RTW *r;
     u32 i;
 
-    for (i = 0; i < RTW_MAX; i++) {
-        RTW *r = &rtw_inst[i];
-
-        if (r->in_use && r->nd != nd)
-            continue;
-        r->in_use = 1;
-        r->nd = nd;
-        r->dev = nd->usb;
-        r->st = &rtw_stats[nd->usb->index];
-        r->efuse = efuse_maps[i];
-        r->ops.context = r;
-        r->ops.tx = op_tx;
-        r->ops.tx_space = op_tx_space;
-        r->ops.set_channel = op_set_channel;
-        r->ops.set_mac = op_set_mac;
-        r->ops.set_link = op_set_link;
-        r->ops.set_key = op_set_key;
-        r->ops.clear_keys = op_clear_keys;
-        r->ops.set_aggregation = op_set_aggregation;
-        nd->priv = r;
-        return r;
+    if (!slot) {                        /* a bring-up again keeps what it has */
+        slot = (RTW_SLOT *)ExAllocatePoolTypeWithTag(sizeof(*slot), 0x53575452u /* "RTWS" */, 2);
+        if (!slot)
+            return 0;
+        for (i = 0; i < sizeof(*slot) / 4; i++)
+            ((u32 *)slot)[i] = 0;
     }
-    return 0;
+    r = &slot->r;
+    r->in_use = 1;
+    r->nd = nd;
+    r->dev = nd->usb;
+    r->st = &rtw_stats[nd->usb->index];
+    r->efuse = slot->efuse;
+    r->ops.context = r;
+    r->ops.tx = op_tx;
+    r->ops.tx_space = op_tx_space;
+    r->ops.set_channel = op_set_channel;
+    r->ops.set_mac = op_set_mac;
+    r->ops.set_link = op_set_link;
+    r->ops.set_key = op_set_key;
+    r->ops.clear_keys = op_clear_keys;
+    r->ops.set_aggregation = op_set_aggregation;
+    nd->priv = slot;
+    return r;
+}
+
+static void rtw8822b_release(void *priv)
+{
+    ExFreePool(priv);
 }
 
 static u32 fail(RTW *r, u32 step, u32 status)
@@ -571,6 +586,7 @@ const XE_DRIVER xe_driver_rtw8822b = {
     .match = rtw8822b_match,
     .start = rtw8822b_start,
     .detached = rtw8822b_detached,
+    .release = rtw8822b_release,
     .xmit = rtw8822b_xmit,
     .tx_space = rtw8822b_tx_space,
     .command = rtw8822b_command,

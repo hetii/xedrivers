@@ -686,9 +686,13 @@ void net_bring_up(USB_DEV *dev)
     set_mode(xe_config.mode);
 }
 
+static void give_back(void);
+
 void net_tick(void)
 {
     u32 i;
+
+    give_back();
 
     if (net_ack_holding)
         acks_flush(route_tx, 1);        /* nothing came in to send them by: at most a tick late */
@@ -813,6 +817,62 @@ static u32 client_match(const u8 *interface, const u8 *device)
     return 1;
 }
 
+/* What a gone device leaves behind, given back by the worker (net_tick) two ticks later:
+ * the driver's state and the slot's block of transfer buffers. A card that is not in the
+ * console takes no memory. */
+#define LEFTOVERS 8u
+static struct {
+    const XE_DRIVER *drv;
+    void *priv;
+    u8 *rings;
+    volatile u32 due;                   /* ticks to wait yet; 0: a free place */
+} leftover[LEFTOVERS];
+
+volatile u32 net_stats_released;        /* devices whose memory went back */
+volatile u32 net_stats_kept;            /* ... and whose could not be (no place: kept) */
+
+/* From the USB core at DISPATCH_LEVEL, once the device's last endpoint is closed and
+ * before its slot is free. */
+static void client_gone(USB_DEV *dev)
+{
+    NET_DEV *nd = &net_devs[dev->index];
+    u32 i;
+
+    for (i = 0; i < LEFTOVERS; i++)
+        if (!leftover[i].due)
+            break;
+    if (i == LEFTOVERS) {
+        net_stats_kept++;               /* the slot keeps them: its next bring-up reuses them */
+        return;
+    }
+    leftover[i].drv = nd->drv;
+    leftover[i].priv = nd->priv;
+    leftover[i].rings = nd->rings;
+    nd->priv = 0;
+    nd->rings = 0;
+    nd->rings_size = 0;
+    mem_sync();
+    leftover[i].due = 3;
+}
+
+/* net_tick, PASSIVE_LEVEL. */
+static void give_back(void)
+{
+    u32 i;
+
+    for (i = 0; i < LEFTOVERS; i++) {
+        if (!leftover[i].due || leftover[i].due-- != 1)
+            continue;
+        if (leftover[i].priv && leftover[i].drv && leftover[i].drv->release)
+            leftover[i].drv->release(leftover[i].priv);
+        if (leftover[i].rings)
+            MmFreePhysicalMemory(2, leftover[i].rings);
+        leftover[i].priv = 0;
+        leftover[i].rings = 0;
+        net_stats_released++;
+    }
+}
+
 /* Inside AddDevice: the slot's NET_DEV takes the driver just matched. */
 static void client_attached(USB_DEV *dev)
 {
@@ -830,7 +890,7 @@ static void client_attached(USB_DEV *dev)
     dev->client = nd;
 }
 
-static const USB_CLIENT client = { client_match, client_attached, net_detached };
+static const USB_CLIENT client = { client_match, client_attached, net_detached, client_gone };
 
 void net_register(void)
 {

@@ -724,6 +724,10 @@ static void close_complete(URB *urb, u32 status)
         return;
     }
 
+    /* every endpoint is closed: what was taken for the device may go -- told before the
+     * slot is free, so a device that comes next to it does not race this */
+    if (client && client->gone)
+        client->gone(dev);
     endpoint = dev->device;
     dev->device = 0;
     mem_sync();
