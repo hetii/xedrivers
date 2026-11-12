@@ -45,12 +45,6 @@ static int flags_in(u32 flags)
            (flags & WS_MSG_WAITALL ? MSG_WAITALL : 0);
 }
 
-static s32 unsupported(void)
-{
-    ws_stats.unsupported++;
-    return ws_fail(WSAEOPNOTSUPP);
-}
-
 /* NetDll_socket (3) */
 u32 ws_socket(u32 caller, s32 family, s32 type, s32 protocol)
 {
@@ -86,6 +80,7 @@ s32 ws_closesocket(u32 caller, u32 s)
     if (fd < 0)
         return WS_ERROR;
     ws_stats.calls++;
+    ws_overlap_forget(s);
     ws_forget(fd);
     return lwip_close(fd) < 0 ? ws_fail_errno() : 0;
 }
@@ -267,12 +262,16 @@ s32 ws_recvfrom(u32 caller, u32 s, void *buffer, s32 length, u32 flags,
 s32 ws_send(u32 caller, u32 s, const void *buffer, s32 length, u32 flags)
 {
     s32 fd = ws_fd(s);
+    int r;
 
     (void)caller;
     if (fd < 0)
         return WS_ERROR;
     ws_stats.calls++;
-    return done((int)lwip_send(fd, buffer, (size_t)length, flags_in(flags)));
+    r = (int)lwip_send(fd, buffer, (size_t)length, flags_in(flags));
+    if (r < 0 && (*ipstack_errno() == EWOULDBLOCK || *ipstack_errno() == EAGAIN))
+        ws_write_blocked(s);                    /* WSAEventSelect's FD_WRITE is due again */
+    return done(r);
 }
 
 /* NetDll_sendto (24) */
@@ -307,9 +306,9 @@ s32 ws_WSARecv(u32 caller, u32 s, WS_BUF *buffers, u32 count, u32 *received, u32
     (void)caller; (void)completion;
     if (fd < 0)
         return WS_ERROR;
-    if (overlapped)
-        return unsupported();
     ws_stats.calls++;
+    if (overlapped)
+        return ws_overlapped_recv(s, fd, buffers, count, received, overlapped);
     if (!buffers || !count || count > IOVECS)
         return ws_fail(WSAEINVAL);
     for (i = 0; i < count; i++) {
@@ -341,9 +340,9 @@ s32 ws_WSASend(u32 caller, u32 s, const WS_BUF *buffers, u32 count, u32 *sent, u
     (void)caller; (void)completion;
     if (fd < 0)
         return WS_ERROR;
-    if (overlapped)
-        return unsupported();
     ws_stats.calls++;
+    if (overlapped)
+        return ws_overlapped_send(s, fd, buffers, count, sent, overlapped);
     if (!buffers || !count || count > IOVECS)
         return ws_fail(WSAEINVAL);
     for (i = 0; i < count; i++) {
@@ -359,12 +358,6 @@ s32 ws_WSASend(u32 caller, u32 s, const WS_BUF *buffers, u32 count, u32 *sent, u
     return 0;
 }
 
-/* Not served yet (winsock.h): NetDll_WSARecvFrom (21) and NetDll_WSASendTo (25) take ten
- * arguments, NetDll_WSAGetOverlappedResult (16), NetDll_WSACancelOverlappedIO (17),
- * NetDll_WSAEventSelect (35). */
-s32 ws_unsupported(void)
-{
-    return unsupported();
-}
+
 
 #endif /* XE_STACK */

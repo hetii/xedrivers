@@ -17,10 +17,11 @@
  *   addr.c      start-up and clean-up, the console's address and link (XNetGetTitleXnAddr)
  *   lookup.c    XNetDnsLookup on lwIP's DNS
  *
- * Not served yet, and answered WSAEOPNOTSUPP: overlapped calls (WSARecv / WSASend with an
- * OVERLAPPED, WSARecvFrom, WSASendTo, WSAGetOverlappedResult, WSACancelOverlappedIO),
- * WSAEventSelect, and xnet's secure transport for games (VDP sockets, XNetConnect, keys,
- * QoS): a game's network play does not work with stack=1.
+ *   overlap.c   overlapped sends and receives (an OVERLAPPED and its event), WSARecvFrom,
+ *               WSASendTo, WSAGetOverlappedResult, WSACancelOverlappedIO, WSAEventSelect
+ *
+ * Not served: xnet's secure transport for games (VDP sockets, XNetConnect, keys, QoS) -- a
+ * game's network play does not work with stack=1.
  */
 #ifndef XE_WINSOCK_H
 #define XE_WINSOCK_H
@@ -168,6 +169,12 @@ s32  ws_WSAGetLastError(void);
 
 /* calls.c: 0 when the stack is up, else WSAENETDOWN set (it waits a while first). */
 u32  ws_ready(void);
+
+/* overlap.c */
+s32  ws_overlapped_recv(u32 s, s32 fd, WS_BUF *bufs, u32 count, u32 *received, void *ov);
+s32  ws_overlapped_send(u32 s, s32 fd, const WS_BUF *bufs, u32 count, u32 *sent, void *ov);
+void ws_write_blocked(u32 s);
+void ws_overlap_forget(u32 s);
 
 /* addr.c */
 void ws_to_lwip(const WS_SOCKADDR_IN *from, void *to);

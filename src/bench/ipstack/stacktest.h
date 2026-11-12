@@ -14,5 +14,6 @@ typedef struct {
 extern volatile STACKTEST_STATS stacktest_stats;
 
 u32 stacktest_start(void);      /* 0 when started now, 1 if it was */
+u32 stacktest_overlap_start(void);  /* the overlapped echo on 5310 */
 
 #endif

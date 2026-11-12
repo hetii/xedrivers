@@ -35,10 +35,10 @@ extern s32 XexGetProcedureAddress(void *handle, u32 ordinal, void **address);
     X(7,  ws_setsockopt)       X(8,  ws_getsockopt)       X(9,  ws_getsockname)      \
     X(10, ws_getpeername)      X(11, ws_bind)             X(12, ws_connect)          \
     X(13, ws_listen)           X(14, ws_accept)           X(15, ws_select)           \
-    X(16, ws_unsupported)      X(17, ws_unsupported)      X(18, ws_recv)             \
-    X(19, ws_WSARecv)          X(20, ws_recvfrom)         X(21, ws_unsupported)      \
+    X(16, ws_WSAGetOverlappedResult) X(17, ws_WSACancelOverlappedIO)      X(18, ws_recv)             \
+    X(19, ws_WSARecv)          X(20, ws_recvfrom)         X(21, ws_WSARecvFrom)      \
     X(22, ws_send)             X(23, ws_WSASend)          X(24, ws_sendto)           \
-    X(25, ws_unsupported)      X(35, ws_unsupported)      X(36, ws_WSAStartupEx)     \
+    X(25, ws_WSASendTo)        X(35, ws_WSAEventSelect)      X(36, ws_WSAStartupEx)     \
     X(51, ws_XNetStartup)                                                             \
     X(52, ws_XNetCleanup)      X(67, ws_XNetDnsLookup)    X(68, ws_XNetDnsRelease)   \
     X(73, ws_XNetGetTitleXnAddr) X(75, ws_XNetGetEthernetLinkStatus)                 \
@@ -49,7 +49,7 @@ extern s32 XexGetProcedureAddress(void *handle, u32 ordinal, void **address);
     X(ws_WSAStartup) X(ws_WSACleanup) X(ws_socket) X(ws_closesocket) X(ws_shutdown)   \
     X(ws_ioctlsocket) X(ws_setsockopt) X(ws_getsockopt) X(ws_getsockname)             \
     X(ws_getpeername) X(ws_bind) X(ws_connect) X(ws_listen) X(ws_accept) X(ws_select) \
-    X(ws_unsupported) X(ws_recv) X(ws_WSARecv) X(ws_recvfrom) X(ws_send)              \
+    X(ws_WSAGetOverlappedResult) X(ws_WSACancelOverlappedIO) X(ws_WSAEventSelect) X(ws_recv) X(ws_WSARecv) X(ws_recvfrom) X(ws_send)              \
     X(ws_WSASend) X(ws_sendto)                                                         \
     X(ws_WSAStartupEx) X(ws_XNetStartup) X(ws_XNetCleanup) X(ws_XNetDnsLookup)        \
     X(ws_XNetDnsRelease) X(ws_XNetGetTitleXnAddr) X(ws_XNetGetEthernetLinkStatus)     \
@@ -57,6 +57,44 @@ extern s32 XexGetProcedureAddress(void *handle, u32 ordinal, void **address);
 
 #define STUB(fn) USB_ENTRY(fn##_entry, fn); void fn##_entry(void);
 FUNCTIONS(STUB)
+
+/* WSARecvFrom and WSASendTo take ten arguments. The console's caller leaves the ninth and
+ * tenth in its frame at SP+0x54 and SP+0x5C (8-byte slots after the home area of the first
+ * eight; xam's own NetDll_WSASendTo reads its tenth as `lwz r30,0xEC(r1)` after a frame of
+ * 0x90); gcc's callee looks for them at 8 and 12 of its caller's frame -- this stub's. */
+#define STUB10(fn)                                                                  \
+    __asm__(".section .text\n"                                                       \
+            ".machine ppc64\n"                                                       \
+            ".globl " #fn "_entry\n"                                                 \
+            #fn "_entry:\n"                                                          \
+            "    mflr    0\n"                                                        \
+            "    stw     0, 4(1)\n"                                                  \
+            "    stwu    1, -176(1)\n"                                               \
+            "    lwz     0, 176+0x54(1)\n"                                           \
+            "    stw     0, 8(1)\n"                                                  \
+            "    lwz     0, 176+0x5c(1)\n"                                           \
+            "    stw     0, 12(1)\n"                                                 \
+            "    std 14, 16(1)\n  std 15, 24(1)\n  std 16, 32(1)\n  std 17, 40(1)\n"  \
+            "    std 18, 48(1)\n  std 19, 56(1)\n  std 20, 64(1)\n  std 21, 72(1)\n"  \
+            "    std 22, 80(1)\n  std 23, 88(1)\n  std 24, 96(1)\n  std 25, 104(1)\n" \
+            "    std 26, 112(1)\n std 27, 120(1)\n std 28, 128(1)\n std 29, 136(1)\n" \
+            "    std 30, 144(1)\n std 31, 152(1)\n"                                  \
+            "    lis 12, " #fn "@ha\n    addi 12, 12, " #fn "@l\n"                   \
+            "    mtctr   12\n"                                                       \
+            "    bctrl\n"                                                            \
+            "    ld 14, 16(1)\n   ld 15, 24(1)\n   ld 16, 32(1)\n   ld 17, 40(1)\n"   \
+            "    ld 18, 48(1)\n   ld 19, 56(1)\n   ld 20, 64(1)\n   ld 21, 72(1)\n"   \
+            "    ld 22, 80(1)\n   ld 23, 88(1)\n   ld 24, 96(1)\n   ld 25, 104(1)\n"  \
+            "    ld 26, 112(1)\n  ld 27, 120(1)\n  ld 28, 128(1)\n  ld 29, 136(1)\n"  \
+            "    ld 30, 144(1)\n  ld 31, 152(1)\n"                                   \
+            "    addi    1, 1, 176\n"                                                \
+            "    lwz     0, 4(1)\n"                                                  \
+            "    mtlr    0\n"                                                        \
+            "    blr\n"                                                              \
+            ".machine any\n");                                                       \
+    void fn##_entry(void);
+STUB10(ws_WSARecvFrom)
+STUB10(ws_WSASendTo)
 
 static const struct {
     u32 ordinal;
