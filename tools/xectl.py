@@ -81,7 +81,8 @@ STRUCTS = {
     "net_win_stats": ["opened", "not_taken", "patched", "held", "released", "probed", "no_room",
                       "dropped", "held_now", "held_most"],
     "ipstack_stats": ["up", "ip", "rx", "rx_dropped", "rx_no_pbuf", "rx_refused", "rx_most", "tx",
-                      "tx_dropped", "tx_most", "tx_starved", "asserts", "assert_text"],
+                      "tx_dropped", "tx_most", "tx_starved", "asserts", "assert_text", "pbufs_used",
+                      "pbufs_most", "pbufs_refused"],
     "stacktest_stats": ["recv_hi", "recv_lo", "sent_hi", "sent_lo", "started", "accepts", "active",
                         "errors"],
     "second_stats": ["ip", "xnet_ip", "slot", "arp_replies", "in", "out", "out_refused", "flows",
@@ -805,22 +806,22 @@ def status(sym):
                   f["stors"], (f["received_hi"] << 32 | f["received_lo"]) >> 20, f["lists"],
                   f["data_failed"], f["wait_failed"], f["accept_failed"],
                   f["read_failed"], f["send_failed"], f["no_thread"]))
+    if "ipstack_stats" in sym:
+        k = read_struct(sym, "ipstack_stats")
+        text = ""
+        if k["asserts"] and k["assert_text"]:
+            text = " last: %r" % read(k["assert_text"], 80).split(b"\0")[0].decode("ascii", "replace")
+        print("ipstack  up=%d ip=%s rx=%d dropped=%d no_pbuf=%d refused=%d (most %d waiting) tx=%d "
+              "dropped=%d (most %d queued) starved=%d pbufs=%d (most %d, none %d times) asserts=%d%s" % (
+                  k["up"], ip(k["ip"]), k["rx"], k["rx_dropped"], k["rx_no_pbuf"], k["rx_refused"],
+                  k["rx_most"], k["tx"], k["tx_dropped"], k["tx_most"], k["tx_starved"],
+                  k["pbufs_used"], k["pbufs_most"], k["pbufs_refused"], k["asserts"], text))
+    if "stacktest_stats" in sym:
+        k = read_struct(sym, "stacktest_stats")
+        print("stacktest started=%d accepts=%d active=%d errors=%d recv=%d MB sent=%d MB" % (
+            k["started"], k["accepts"], k["active"], k["errors"],
+            (k["recv_hi"] << 32 | k["recv_lo"]) >> 20, (k["sent_hi"] << 32 | k["sent_lo"]) >> 20))
     if ss:
-        if "ipstack_stats" in sym:
-            k = read_struct(sym, "ipstack_stats")
-            text = ""
-            if k["asserts"] and k["assert_text"]:
-                text = " last: %r" % read(k["assert_text"], 80).split(b"\0")[0].decode("ascii", "replace")
-            print("ipstack  up=%d ip=%s rx=%d dropped=%d no_pbuf=%d refused=%d (most %d waiting) tx=%d "
-                  "dropped=%d (most %d queued) starved=%d asserts=%d%s" % (
-                      k["up"], ip(k["ip"]), k["rx"], k["rx_dropped"], k["rx_no_pbuf"], k["rx_refused"],
-                      k["rx_most"], k["tx"], k["tx_dropped"], k["tx_most"], k["tx_starved"],
-                      k["asserts"], text))
-        if "stacktest_stats" in sym:
-            k = read_struct(sym, "stacktest_stats")
-            print("stacktest started=%d accepts=%d active=%d errors=%d recv=%d MB sent=%d MB" % (
-                k["started"], k["accepts"], k["active"], k["errors"],
-                (k["recv_hi"] << 32 | k["recv_lo"]) >> 20, (k["sent_hi"] << 32 | k["sent_lo"]) >> 20))
         if "net_win_stats" in sym:
             w = read_struct(sym, "net_win_stats")
             print("window   extra=%d KB opened=%d not_taken=%d patched=%d held=%d released=%d probed=%d "

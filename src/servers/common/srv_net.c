@@ -5,6 +5,7 @@
  */
 
 #include "srv.h"
+#include "ipstack.h"       /* stack=1 and `stack_servers = 1`: lwIP's sockets, not xnet's */
 
 extern int NetDll_WSAStartup(u32 caller, u16 version, void *data);
 extern u32 NetDll_socket(u32 caller, int family, int type, int protocol);
@@ -98,6 +99,8 @@ static SRV_SOCK bound(int type, int protocol, u32 port)
 
 SRV_SOCK srv_listen(u32 port, u32 backlog)
 {
+    if (ipstack_servers)
+        return own_listen(port, backlog);
     SRV_SOCK s = bound(SOCK_STREAM, IPPROTO_TCP, port);
 
     if (s >= 0 && NetDll_listen(CALLER_SYSAPP, (u32)s, (int)backlog) < 0) {
@@ -109,11 +112,15 @@ SRV_SOCK srv_listen(u32 port, u32 backlog)
 
 SRV_SOCK srv_udp(u32 port)
 {
+    if (ipstack_servers)
+        return own_udp(port);
     return bound(SOCK_DGRAM, IPPROTO_UDP, port);
 }
 
 SRV_SOCK srv_accept(SRV_SOCK listener, u32 *peer)
 {
+    if (ipstack_servers)
+        return own_accept(listener, peer);
     SOCKADDR_IN a;
     int n = sizeof(a);
     u32 s = NetDll_accept(CALLER_SYSAPP, (u32)listener, &a, &n);
@@ -133,6 +140,8 @@ SRV_SOCK srv_accept(SRV_SOCK listener, u32 *peer)
 
 SRV_SOCK srv_connect(u32 address, u32 port)
 {
+    if (ipstack_servers)
+        return own_connect(address, port);
     SOCKADDR_IN a;
     u32 s, i;
 
@@ -155,6 +164,8 @@ SRV_SOCK srv_connect(u32 address, u32 port)
 
 s32 srv_recv(SRV_SOCK s, void *buffer, u32 length)
 {
+    if (ipstack_servers)
+        return own_recv(s, buffer, length);
     int n = NetDll_recv(CALLER_SYSAPP, (u32)s, buffer, (int)length, 0);
 
     return n < 0 ? -1 : n;
@@ -172,6 +183,8 @@ volatile u32 srv_send_retries, srv_send_last_error;
 
 s32 srv_send(SRV_SOCK s, const void *buffer, u32 length)
 {
+    if (ipstack_servers)
+        return own_send(s, buffer, length);
     const u8 *p = (const u8 *)buffer;
     u32 done = 0, tries = 0;
     int n, e;
@@ -196,6 +209,8 @@ s32 srv_send(SRV_SOCK s, const void *buffer, u32 length)
 
 s32 srv_recvfrom(SRV_SOCK s, void *buffer, u32 length, u32 *address, u32 *port)
 {
+    if (ipstack_servers)
+        return own_recvfrom(s, buffer, length, address, port);
     SOCKADDR_IN a;
     int n = sizeof(a), r = NetDll_recvfrom(CALLER_SYSAPP, (u32)s, buffer, (int)length, 0, &a, &n);
 
@@ -208,6 +223,8 @@ s32 srv_recvfrom(SRV_SOCK s, void *buffer, u32 length, u32 *address, u32 *port)
 
 s32 srv_sendto(SRV_SOCK s, const void *buffer, u32 length, u32 address, u32 port)
 {
+    if (ipstack_servers)
+        return own_sendto(s, buffer, length, address, port);
     SOCKADDR_IN a;
     u32 i;
 
@@ -223,6 +240,8 @@ s32 srv_sendto(SRV_SOCK s, const void *buffer, u32 length, u32 address, u32 port
 /* Winsock's fd_set and timeval, as xnet takes them. */
 s32 srv_wait(SRV_SOCK s, u32 ms)
 {
+    if (ipstack_servers)
+        return own_wait(s, ms);
     struct {
         u32 count;
         u32 sockets[1];
@@ -240,6 +259,10 @@ s32 srv_wait(SRV_SOCK s, u32 ms)
 
 void srv_close(SRV_SOCK s)
 {
+    if (ipstack_servers) {
+        own_close(s);
+        return;
+    }
     if (s >= 0)
         NetDll_closesocket(CALLER_SYSAPP, (u32)s);
 }
@@ -249,6 +272,8 @@ void srv_close(SRV_SOCK s)
  * console's one address. */
 u32 srv_local_address(SRV_SOCK s)
 {
+    if (ipstack_servers)
+        return own_host_address();
     SOCKADDR_IN a;
     int n = sizeof(a);
 
@@ -260,6 +285,8 @@ u32 srv_local_address(SRV_SOCK s)
 
 u32 srv_local_port(SRV_SOCK s)
 {
+    if (ipstack_servers)
+        return own_local_port(s);
     SOCKADDR_IN a;
     int n = sizeof(a);
 
@@ -270,6 +297,8 @@ u32 srv_local_port(SRV_SOCK s)
  * every peer. */
 u32 srv_host_address(u32 peer)
 {
+    if (ipstack_servers)
+        return own_host_address();
     struct {
         u32 ina, ina_online;
         u16 port_online;

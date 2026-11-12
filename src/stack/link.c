@@ -12,10 +12,13 @@
 #include "lwip/etharp.h"
 #include "lwip/pbuf.h"
 #include "lwip/priv/tcp_priv.h"
+#include "lwip/stats.h"
+#include "lwip/memp.h"
 #include "netif/ethernet.h"
 #include <string.h>
 
 #include "ipstack.h"
+#include "file.h"
 
 #if XE_STACK
 
@@ -25,6 +28,45 @@
 
 volatile IPSTACK_STATS ipstack_stats;
 volatile u32 ipstack_ready;
+volatile u32 ipstack_servers;
+
+/* A bit a port: the local ports that are the stack's. Read on the USB processor for
+ * every frame; written by threads, which count the sockets that hold each port -- a
+ * listener and the connections accepted on it share one, and it stays the stack's until
+ * the last of them is closed (an FTP data connection outlives its listener). */
+static volatile u32 own_ports[65536 / 32];
+static struct {
+    u16 port, count;
+} holders[96];
+static KSPIN_LOCK ports_lock;
+
+void ipstack_port(u32 port, u32 on)
+{
+    u32 irql, i, spare = 0xFFFFFFFFu;
+
+    port &= 0xFFFFu;
+    if (!port)
+        return;
+    irql = KfAcquireSpinLock(&ports_lock);
+    for (i = 0; i < sizeof(holders) / sizeof(holders[0]); i++) {
+        if (holders[i].count && holders[i].port == port)
+            break;
+        if (!holders[i].count && spare == 0xFFFFFFFFu)
+            spare = i;
+    }
+    if (i == sizeof(holders) / sizeof(holders[0]))
+        i = spare;
+    if (i != 0xFFFFFFFFu) {
+        if (on) {
+            holders[i].port = (u16)port;
+            holders[i].count++;
+            own_ports[port >> 5] |= 1u << (port & 31);
+        } else if (holders[i].count && holders[i].port == port && !--holders[i].count) {
+            own_ports[port >> 5] &= ~(1u << (port & 31));
+        }
+    }
+    KfReleaseSpinLock(&ports_lock, irql);
+}
 
 static struct netif nif;
 static KEVENT wake;
@@ -172,7 +214,7 @@ u32 ipstack_rx_slow(const u8 *frame, u32 length)
     if (ETH_HLEN + ihl + 4 > length)
         return 0;
     port = (u32)ip[ihl + 2] << 8 | ip[ihl + 3];
-    if (port < IPSTACK_PORT_LO || port > IPSTACK_PORT_HI)
+    if (!(own_ports[port >> 5] >> (port & 31) & 1u))
         return 0;
     put(frame, length);
     return 1;
@@ -237,6 +279,9 @@ static void loop(void *arg)
             }
             rx_out = rx_out + 1;
         }
+        ipstack_stats.pbufs_used = lwip_stats.memp[MEMP_PBUF_POOL]->used;
+        ipstack_stats.pbufs_most = lwip_stats.memp[MEMP_PBUF_POOL]->max;
+        ipstack_stats.pbufs_refused = lwip_stats.memp[MEMP_PBUF_POOL]->err;
         if (tx_out != tx_in)
             drain();
         if (tx_starved && tx_in - tx_out < TX_QUEUE / 2) {
@@ -283,6 +328,10 @@ static void started(void *arg)
 
 void ipstack_init(void)
 {
+    char value[4];
+
+    if (file_setting("xedrivers.ini", "stack_servers", value, sizeof(value)))
+        ipstack_servers = value[0] == '1';
     KeInitializeEvent(&wake, 1, 0);
     tcpip_init(started, 0);
 }

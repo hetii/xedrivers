@@ -19,7 +19,7 @@
 
 /* --- memory: all of it the plugin's own image, none taken at run time ------- */
 #define MEM_ALIGNMENT                   8       /* the semaphores inside lwIP's objects */
-#define MEM_SIZE                        (256 * 1024)
+#define MEM_SIZE                        (640 * 1024)    /* what is being sent lives here: 8 connections' TCP_SND_BUF and some */
 #define MEMP_NUM_PBUF                   64
 #define MEMP_NUM_UDP_PCB                8
 #define MEMP_NUM_TCP_PCB                24
@@ -30,7 +30,7 @@
 #define MEMP_NUM_TCPIP_MSG_API          16
 #define MEMP_NUM_TCPIP_MSG_INPKT        64
 #define MEMP_NUM_SYS_TIMEOUT            16
-#define PBUF_POOL_SIZE                  512     /* a received frame each: 800 KB */
+#define PBUF_POOL_SIZE                  768     /* a received frame each: 1.2 MB */
 #define PBUF_POOL_BUFSIZE               1536
 
 /* --- protocols -------------------------------------------------------------- */
@@ -60,8 +60,8 @@
 #define TCP_MSS                         1460
 #define LWIP_WND_SCALE                  1
 #define TCP_RCV_SCALE                   3
-#define TCP_WND                         (384 * 1024)
-#define TCP_SND_BUF                     (128 * 1024)
+#define TCP_WND                         (256 * 1024)
+#define TCP_SND_BUF                     (64 * 1024)     /* four senders of 128 KB ran a 256 KB heap dry and timed out */
 #define TCP_SND_QUEUELEN                ((4 * TCP_SND_BUF) / TCP_MSS)
 #define TCP_SNDLOWAT                    32768   /* a 16-bit field in lwIP */
 #define TCP_QUEUE_OOSEQ                 1
@@ -93,7 +93,17 @@
 #define LWIP_TIMEVAL_PRIVATE            1
 
 /* --- checks and statistics -------------------------------------------------- */
-#define LWIP_STATS                      0
+#define LWIP_STATS                      1       /* only the pools' use: ipstack_stats shows it */
+#define MEMP_STATS                      1
+#define MEM_STATS                       0
+#define SYS_STATS                       0
+#define LINK_STATS                      0
+#define ETHARP_STATS                    0
+#define IP_STATS                        0
+#define ICMP_STATS                      0
+#define UDP_STATS                       0
+#define TCP_STATS                       0
+#define LWIP_STATS_DISPLAY              0
 #define LWIP_NETIF_STATUS_CALLBACK      0
 #define LWIP_NETIF_LINK_CALLBACK        0
 #define LWIP_NETIF_HOSTNAME             0

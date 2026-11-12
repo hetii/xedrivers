@@ -7,6 +7,7 @@
  *              system (sysarch.c), the C library functions it calls (libc.c)
  *   link.c     the network interface: frames in from the cards (a ring, a thread),
  *              frames out to the uplink (a queue), the address
+ *   ownsock.c  the file servers' sockets on it (srv_net.c's twin), `stack_servers = 1`
  * lwIP itself is not in the repository: the Makefile fetches the release, pinned by
  * sha256, as it does the firmware.
  */
@@ -15,8 +16,6 @@
 
 #include "net.h"
 
-#define IPSTACK_PORT_LO     5300u       /* TCP and UDP ports that are the stack's own, */
-#define IPSTACK_PORT_HI     5399u       /* until its servers say which they listen on */
 
 typedef struct {
     u32 up;                     /* lwIP is running */
@@ -32,6 +31,8 @@ typedef struct {
     u32 tx_starved;             /* times lwIP was told to send again after the queue emptied */
     u32 asserts;                /* lwIP's assertions that failed, and the last one's text */
     const char *assert_text;
+    u32 pbufs_used, pbufs_most; /* of lwIP's pool of receive buffers (PBUF_POOL_SIZE) */
+    u32 pbufs_refused;          /* times the pool had none */
 } IPSTACK_STATS;
 
 #if XE_STACK
@@ -40,6 +41,24 @@ extern volatile IPSTACK_STATS ipstack_stats;
 extern volatile u32 ipstack_ready;
 
 void ipstack_init(void);                /* thread */
+/* A local TCP or UDP port becomes the stack's (`on`) or xnet's again: frames to it are
+ * handed to lwIP and never reach xnet. Whoever binds a socket of the stack says so. */
+void ipstack_port(u32 port, u32 on);
+
+/* 1: the file servers' sockets are the stack's (`stack_servers = 1` in the ini). */
+extern volatile u32 ipstack_servers;
+s32  own_listen(u32 port, u32 backlog);
+s32  own_udp(u32 port);
+s32  own_accept(s32 listener, u32 *peer);
+s32  own_connect(u32 address, u32 port);
+s32  own_recv(s32 s, void *buffer, u32 length);
+s32  own_send(s32 s, const void *buffer, u32 length);
+s32  own_recvfrom(s32 s, void *buffer, u32 length, u32 *address, u32 *port);
+s32  own_sendto(s32 s, const void *buffer, u32 length, u32 address, u32 port);
+s32  own_wait(s32 s, u32 ms);
+void own_close(s32 s);
+u32  own_local_port(s32 s);
+u32  own_host_address(void);
 u32  ipstack_rx_slow(const u8 *frame, u32 length);
 void ipstack_note_slow(const u8 *frame);
 void ipstack_tx_done(void);
@@ -64,6 +83,7 @@ u32 net_stack_tx(const u8 *frame, u32 length);
 
 #else
 
+#define ipstack_servers 0u
 static inline void ipstack_init(void) { }
 static inline u32  ipstack_rx(const u8 *frame, u32 length) { (void)frame; (void)length; return 0; }
 static inline void ipstack_note(const u8 *frame, u32 length) { (void)frame; (void)length; }
