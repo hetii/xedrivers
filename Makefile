@@ -61,7 +61,23 @@ IP_VALUE   := $(shell python3 -c "import ipaddress,sys; print(hex(int(ipaddress.
 comma      := ,
 empty      :=
 space      := $(empty) $(empty)
-BENCH_ALL  := history stack debug prof tcp trace disk
+# stack=1: the console's own network stack beside xnet (src/stack/ipstack.h), lwIP fetched
+# and pinned below. Off, the default: none of it is in the build. bench=ipstack (its
+# throughput servers) needs it.
+stack ?= 0
+LWIP_VERSION := 2.2.1
+LWIP_SHA256  := 7b622662dba2383d71f874f2e494b54ae948531559c17acbe75797966d646878
+LWIP_URL     := https://download.savannah.nongnu.org/releases/lwip/lwip-$(LWIP_VERSION).zip
+LWIP_ROOT     = $(BUILD)/lwip/lwip-$(LWIP_VERSION)/src
+LWIP_FILES   := core/init.c core/def.c core/inet_chksum.c core/ip.c core/mem.c core/memp.c \
+                core/netif.c core/pbuf.c core/stats.c core/sys.c core/tcp.c core/tcp_in.c \
+                core/tcp_out.c core/timeouts.c core/udp.c core/ipv4/etharp.c core/ipv4/icmp.c \
+                core/ipv4/ip4.c core/ipv4/ip4_addr.c core/ipv4/dhcp.c api/api_lib.c \
+                api/api_msg.c api/err.c api/netbuf.c api/sockets.c api/tcpip.c netif/ethernet.c
+# Copied under names of their own (lw_tcp.c): the packer names an object after its
+# source's basename, and src/ has a tcp.c too.
+LWIP_SRC      = $(addprefix $(BUILD)/lwip/c/lw_,$(notdir $(LWIP_FILES)))
+BENCH_ALL  := history stack debug prof tcp trace disk $(if $(filter 1,$(stack)),ipstack)
 BENCH_ASKED := $(subst $(comma), ,$(bench))
 BENCH_LIST := $(sort $(if $(filter all,$(BENCH_ASKED)),$(BENCH_ALL),$(BENCH_ASKED)))
 $(if $(filter-out $(BENCH_ALL),$(BENCH_LIST)),\
@@ -75,7 +91,8 @@ BENCH_FLAGS := -D XE_BENCH=$(if $(BENCH_LIST),1,0) \
                -D XE_BENCH_STACK=$(call bench_on,stack) \
                -D XE_BENCH_DEBUG=$(call bench_on,debug) \
                -D XE_PROF=$(call bench_on,prof) -D XE_TCP=$(call bench_on,tcp) \
-               -D XE_BENCH_DISK=$(call bench_on,disk)
+               -D XE_BENCH_DISK=$(call bench_on,disk) \
+               -D XE_BENCH_IPSTACK=$(call bench_on,ipstack) -D XE_STACK=$(stack)
 
 # servers= names the file servers to build in, comma-separated, each a directory of
 # src/servers/ on the platform of src/servers/common/: xenfs (NFSv3 with MOUNT and a
@@ -111,9 +128,11 @@ SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
             $(if $(filter common/btusb,$(DRIVER_DIRS)),src/bluetooth src/bluetooth/audio) \
             $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST))) \
             $(if $(SERVERS_LIST),src/servers src/servers/common $(addprefix src/servers/,$(SERVERS_LIST)))
-SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c
+SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c \
+            $(if $(filter 1,$(stack)),$(wildcard src/stack/*.c src/stack/port/*.c) $(LWIP_SRC))
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h src/*/*/*/*.h)
-INCLUDES := $(addprefix -I ,$(SRC_DIRS))
+INCLUDES := $(addprefix -I ,$(SRC_DIRS)) -I src/stack \
+            $(if $(filter 1,$(stack)),-I src/stack/port/include -I $(LWIP_ROOT)/include)
 DEBUG    ?= 0
 # multipath=1: a second card answers for `second_ip =` and its traffic is translated to the
 # console's address (src/net/second.h). Off: none of it is in the build.
@@ -199,6 +218,20 @@ FORCE:
 # gives a module a record only when something is imported from it (xam: bench=tcp,
 # servers=).
 TABLES := $(KIT)/ordinals-xboxkrnl-$(ORDINALS).txt $(KIT)/ordinals-xam-$(ORDINALS).txt
+
+# lwIP, for stack=1: the release, checked against the pinned sha256, and the files of it
+# that are built.
+$(BUILD)/lwip/lwip-$(LWIP_VERSION).zip:
+	@mkdir -p $(BUILD)/lwip
+	curl -fsSL -A xedrivers -o $@.part "$(LWIP_URL)" || { echo "cannot fetch $(LWIP_URL)"; exit 1; }
+	@echo "$(LWIP_SHA256)  $@.part" | sha256sum -c --status \
+	    || { echo "$(LWIP_URL): not the pinned sha256 $(LWIP_SHA256)"; exit 1; }
+	@mv $@.part $@
+
+$(LWIP_SRC) &: $(BUILD)/lwip/lwip-$(LWIP_VERSION).zip
+	@cd $(BUILD)/lwip && unzip -q -o lwip-$(LWIP_VERSION).zip
+	@mkdir -p $(BUILD)/lwip/c
+	@for f in $(LWIP_FILES); do cp $(LWIP_ROOT)/$$f $(BUILD)/lwip/c/lw_$$(basename $$f); done
 
 $(BUILD)/drivers.generated.c: $(BUILD)/flags
 	@mkdir -p $(BUILD)

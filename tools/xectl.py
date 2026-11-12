@@ -80,6 +80,10 @@ PROF_SLOTS = ['copy', 'submit', 'tx_done', 'rx_done', 'rx_up', 'tx_wait', 'turna
 STRUCTS = {
     "net_win_stats": ["opened", "not_taken", "patched", "held", "released", "probed", "no_room",
                       "dropped", "held_now", "held_most"],
+    "ipstack_stats": ["up", "ip", "rx", "rx_dropped", "rx_no_pbuf", "rx_refused", "rx_most", "tx",
+                      "tx_dropped", "tx_most", "tx_starved", "asserts", "assert_text"],
+    "stacktest_stats": ["recv_hi", "recv_lo", "sent_hi", "sent_lo", "started", "accepts", "active",
+                        "errors"],
     "second_stats": ["ip", "xnet_ip", "slot", "arp_replies", "in", "out", "out_refused", "flows",
                      "not_ours", "no_xnet_ip", "out_dropped", "gave_up", "moved", "announced", "queued",
                      "queued_most"],
@@ -802,6 +806,21 @@ def status(sym):
                   f["data_failed"], f["wait_failed"], f["accept_failed"],
                   f["read_failed"], f["send_failed"], f["no_thread"]))
     if ss:
+        if "ipstack_stats" in sym:
+            k = read_struct(sym, "ipstack_stats")
+            text = ""
+            if k["asserts"] and k["assert_text"]:
+                text = " last: %r" % read(k["assert_text"], 80).split(b"\0")[0].decode("ascii", "replace")
+            print("ipstack  up=%d ip=%s rx=%d dropped=%d no_pbuf=%d refused=%d (most %d waiting) tx=%d "
+                  "dropped=%d (most %d queued) starved=%d asserts=%d%s" % (
+                      k["up"], ip(k["ip"]), k["rx"], k["rx_dropped"], k["rx_no_pbuf"], k["rx_refused"],
+                      k["rx_most"], k["tx"], k["tx_dropped"], k["tx_most"], k["tx_starved"],
+                      k["asserts"], text))
+        if "stacktest_stats" in sym:
+            k = read_struct(sym, "stacktest_stats")
+            print("stacktest started=%d accepts=%d active=%d errors=%d recv=%d MB sent=%d MB" % (
+                k["started"], k["accepts"], k["active"], k["errors"],
+                (k["recv_hi"] << 32 | k["recv_lo"]) >> 20, (k["sent_hi"] << 32 | k["sent_lo"]) >> 20))
         if "net_win_stats" in sym:
             w = read_struct(sym, "net_win_stats")
             print("window   extra=%d KB opened=%d not_taken=%d patched=%d held=%d released=%d probed=%d "
@@ -971,6 +990,8 @@ def history(sym, last):
 # NIC's counters are no reference: igb updates them every ~2 s.)
 
 TCP_SETTLE = 2.0
+TCP_SOURCE = 5201   # the console sends from it; the sink is the next port
+TCP_STATS = "tcp_stats"     # whose recv_hi / recv_lo the sink counts in
 SO_MAX_PACING_RATE = 47
 
 
@@ -1005,7 +1026,7 @@ def tcp_stream(port, begin, end, out, index, up, pace):
 def console_received(sym):
     """The console server's received bytes, and when (the middle of the read)."""
     before = time.time()
-    t = read_struct(sym, "tcp_stats")
+    t = read_struct(sym, TCP_STATS)
     return (t["recv_hi"] << 32 | t["recv_lo"]), (before + time.time()) / 2
 
 
@@ -1015,7 +1036,7 @@ def tcp_run(streams, seconds, up, pace=0.0, sym=None):
     begin = time.time() + TCP_SETTLE
     end = begin + seconds
     threads = [threading.Thread(target=tcp_stream,
-                                args=(5202 if up else 5201, begin, end, out, i, up, pace))
+                                args=(TCP_SOURCE + 1 if up else TCP_SOURCE, begin, end, out, i, up, pace))
                for i in range(streams)]
     for t in threads:
         t.start()
@@ -1782,6 +1803,9 @@ def bench(sym, argv):
     ap = argparse.ArgumentParser(prog="xectl.py bench")
     ap.add_argument("test", choices=["tcp", "udp", "ftpdll", "xeftp", "xenfs", "mix", "sockets",
                                      "a2dp", "disk"])
+    ap.add_argument("--stack", action="store_true",
+                    help="tcp: the servers on the console's own stack (make stack=1 bench=ipstack), "
+                         "ports 5301 / 5302")
     ap.add_argument("--chunk-kb", default="4,16,64,256,1024",
                     help="disk: kilobytes a write, one run for each")
     ap.add_argument("which", nargs="?", default="both", choices=["down", "up", "both"])
@@ -1819,6 +1843,10 @@ def bench(sym, argv):
     ways = ["down", "up"] if a.which == "both" else [a.which]
     if a.test == "disk":
         return disk_run(sym, a)
+    if a.stack:
+        global TCP_SOURCE, TCP_STATS
+        TCP_SOURCE, TCP_STATS = 5301, "stacktest_stats"
+        command(sym, 30)                    # start them, if they are not
     if a.test == "a2dp":
         a2dp_bench(sym, a.seconds, a.record, a.note)
         return

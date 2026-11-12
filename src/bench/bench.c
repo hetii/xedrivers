@@ -24,9 +24,13 @@
 #if XE_BENCH_DISK
 #include "disk.h"
 #endif
+#if XE_BENCH_IPSTACK
+#include "stacktest.h"
+#endif
 
 #define CMD_BLAST       4u  /* [1] count, [2] payload bytes, [3] UDP port (stack) */
 #define CMD_STACK_TAKE  27u /* [1] slot, [2] IPv4 address: the stack on that card (stack) */
+#define CMD_STACKTEST   30u /* start the throughput servers on the own stack (ipstack) */
 #define CMD_DISK        28u /* [1] megabytes, [2] KB a write, [3] files at once (disk) */
 #define CMD_TCP_START  14u  /* start the throughput server (tcp, xnet mode) */
 #define CMD_THREAD_PRIO 15u /* [1] thread id (xerunner console list-threads), [2] prio */
@@ -127,6 +131,11 @@ u32 bench_command(u32 what, volatile u32 *args)
 #if XE_TCP
     case CMD_TCP_START:
         args[5] = tcp_start();
+        return 1;
+#endif
+#if XE_BENCH_IPSTACK
+    case CMD_STACKTEST:
+        args[5] = stacktest_start();
         return 1;
 #endif
 #if XE_BENCH_DISK

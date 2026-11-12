@@ -16,6 +16,7 @@
 #include "second.h"
 #include "acks.h"
 #include "window.h"
+#include "ipstack.h"
 
 #define CMD_MODE       5u   /* [1] XE_MODE_* */
 #define CMD_XNET_IFACE 13u  /* [1] interface id given to xnet's receive callback */
@@ -333,6 +334,8 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
 /* A frame for xnet, by whichever card it came. */
 void net_up(const u8 *frame, u32 length)
 {
+    if (ipstack_rx(frame, length))
+        return;                             /* the own stack's (make stack=1): never xnet's */
     net_rx_note(frame, length);
     if (net_win_extra_kb && window_rx(frame, length))
         return;                             /* beyond xnet's window: kept until it has room */
@@ -368,6 +371,8 @@ void net_tx_done(NET_DEV *nd)
         return;
     }
     second_tx_done(nd);
+    if (uplink() == nd)
+        ipstack_tx_done();
     if (net_tx_idle && uplink() == nd)
         net_tx_idle();
 }
@@ -523,6 +528,13 @@ static u32 uplink_tx(const u8 *frame, u32 length)
     return nd->drv->xmit(nd, frame, length);
 }
 
+#if XE_STACK
+u32 net_stack_tx(const u8 *frame, u32 length)
+{
+    return uplink_tx(frame, length);
+}
+#endif
+
 /* By the second way if the frame's connection came in by it (second.h), else the uplink. */
 static u32 route_tx(const u8 *frame, u32 length)
 {
@@ -537,6 +549,7 @@ u32 net_tx(const u8 *frame, u32 length)
 {
     if (bench_tx_refused())
         return 0;
+    ipstack_note(frame, length);
     /* thinned before the second way rewrites the frame: a held acknowledgement is xnet's
      * own, and takes its way out when it goes */
     if (net_win_extra_kb) {
@@ -631,6 +644,7 @@ void net_layer_init(void)
     second_init();
     acks_init();
     window_init();
+    ipstack_init();
     set_mode(xe_config.mode == XE_MODE_XNET ? XE_MODE_DROP : xe_config.mode);
     xe_config.mode = XE_MODE;
 }
