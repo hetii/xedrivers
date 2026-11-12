@@ -334,9 +334,9 @@ void net_frame_in(NET_DEV *nd, const u8 *frame, u32 length)
 /* A frame for xnet, by whichever card it came. */
 void net_up(const u8 *frame, u32 length)
 {
+    net_rx_note(frame, length);
     if (ipstack_rx(frame, length))
         return;                             /* the own stack's (make stack=1): never xnet's */
-    net_rx_note(frame, length);
     if (net_win_extra_kb && window_rx(frame, length))
         return;                             /* beyond xnet's window: kept until it has room */
     if (net_rx) {
@@ -529,8 +529,12 @@ static u32 uplink_tx(const u8 *frame, u32 length)
 }
 
 #if XE_STACK
+/* The own stack's frames: its acknowledgements are thinned as xnet's are (acks.h) -- the
+ * host controller does not care whose they are. */
 u32 net_stack_tx(const u8 *frame, u32 length)
 {
+    if ((net_ack_thin > 1 || net_ack_holding) && acks_tx(frame, length, uplink_tx))
+        return 1;
     return uplink_tx(frame, length);
 }
 #endif

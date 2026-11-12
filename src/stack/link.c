@@ -32,6 +32,7 @@ static KEVENT wake;
 static u8 rx_frame[RX_RING][SLOT] __attribute__((aligned(4)));
 static u16 rx_length[RX_RING];
 static volatile u32 rx_in, rx_out;
+static volatile u32 rx_idle;            /* the thread waits: a frame put in wakes it */
 static KSPIN_LOCK rx_lock;              /* two cards may bring frames at once */
 
 static u8 tx_frame[TX_QUEUE][SLOT] __attribute__((aligned(4)));
@@ -146,7 +147,10 @@ static void put(const u8 *frame, u32 length)
     if (waiting + 1 > ipstack_stats.rx_most)
         ipstack_stats.rx_most = waiting + 1;
     KfReleaseSpinLock(&rx_lock, irql);
-    KeSetEvent(&wake, 0, 0);
+    /* only when the thread sleeps: an event set for each of 18000 frames a second is
+     * scheduler work on the processor that serves USB */
+    if (rx_idle)
+        KeSetEvent(&wake, 0, 0);
 }
 
 u32 ipstack_rx_slow(const u8 *frame, u32 length)
@@ -210,7 +214,11 @@ static void loop(void *arg)
     for (;;) {
         s64 interval = -100000;         /* 10 ms: a wake-up missed costs no more */
 
-        KeWaitForSingleObject(&wake, 0, 0, 0, &interval);
+        rx_idle = 1;
+        mem_sync();
+        if (rx_out == rx_in)
+            KeWaitForSingleObject(&wake, 0, 0, 0, &interval);
+        rx_idle = 0;
         if (wanted_ip != ipstack_stats.ip)
             take_address();
         while (rx_out != rx_in) {

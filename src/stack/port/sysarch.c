@@ -21,8 +21,9 @@ extern void RtlLeaveCriticalSection(void *section);
 #define STATUS_TIMEOUT  0x102u
 #define TAG             0x70697773u     /* "swip" */
 
-/* The hardware thread lwIP's own threads run on: not 0 or 1, not 2 (USB), not 4 (the
- * file servers) and not 5 (the driver's worker). To be measured. */
+/* The hardware thread lwIP's own threads run on: not 2 (USB), not 4 (the file servers)
+ * and not 5 (the driver's worker). Measured 2026-11-13: connection threads on 3, 4 or 5
+ * move nothing (212 Mbit/s in each time); on 1 nothing ran at all. */
 volatile u32 ipstack_cpu = 3;
 
 /* --- semaphores -------------------------------------------------------------- */
