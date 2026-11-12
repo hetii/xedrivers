@@ -199,17 +199,28 @@ all: firmware tables $(XEX)
 
 # A file in place with the right hash is kept; any other is fetched and checked.
 # (git.kernel.org refuses some clients without a User-Agent of their own.)
-# Data of ours a driver reads once, at its card's start, kept out of the plugin's
-# memory: the RTL8822BU's register tables (163 KB), packed from their source into
-# firmware/rtw8822b/rtw8822b_tables.bin; the driver checks it against the sum in the
-# generated header (rtw_phy.c).
-RTW_TABLES_BIN := $(FW_DIR)/rtw8822b/rtw8822b_tables.bin
-RTW_TABLES_H   := $(BUILD)/gen/rtw8822b_tables.h
-tables: $(RTW_TABLES_BIN)
-$(RTW_TABLES_BIN) $(RTW_TABLES_H) &: src/drivers/rtw8822b/tables/pack.c src/drivers/rtw8822b/tables/rtw8822b_table.c
-	@mkdir -p $(dir $(RTW_TABLES_BIN)) $(BUILD)/gen
-	$(HOST_CC) -I src/drivers/rtw8822b -I src/drivers/rtw8822b/tables -o $(BUILD)/rtw_tables_pack src/drivers/rtw8822b/tables/pack.c
-	$(BUILD)/rtw_tables_pack $(RTW_TABLES_BIN) $(RTW_TABLES_H)
+# Data a driver reads once, at its card's start, kept out of the plugin's memory: the
+# RTL8822BU's register tables (163 KB). Linux's rtw88 rtw8822b_table.c, fetched at a
+# fixed commit and pinned by sha256 when it is not here yet, is turned by
+# tools/rtw88_import.py --tables into firmware/rtw8822b/rtw8822b_tables.bin and the
+# header with the sum the driver checks that file against (rtw_phy.c).
+RTW8822B_URL   := https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/drivers/net/wireless/realtek/rtw88
+RTW8822B_REV   := ee83899302a0457a3ba47464a13e8682bd7ba27d
+RTW8822B_TABLE_SUM := 8e58874cfb30a2bcbfe24af93348a56a35f2968fcbf2fbea2e7b48f733d212a7
+RTW8822B_TABLE_C    := $(BUILD)/rtw88/rtw8822b_table.c
+RTW8822B_TABLES_BIN := $(FW_DIR)/rtw8822b/rtw8822b_tables.bin
+RTW8822B_TABLES_H   := $(BUILD)/gen/rtw8822b_tables.h
+tables: $(RTW8822B_TABLES_BIN)
+$(RTW8822B_TABLE_C):
+	@mkdir -p $(dir $@)
+	@echo "  fetch rtw88/rtw8822b_table.c"
+	@curl -fsSL -A xedrivers -o $@.part "$(RTW8822B_URL)/rtw8822b_table.c?id=$(RTW8822B_REV)" \
+	    || { echo "cannot fetch rtw8822b_table.c"; exit 1; }
+	@echo "$(RTW8822B_TABLE_SUM)  $@.part" | sha256sum -c --status \
+	    || { echo "rtw8822b_table.c: not the pinned sha256 $(RTW8822B_TABLE_SUM)"; rm -f $@.part; exit 1; }
+	@mv $@.part $@
+$(RTW8822B_TABLES_BIN) $(RTW8822B_TABLES_H) &: $(RTW8822B_TABLE_C) tools/rtw88_import.py
+	python3 tools/rtw88_import.py --tables $(RTW8822B_TABLE_C) $(RTW8822B_TABLES_BIN) $(RTW8822B_TABLES_H)
 
 firmware:
 	@echo "$$FIRMWARE" | while read path sum url; do \
@@ -260,7 +271,7 @@ $(BUILD)/drivers.generated.c: $(BUILD)/flags
 	   echo 'const u32 xe_driver_count = sizeof(xe_drivers) / sizeof(xe_drivers[0]);'; \
 	} > $@
 
-$(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) $(RTW_TABLES_H) \
+$(XEX): $(SRC) $(HEADERS) $(BUILD)/flags Makefile $(TABLES) $(RTW8822B_TABLES_H) \
         $(KIT)/plugin.py $(KIT)/write.py $(KIT)/kcall.S
 	@mkdir -p $(BUILD) $(PKG)
 	$(PYTHON) $(KIT)/plugin.py $(SRC) $(addprefix --ordinals ,$(TABLES)) \
