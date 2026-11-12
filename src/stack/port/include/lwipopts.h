@@ -99,7 +99,7 @@
 /* --- checks and statistics -------------------------------------------------- */
 #define LWIP_STATS                      1       /* only the pools' use: ipstack_stats shows it */
 #define MEMP_STATS                      1
-#define MEM_STATS                       0
+#define MEM_STATS                       1       /* the heap, where what is sent waits */
 #define SYS_STATS                       0
 #define LINK_STATS                      0
 #define ETHARP_STATS                    0

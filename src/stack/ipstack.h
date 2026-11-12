@@ -39,6 +39,8 @@ typedef struct {
     u32 gateway, dns;           /* what DHCP gave */
     u32 dhcp_starts;            /* DHCP begun: once, and again for another uplink MAC */
     u32 xnet_dropped;           /* frames xnet sent, dropped */
+    u32 heap_used, heap_most, heap_refused;     /* lwIP's heap (MEM_SIZE): what is being sent */
+    u32 rx_small;               /* small frames moved out of the pool into the heap */
 } IPSTACK_STATS;
 
 #if XE_STACK

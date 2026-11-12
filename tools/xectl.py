@@ -82,7 +82,8 @@ STRUCTS = {
                       "dropped", "held_now", "held_most"],
     "ipstack_stats": ["up", "ip", "rx", "rx_dropped", "rx_no_pbuf", "rx_refused", "rx_most", "tx",
                       "tx_dropped", "tx_most", "tx_starved", "asserts", "assert_text", "pbufs_used",
-                      "pbufs_most", "pbufs_refused", "gateway", "dns", "dhcp_starts", "xnet_dropped"],
+                      "pbufs_most", "pbufs_refused", "gateway", "dns", "dhcp_starts", "xnet_dropped",
+                      "heap_used", "heap_most", "heap_refused", "rx_small"],
     "ws_stats": ["hooked", "chained", "refused", "refused_ordinal", "calls", "sockets", "sockets_most",
                  "not_ours", "unsupported", "waited", "lookups", "lookups_failed"],
     "stacktest_stats": ["recv_hi", "recv_lo", "sent_hi", "sent_lo", "started", "accepts", "active",
@@ -820,8 +821,9 @@ def status(sym):
                   k["pbufs_used"], k["pbufs_most"], k["pbufs_refused"], k["asserts"], text))
     if "ipstack_stats" in sym:
         k = read_struct(sym, "ipstack_stats")
-        print("ipstack  gateway=%s dns=%s dhcp_starts=%d xnet_frames_dropped=%d" % (
-            ip(k["gateway"]), ip(k["dns"]), k["dhcp_starts"], k["xnet_dropped"]))
+        print("ipstack  gateway=%s dns=%s dhcp_starts=%d xnet_frames_dropped=%d heap=%d KB (most %d KB, refused %d) small=%d" % (
+            ip(k["gateway"]), ip(k["dns"]), k["dhcp_starts"], k["xnet_dropped"], k["heap_used"] >> 10,
+            k["heap_most"] >> 10, k["heap_refused"], k["rx_small"]))
     if "ws_stats" in sym:
         k = read_struct(sym, "ws_stats")
         print("winsock  hooked=%d chained=%d refused=%d (last ordinal %d) calls=%d sockets=%d (most %d) "

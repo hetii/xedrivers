@@ -30,6 +30,7 @@
 #define TX_QUEUE    128u                /* copies, made by lwIP's thread: references made the USB
                                          * processor copy, and two cards sent 20% less */
 #define SLOT        1536u
+#define SMALL       384u                /* frames up to this move out of the pool (loop) */
 
 volatile IPSTACK_STATS ipstack_stats;
 volatile u32 ipstack_ready;
@@ -218,6 +219,20 @@ static void loop(void *arg)
             struct pbuf *p = rx_pbuf[rx_out & (RX_RING - 1)];
 
             rx_out = rx_out + 1;
+            if (p->tot_len <= SMALL) {
+                /* a small frame (a request, an acknowledgement) gives its pool buffer back
+                 * at once and waits in a piece of the heap its size: lwIP counts a window
+                 * in bytes, and NFS requests of 200 bytes waiting for the server held a
+                 * 1.5 KB buffer each -- reads by two cards ran the pool dry 750 times */
+                struct pbuf *q = pbuf_alloc(PBUF_RAW, p->tot_len, PBUF_RAM);
+
+                if (q) {
+                    pbuf_copy(q, p);
+                    pbuf_free(p);
+                    p = q;
+                    ipstack_stats.rx_small++;
+                }
+            }
             if (nif.input(p, &nif) != ERR_OK) {
                 pbuf_free(p);
                 ipstack_stats.rx_refused++;
@@ -227,6 +242,9 @@ static void loop(void *arg)
         ipstack_stats.pbufs_used = lwip_stats.memp[MEMP_PBUF_POOL]->used;
         ipstack_stats.pbufs_most = lwip_stats.memp[MEMP_PBUF_POOL]->max;
         ipstack_stats.pbufs_refused = lwip_stats.memp[MEMP_PBUF_POOL]->err;
+        ipstack_stats.heap_used = lwip_stats.mem.used;
+        ipstack_stats.heap_most = lwip_stats.mem.max;
+        ipstack_stats.heap_refused = lwip_stats.mem.err;
         if (tx_out != tx_in)
             drain();
         if (tx_starved && tx_in - tx_out < TX_QUEUE / 2) {
