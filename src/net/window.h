@@ -18,6 +18,24 @@
  *   - in: a segment that ends beyond xnet's right edge (as its last segment out told it) is
  *     copied to a pool and handed up, in the order it came, when the edge has moved past
  *     it. One that fits goes up at once, whatever is held: it is older than all of them.
+ * What is told beyond xnet's edge is never more than the pool can keep: `extra`, or the
+ * pool divided among the connections receiving now. Told more (four connections by two
+ * cards, 256 KB each over a pool of 384 KB), the pool ran out, the segments it could not
+ * keep were dropped by xnet, and with no SACK each cost a round trip or a timeout: 349.9
+ * Mbit/s into the console by two addresses fell to 246.4, four FTP sessions 305.8 to 111.3.
+ * And it is told only while it helps. A frame that has to be kept means xnet (or the
+ * program reading) is behind, not the sender: then a larger window only brings more to
+ * copy and hand up later, on the processor that serves USB. By two cards that cost a
+ * third and more (344.0-361.1 Mbit/s into the console by two addresses; 125.6 to 276.9 with
+ * 256 KB told throughout, each run with a dozen 200 ms waits for an edge that did not
+ * move; a grant cut by a quarter a tick still 217.1). So a connection's grant goes to
+ * nothing in a tick in which a frame of it was kept and grows by WIN_GROW in one without:
+ * 347.8-361.8 by two addresses, and the RTL8822BU alone keeps its gain. Not so for a
+ * connection whose own window stays under WIN_SMALL (ftpdll's data socket states 64 KB,
+ * XBDM's 16): its frames are kept nearly always, and that is where its gain is -- 159.3-
+ * 165.1 Mbit/s over the RTL8822BU with the grant left, 123.0 with it cut, as without all
+ * this. Handing a kept frame up early instead (a probe after 20 ms, not 200) made xnet
+ * drop it: 47.0-49.0.
  * Acknowledgement numbers stay xnet's. A segment lost here (no room in the pool, a
  * connection closed) was never acknowledged, and the peer sends it again.
  *
@@ -45,6 +63,9 @@
 #define WIN_EXTRA_KB    256u
 #define WIN_IDLE        500u        /* ticks (10 s) a place is kept for a quiet connection */
 #define WIN_PROBE       10u         /* ticks (200 ms) without the edge moving: the first goes up */
+#define WIN_BUSY        50u         /* ticks (1 s) since its last data: a connection that is receiving */
+#define WIN_GROW        1024u       /* bytes a tick the grant grows back: all of it in 5 s */
+#define WIN_SMALL       98304u      /* a connection whose own window stays under this keeps its grant */
 #define WIN_NONE        0xFFFFu
 
 typedef struct {
@@ -55,6 +76,10 @@ typedef struct {
     u32 held_bytes;
     u32 seen;                   /* tick of its last segment */
     u32 moved;                  /* tick the edge last moved, or a frame was first held */
+    u32 data;                   /* tick of the last segment with data from the peer */
+    u32 grant;                  /* what this connection is told beyond the edge now, at most `extra` */
+    u32 kept;                   /* frames held since the last tick */
+    u32 widest;                 /* the largest window xnet itself has stated */
     u16 first, last;            /* held frames, oldest first; WIN_NONE: none */
     u8  shift;                  /* xnet's own window scale */
     u8  told_shift;             /* the one the peer was given */
@@ -72,6 +97,7 @@ typedef struct {
     u16 free;                   /* a list through next[] */
     u32 held_now, held_most;
     u32 opened, not_taken, dropped;
+    u32 busy;                   /* connections receiving now: they share the pool */
 } WIN_TABLE;
 
 /* What win_out changed in a frame, to be put back by win_restore. */
@@ -97,7 +123,8 @@ u32 win_in(WIN_TABLE *t, const u8 *frame, u32 length, u32 extra, u32 now);
 u32 win_take(WIN_TABLE *t, WIN_FLOW *f, u32 force);
 void win_free(WIN_TABLE *t, u32 slot);
 
-/* A connection whose held frames have waited WIN_PROBE ticks with the edge still, or 0. */
+/* Once a tick: counts the connections receiving (t->busy), and returns one whose held
+ * frames have waited WIN_PROBE ticks with the edge still, or 0. */
 WIN_FLOW *win_stale(WIN_TABLE *t, u32 now);
 
 /* --- the plugin's ----------------------------------------------------------- */

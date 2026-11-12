@@ -117,6 +117,15 @@ void win_reset(WIN_TABLE *t, u8 *pool)
         win_free(t, i);
     t->held_now = t->held_most = 0;
     t->opened = t->not_taken = t->dropped = 0;
+    t->busy = 0;
+}
+
+/* What one connection may be told, and may have kept, beyond xnet's edge. */
+static u32 share(const WIN_TABLE *t, u32 extra)
+{
+    u32 room = WIN_FRAMES * 1400u / (t->busy ? t->busy : 1u);
+
+    return extra < room ? extra : room;
 }
 
 /* The ones'-complement sum at `sum` after the 16-bit word `old` became `new` (RFC 1624). */
@@ -182,6 +191,10 @@ static void opening(WIN_TABLE *t, u8 *frame, const SEG *s, u32 now, WIN_PATCH *p
     f->shift = f->told_shift = 0;
     f->edge_known = 0;
     f->fins = 0;
+    f->data = now - WIN_BUSY;
+    f->grant = 0xFFFFFFFFu;                 /* all of `extra` until frames are kept */
+    f->widest = 0;
+    f->kept = 0;
     t->opened++;
     *taken = 1;
     if (s->scale_at) {
@@ -228,6 +241,8 @@ WIN_FLOW *win_out(WIN_TABLE *t, u8 *frame, u32 length, u32 extra, u32 now, WIN_P
     if (!(s.flags & F_ACK))
         return 0;
     edge = s.ack + (s.window << f->shift);
+    if (s.window << f->shift > f->widest)
+        f->widest = s.window << f->shift;
     if (!f->edge_known || (s32)(edge - f->edge) > 0) {
         if (!f->edge_known)
             f->told = edge;
@@ -235,6 +250,11 @@ WIN_FLOW *win_out(WIN_TABLE *t, u8 *frame, u32 length, u32 extra, u32 now, WIN_P
         f->edge_known = 1;
         f->moved = now;
     }
+    extra = share(t, extra);
+    if (f->grant < extra)
+        extra = f->grant;
+    else
+        f->grant = extra;
     want = f->edge + (extra > f->held_bytes ? extra - f->held_bytes : 0);
     if ((s32)(want - f->told) > 0)
         f->told = want;
@@ -279,12 +299,17 @@ u32 win_in(WIN_TABLE *t, const u8 *frame, u32 length, u32 extra, u32 now)
         return 0;
     }
     end = s.seq + s.payload + (s.flags & F_FIN ? 1u : 0u);
+    if (s.payload) {
+        if (now - f->data >= WIN_BUSY)
+            t->busy++;                      /* counted at once: its share shrinks the others' */
+        f->data = now;
+    }
     if (s.flags & F_FIN)
         f->fins |= 2;
     if (!f->edge_known || end == s.seq || (s32)(end - f->edge) <= 0)
         return 0;                           /* fits, or carries nothing */
     if (!t->pool || t->free == WIN_NONE || length > WIN_FRAME ||
-        f->held_bytes + s.payload > extra + (extra >> 1))
+        f->held_bytes + s.payload > extra)
         return 2;                           /* not kept: xnet may drop it */
     slot = t->free;
     t->free = t->next[slot];
@@ -303,6 +328,7 @@ u32 win_in(WIN_TABLE *t, const u8 *frame, u32 length, u32 extra, u32 now)
     }
     f->last = (u16)slot;
     f->held_bytes += s.payload;
+    f->kept++;
     if (++t->held_now > t->held_most)
         t->held_most = t->held_now;
     return 1;
@@ -328,15 +354,30 @@ WIN_FLOW *win_stale(WIN_TABLE *t, u32 now)
 {
     u32 i;
 
+    WIN_FLOW *stale = 0;
+    u32 busy = 0;
+
     for (i = 0; i < WIN_FLOWS; i++) {
         WIN_FLOW *f = &t->flow[i];
 
-        if (f->ports && f->first != WIN_NONE && now - f->moved >= WIN_PROBE) {
+        if (!f->ports)
+            continue;
+        if (now - f->data < WIN_BUSY)
+            busy++;
+        if (f->kept) {
+            if (f->widest > WIN_SMALL)
+                f->grant = 0;
+            f->kept = 0;
+        } else if (f->grant < 0xFFFFFFFFu - WIN_GROW) {
+            f->grant += WIN_GROW;
+        }
+        if (!stale && f->first != WIN_NONE && now - f->moved >= WIN_PROBE) {
             f->moved = now;
-            return f;
+            stale = f;
         }
     }
-    return 0;
+    t->busy = busy;
+    return stale;
 }
 
 /* === the plugin's ============================================================ */
@@ -468,8 +509,6 @@ void window_tick(void)
     WIN_FLOW *f;
 
     ticks++;
-    if (!table.held_now)
-        return;
     irql = KfAcquireSpinLock(&lock);
     f = win_stale(&table, ticks);
     KfReleaseSpinLock(&lock, irql);

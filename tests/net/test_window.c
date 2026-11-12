@@ -141,14 +141,13 @@ int main(void)
         win_free(&t, slot);
     }
 
-    /* More than extra and half again is not kept. */
+    /* More than extra is not kept. */
     for (i = 0; i < 400; i++) {
         n = tcp(f, 0, 5000 + 2800 + 131070 + i * 1400, 1000, 0x10, 0x100, 1400, -1);
         if (win_in(&t, f, n, extra, 6) != 1)
             break;
     }
-    CHECK(i == ((extra + extra / 2) / 1400 < WIN_FRAMES ? (extra + extra / 2) / 1400 : WIN_FRAMES) &&
-          t.held_now == i);
+    CHECK(i == extra / 1400 && t.held_now == i);
 
     /* A reset lets all of it go, and the place with it. */
     n = tcp(f, 0, 5000, 1000, 0x14, 0, 0, -1);
@@ -177,6 +176,23 @@ int main(void)
     n = tcp(f, 1, 1000, 5000, 0x10, 0x4000, 0, -1);
     win_out(&t, f, n, extra, 1, &p);
     CHECK(window_of(f) == 0xFFFF);
+
+    /* Four connections receiving share the pool: each is told a quarter of it, not extra. */
+    win_reset(&t, pool);
+    n = tcp(f, 1, 999, 5000, 0x12, 0xFFFF, 0, 1);
+    win_out(&t, f, n, extra, 0, &p);
+    t.busy = 4;
+    n = tcp(f, 1, 1000, 5000, 0x10, 0xFFFF, 0, -1);
+    win_out(&t, f, n, extra, 1, &p);
+    CHECK(window_of(f) == ((0xFFFFu << 1) + WIN_FRAMES * 1400u / 4) >> WIN_SHIFT);
+    /* win_stale counts them: none has had data for WIN_BUSY ticks */
+    win_stale(&t, 1 + WIN_BUSY);
+    CHECK(t.busy == 0);
+    n = tcp(f, 0, 5000, 1000, 0x10, 0x100, 1400, -1);
+    win_in(&t, f, n, extra, 1 + WIN_BUSY);
+    CHECK(t.busy == 1);
+    win_stale(&t, 2 + WIN_BUSY);
+    CHECK(t.busy == 1);
 
     /* Closed both ways: the place is free at once for another connection. */
     win_reset(&t, pool);
