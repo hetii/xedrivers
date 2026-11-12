@@ -1159,7 +1159,57 @@ def context(sym):
         "tcp_sockets": xs["tcp_sockets_after"] or xs["tcp_sockets_before"],
         "title_pool_kb": xs["title_pool_pages"] * 4,
     }
+    ctx["stack"] = "lwip" if "ipstack_stats" in sym else "xnet"
+    ctx["build"] = build_flags()
+    ctx["cards"] = cards_now(sym, drivers, slot)
+    ctx["pc_flow_control"] = pc_flow_control()
     return ctx
+
+
+def build_flags():
+    """The flags of the build xectl reads its symbols from (build/flags), the commit left out:
+    the record has it."""
+    try:
+        line = open(os.path.join(ROOT, "build", "flags")).read().strip()
+    except OSError:
+        return ""
+    return " ".join(w for w in line.split() if not w.startswith("COMMIT="))
+
+
+def cards_now(sym, drivers, up):
+    """Every card the plugin has: driver, the port it sits in (controller and port, as
+    xectl status prints them), its link and what it does now."""
+    second = 0
+    if "second_stats" in sym:
+        second = read_struct(sym, "second_stats")["slot"]
+    out = []
+    for i in range(NET_MAX):
+        ns = read_struct(sym, "net_stats", i)
+        if not ns["driver"]:
+            continue
+        role = "uplink" if i == up else "second" if second == i + 1 else "spare"
+        out.append({"slot": i, "driver": drivers.get(ns["driver"], ns["driver"]),
+                    "controller": ns["where"] & 3, "port": (ns["where"] >> 2) & 7,
+                    "ready": ns["ready"], "link_mbps": ns["speed_mbps"], "role": role})
+    return out
+
+
+PC_NIC = os.environ.get("XE_PC_NIC", "enp6s0")
+
+
+def pc_flow_control():
+    """The PC's pause frames on the NIC the bench runs over: "on", "off" or "rx"/"tx"."""
+    try:
+        out = subprocess.run(["ethtool", "-a", PC_NIC], capture_output=True, text=True,
+                             timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    rx = re.search(r"^RX:\s*(\w+)", out, re.M)
+    tx = re.search(r"^TX:\s*(\w+)", out, re.M)
+    if not rx or not tx:
+        return "unknown"
+    rx, tx = rx.group(1) == "on", tx.group(1) == "on"
+    return "on" if rx and tx else "off" if not rx and not tx else "rx" if rx else "tx"
 
 
 RTS_NAMES = {0: "off", 1: "rts", 2: "cts"}
@@ -1261,7 +1311,25 @@ def kept_rows(kind):
         return path, [json.loads(line) for line in f if line.strip()]
 
 
-def keep(ctx, test, streams, direction, bytes_per_s, a):
+BENCH_SECONDS = 10
+RUNS_LOG = os.path.join(ROOT, "docs", "speedtest-runs.jsonl")   # every result, never committed
+
+
+def shape(test, streams):
+    """What was moved, spelled out: files and their size, connections, seconds."""
+    m = re.match(r"(xeftp|xenfs|ftpdll) (\d+) MB(?: in (\d+) files)?", test)
+    if not m:
+        return {"connections": streams, "seconds": BENCH_SECONDS} if test.startswith("tcp") else \
+               {"connections": streams}
+    kind, mb, files = m.group(1), int(m.group(2)), m.group(3)
+    if kind == "xeftp" or (kind == "ftpdll" and streams > 1):
+        n = streams                     # a session a file
+    else:
+        n = int(files) if files else 1
+    return {"files": n, "file_mib": mb // n, "total_mib": mb, "connections": streams}
+
+
+def keep(ctx, test, streams, direction, bytes_per_s, a, runs=None):
     """Set one result against the kept one under the same conditions, say how far
     apart they are, and with --record keep it: in place of the old when better
     by more than the tolerance, never when within it (noise), and when worse by
@@ -1276,6 +1344,11 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
            **{k: v for k, v in ctx.items() if k not in ("commit", "dirty", "servers")},
            "test": test, "streams": streams, "direction": direction,
            "mbit_s": round(bytes_per_s * 8 / 1e6, 1), "mbyte_s": round(bytes_per_s / 1e6, 2)}
+    full = dict(row, **shape(test, streams), second_host=SECOND_HOST or None,
+                runs_mbit_s=[round(r * 8 / 1e6, 1) for r in (runs or [bytes_per_s])],
+                median_of=len(runs or [bytes_per_s]), time=time.strftime("%H:%M:%S"))
+    for k in ("stack", "build", "cards", "pc_flow_control"):
+        row.pop(k, None)                # kept in the runs log; the table keys stay as they were
     if test.startswith(("xeftp", "xenfs", "mix")) and ctx.get("servers"):
         row["servers"] = ctx["servers"]
     key = [condition(row, k) for k in CONDITIONS]
@@ -1303,6 +1376,13 @@ def keep(ctx, test, streams, direction, bytes_per_s, a):
     if ctx["dirty"]:
         raise SystemExit("not kept: the plugin on the console was built from uncommitted "
                          "changes (or by hand); commit, make, push, boot, then --record")
+    if a.note:
+        full["note"] = a.note
+    full["verdict"] = verdict
+    os.makedirs(os.path.dirname(RUNS_LOG), exist_ok=True)
+    with open(RUNS_LOG, "a") as f:
+        f.write(json.dumps(full, ensure_ascii=False) + "\n")
+    print("     logged in %s" % os.path.relpath(RUNS_LOG, ROOT))
     if verdict == "within":
         return
     if verdict == "WORSE":
@@ -1698,7 +1778,7 @@ def bench_servers(a, ctx, ways):
         rate = median(rates)
         print("%s %6.1f Mbit/s (%5.1f MB/s)%s" % (label, rate * 8 / 1e6, rate / 1e6,
               "  median of %d" % a.repeat if a.repeat > 1 else ""))
-        keep(ctx, test, streams, direction, rate, a)
+        keep(ctx, test, streams, direction, rate, a, rates)
         return True
 
     if a.test == "xeftp":
@@ -1853,8 +1933,9 @@ def bench(sym, argv):
     a = ap.parse_args(argv)
     if not HOST:
         raise SystemExit("set XE_HOST to the console's address")
-    global SECOND_HOST, PIECES
+    global SECOND_HOST, PIECES, BENCH_SECONDS
     SECOND_HOST = a.second
+    BENCH_SECONDS = a.seconds
     PIECES = max(1, a.pieces)
     ways = ["down", "up"] if a.which == "both" else [a.which]
     if a.test == "disk":
@@ -1885,7 +1966,7 @@ def bench(sym, argv):
                   a.size, rate * 8 / 1e6, rate / 1e6, median([r[1] for r in runs]) * 8 / 1e6,
                   median([r[1] for r in runs]) / 1e6,
                   "  median of %d" % a.repeat if a.repeat > 1 else ""))
-        keep(ctx, "udp discard %d B" % a.size, 1, DIRECTION["up"], rate, a)
+        keep(ctx, "udp discard %d B" % a.size, 1, DIRECTION["up"], rate, a, [r[0] for r in runs])
         return
     if a.test == "ftpdll" and a.files != "1,2":
         # several sessions at once, as a client copying several files
@@ -1915,7 +1996,7 @@ def bench(sym, argv):
             print("ftpdll %-4s %s  %d MB  %6.1f Mbit/s (%5.1f MB/s)%s" % (
                 w, DIRECTION[w], a.mb, rate * 8 / 1e6, rate / 1e6,
                 "  median of %d" % a.repeat if a.repeat > 1 else ""))
-            keep(ctx, "ftpdll %d MB" % a.mb, 1, DIRECTION[w], rate, a)
+            keep(ctx, "ftpdll %d MB" % a.mb, 1, DIRECTION[w], rate, a, runs)
         return
     for n in (int(x) for x in a.streams.split(",")):
         for w in ways:
@@ -1925,7 +2006,7 @@ def bench(sym, argv):
             print("tcp  %-4s x%-3d %s  %6.1f Mbit/s (%5.1f MB/s)%s" % (
                 w, n, DIRECTION[w], rate * 8 / 1e6, rate / 1e6,
                 "  median of %d" % a.repeat if a.repeat > 1 else ""))
-            keep(ctx, "tcp ram", n, DIRECTION[w], rate, a)
+            keep(ctx, "tcp ram", n, DIRECTION[w], rate, a, runs)
 
 
 def main(argv):
