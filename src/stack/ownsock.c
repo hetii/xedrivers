@@ -3,8 +3,6 @@
  * `stack_servers = 1` is in xedrivers.ini (ipstack_servers), so the same xeftp and xenfs
  * run on either stack and the two can be measured against each other.
  *
- * Every local port a socket here is bound to is entered in the stack's port table
- * (ipstack_port): that is what makes its frames the stack's and not xnet's.
  */
 #include "lwip/opt.h"
 #include "lwip/sockets.h"
@@ -55,7 +53,6 @@ static s32 bound(int type, u32 port)
         return -1;
     }
     bound_port[s] = (u16)got;
-    ipstack_port(got, 1);
     return s;
 }
 
@@ -96,9 +93,6 @@ s32 own_accept(s32 listener, u32 *peer)
     }
     if (peer)
         *peer = a.sin_addr.s_addr;
-    /* the connection holds its listener's port too: it may outlive the listener */
-    if ((u32)s < sizeof(bound_port) / sizeof(bound_port[0]) && (bound_port[s] = (u16)port_of(s)) != 0)
-        ipstack_port(bound_port[s], 1);
     return s;
 }
 
@@ -173,10 +167,8 @@ void own_close(s32 s)
 {
     if (s < 0)
         return;
-    if ((u32)s < sizeof(bound_port) / sizeof(bound_port[0]) && bound_port[s]) {
-        ipstack_port(bound_port[s], 0);
+    if ((u32)s < sizeof(bound_port) / sizeof(bound_port[0]))
         bound_port[s] = 0;
-    }
     lwip_close(s);
 }
 

@@ -1,5 +1,6 @@
 /* The stack's network interface. See ipstack.h.
  *
+ * Every frame the uplink (or the second way, second.c) brings is the stack's once it is up.
  * In: the cards deliver at DISPATCH_LEVEL on the USB processor, and lwIP is thread-level
  * code. So a frame that is the stack's is copied into a ring there and a thread hands
  * the ring to lwIP (tcpip_input, which with core locking does the work in that thread).
@@ -12,6 +13,8 @@
 #include "lwip/etharp.h"
 #include "lwip/pbuf.h"
 #include "lwip/priv/tcp_priv.h"
+#include "lwip/dhcp.h"
+#include "lwip/dns.h"
 #include "lwip/stats.h"
 #include "lwip/memp.h"
 #include "netif/ethernet.h"
@@ -30,44 +33,6 @@ volatile IPSTACK_STATS ipstack_stats;
 volatile u32 ipstack_ready;
 volatile u32 ipstack_servers;
 
-/* A bit a port: the local ports that are the stack's. Read on the USB processor for
- * every frame; written by threads, which count the sockets that hold each port -- a
- * listener and the connections accepted on it share one, and it stays the stack's until
- * the last of them is closed (an FTP data connection outlives its listener). */
-static volatile u32 own_ports[65536 / 32];
-static struct {
-    u16 port, count;
-} holders[96];
-static KSPIN_LOCK ports_lock;
-
-void ipstack_port(u32 port, u32 on)
-{
-    u32 irql, i, spare = 0xFFFFFFFFu;
-
-    port &= 0xFFFFu;
-    if (!port)
-        return;
-    irql = KfAcquireSpinLock(&ports_lock);
-    for (i = 0; i < sizeof(holders) / sizeof(holders[0]); i++) {
-        if (holders[i].count && holders[i].port == port)
-            break;
-        if (!holders[i].count && spare == 0xFFFFFFFFu)
-            spare = i;
-    }
-    if (i == sizeof(holders) / sizeof(holders[0]))
-        i = spare;
-    if (i != 0xFFFFFFFFu) {
-        if (on) {
-            holders[i].port = (u16)port;
-            holders[i].count++;
-            own_ports[port >> 5] |= 1u << (port & 31);
-        } else if (holders[i].count && holders[i].port == port && !--holders[i].count) {
-            own_ports[port >> 5] &= ~(1u << (port & 31));
-        }
-    }
-    KfReleaseSpinLock(&ports_lock, irql);
-}
-
 static struct netif nif;
 static KEVENT wake;
 
@@ -81,8 +46,7 @@ static u8 tx_frame[TX_QUEUE][SLOT] __attribute__((aligned(4)));
 static u16 tx_length[TX_QUEUE];
 static volatile u32 tx_in, tx_out, tx_busy, tx_starved;
 
-static volatile u32 wanted_ip;
-static u8 wanted_mac[6];
+static u32 have_mac;                    /* nif.hwaddr is the uplink's, and DHCP runs */
 
 void ipstack_assert(const char *what)
 {
@@ -197,61 +161,42 @@ static void put(const u8 *frame, u32 length)
 
 u32 ipstack_rx_slow(const u8 *frame, u32 length)
 {
-    const u8 *ip = frame + ETH_HLEN;
-    u32 type = (u32)frame[12] << 8 | frame[13], ihl, port;
-
-    if (type == 0x0806) {
-        /* an ARP reply is for whoever asked: lwIP has it too. Requests stay xnet's to
-         * answer -- one answer, and the address is the same */
-        if (length >= 42 && frame[21] == 2)
-            put(frame, length);
-        return 0;
-    }
-    if (type != 0x0800 || length < ETH_HLEN + 28 || (ip[0] >> 4) != 4 ||
-        (ip[9] != 6 && ip[9] != 17) || (ip[6] & 0x3F) || ip[7])
-        return 0;                       /* not TCP or UDP over IPv4, or a fragment */
-    ihl = (ip[0] & 0x0Fu) * 4;
-    if (ETH_HLEN + ihl + 4 > length)
-        return 0;
-    port = (u32)ip[ihl + 2] << 8 | ip[ihl + 3];
-    if (!(own_ports[port >> 5] >> (port & 31) & 1u))
-        return 0;
     put(frame, length);
     return 1;
 }
 
-void ipstack_note_slow(const u8 *frame)
+/* The uplink's MAC is the stack's: DHCP on it, once and again when the uplink changes. */
+static void watch_link(void)
 {
-    u32 ip = (u32)frame[26] << 24 | (u32)frame[27] << 16 | (u32)frame[28] << 8 | frame[29], i;
+    u8 mac[6];
+    u32 link = net_uplink_mac(mac), i;
 
-    if (!ip || ip == wanted_ip)
-        return;                         /* 0.0.0.0: xnet asking for its lease */
-    for (i = 0; i < 6; i++)
-        wanted_mac[i] = frame[6 + i];
-    wanted_ip = ip;
-    KeSetEvent(&wake, 0, 0);
-}
-
-/* xnet's address is the stack's: same card, same MAC. The mask is taken as /24 and
- * there is no router yet (lwIP's own DHCP is to give both). */
-static void take_address(void)
-{
-    ip4_addr_t ip, mask, gw;
-    u32 want = wanted_ip, i;
-
-    IP4_ADDR(&ip, want >> 24, (want >> 16) & 255, (want >> 8) & 255, want & 255);
-    IP4_ADDR(&mask, 255, 255, 255, 0);
-    ip4_addr_set_zero(&gw);
     LOCK_TCPIP_CORE();
-    for (i = 0; i < 6; i++)
-        nif.hwaddr[i] = wanted_mac[i];
-    netif_set_addr(&nif, &ip, &mask, &gw);
+    if (link && (!have_mac || memcmp(mac, nif.hwaddr, 6))) {
+        if (have_mac)
+            dhcp_release_and_stop(&nif);
+        for (i = 0; i < 6; i++)
+            nif.hwaddr[i] = mac[i];
+        netif_set_link_up(&nif);
+        dhcp_start(&nif);
+        have_mac = 1;
+        ipstack_stats.dhcp_starts++;
+    } else if (link && !netif_is_link_up(&nif)) {
+        netif_set_link_up(&nif);
+        dhcp_network_changed_link_up(&nif);
+    } else if (!link && have_mac && netif_is_link_up(&nif)) {
+        netif_set_link_down(&nif);
+    }
+    ipstack_stats.ip = ip4_addr_get_u32(netif_ip4_addr(&nif));
+    ipstack_stats.gateway = ip4_addr_get_u32(netif_ip4_gw(&nif));
+    ipstack_stats.dns = ip4_addr_get_u32(ip_2_ip4(dns_getserver(0)));
     UNLOCK_TCPIP_CORE();
-    ipstack_stats.ip = want;
 }
 
 static void loop(void *arg)
 {
+    u32 ticks = 0;
+
     (void)arg;
     for (;;) {
         s64 interval = -100000;         /* 10 ms: a wake-up missed costs no more */
@@ -261,8 +206,8 @@ static void loop(void *arg)
         if (rx_out == rx_in)
             KeWaitForSingleObject(&wake, 0, 0, 0, &interval);
         rx_idle = 0;
-        if (wanted_ip != ipstack_stats.ip)
-            take_address();
+        if (++ticks % 10 == 0 || !have_mac)
+            watch_link();               /* every 100 ms or so */
         while (rx_out != rx_in) {
             u32 at = rx_out & (RX_RING - 1), length = rx_length[at];
             struct pbuf *p = pbuf_alloc(PBUF_RAW, (u16_t)length, PBUF_POOL);
@@ -305,8 +250,7 @@ static err_t nif_init(struct netif *netif)
     netif->linkoutput = link_out;
     netif->mtu = 1500;
     netif->hwaddr_len = 6;
-    netif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_ETHERNET |
-                   NETIF_FLAG_LINK_UP;
+    netif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_ETHERNET;
     return ERR_OK;
 }
 

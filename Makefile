@@ -71,7 +71,7 @@ LWIP_URL     := https://download.savannah.nongnu.org/releases/lwip/lwip-$(LWIP_V
 LWIP_ROOT     = $(BUILD)/lwip/lwip-$(LWIP_VERSION)/src
 LWIP_FILES   := core/init.c core/def.c core/inet_chksum.c core/ip.c core/mem.c core/memp.c \
                 core/netif.c core/pbuf.c core/stats.c core/sys.c core/tcp.c core/tcp_in.c \
-                core/tcp_out.c core/timeouts.c core/udp.c core/ipv4/etharp.c core/ipv4/icmp.c \
+                core/tcp_out.c core/timeouts.c core/udp.c core/dns.c core/ipv4/etharp.c core/ipv4/icmp.c \
                 core/ipv4/ip4.c core/ipv4/ip4_addr.c core/ipv4/dhcp.c api/api_lib.c \
                 api/api_msg.c api/err.c api/netbuf.c api/sockets.c api/tcpip.c netif/ethernet.c
 # Copied under names of their own (lw_tcp.c): the packer names an object after its
@@ -129,10 +129,10 @@ SRC_DIRS := src/core src/net src/wireless src/wireless/softmac \
             $(if $(BENCH_LIST),src/bench $(addprefix src/bench/,$(BENCH_LIST))) \
             $(if $(SERVERS_LIST),src/servers src/servers/common $(addprefix src/servers/,$(SERVERS_LIST)))
 SRC      := $(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)) $(BUILD)/drivers.generated.c \
-            $(if $(filter 1,$(stack)),$(wildcard src/stack/*.c src/stack/port/*.c) $(LWIP_SRC))
+            $(if $(filter 1,$(stack)),$(wildcard src/stack/*.c src/stack/port/*.c src/stack/winsock/*.c) $(LWIP_SRC))
 HEADERS  := $(wildcard src/*/*.h src/*/*/*.h src/*/*/*/*.h)
 INCLUDES := $(addprefix -I ,$(SRC_DIRS)) -I src/stack \
-            $(if $(filter 1,$(stack)),-I src/stack/port/include -I $(LWIP_ROOT)/include)
+            $(if $(filter 1,$(stack)),-I src/stack/winsock -I src/stack/port/include -I $(LWIP_ROOT)/include)
 DEBUG    ?= 0
 # multipath=1: a second card answers for `second_ip =` and its traffic is translated to the
 # console's address (src/net/second.h). Off: none of it is in the build.

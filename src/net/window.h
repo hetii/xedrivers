@@ -141,6 +141,7 @@ typedef struct {
     u32 held_now, held_most;
 } WIN_STATS;
 
+#if !XE_STACK || !defined(__powerpc__)
 extern volatile WIN_STATS net_win_stats;
 extern volatile u32 net_win_extra_kb;   /* 0: off */
 
@@ -148,5 +149,13 @@ void window_init(void);                 /* thread: the ini (`rx_window_kb =`), t
 void window_tx(u8 *frame, u32 length, WIN_PATCH *p);    /* net_tx, before the frame goes */
 u32  window_rx(const u8 *frame, u32 length);            /* 1: kept, not for xnet yet */
 void window_tick(void);
+#else
+/* stack=1: the own stack's window is its own; none of this is built. */
+#define net_win_extra_kb 0u
+static inline void window_init(void) { }
+static inline void window_tx(u8 *frame, u32 length, WIN_PATCH *p) { (void)frame; (void)length; p->n = 0; }
+static inline u32  window_rx(const u8 *frame, u32 length) { (void)frame; (void)length; return 0; }
+static inline void window_tick(void) { }
+#endif
 
 #endif /* XE_WINDOW_H */

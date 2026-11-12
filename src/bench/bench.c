@@ -57,10 +57,40 @@ void bench_init(void)
     prof_init();
 }
 
+#if XE_BENCH_DEBUG && XE_STACK
+#include "file.h"
+#include "ipstack.h"
+#include "winsock.h"
+/* A beacon for when nothing on the network answers (the own stack, make stack=1): once a
+ * second the worker writes what it knows to beacon.bin beside the plugin; read it off the
+ * medium with the console off (scratch: beacon.py). */
+static struct {
+    u32 magic, tick, uplink_link;
+    u8  mac[8];
+    IPSTACK_STATS ip;
+    WS_STATS ws;
+} beacon;
+
+static void beacon_tick(u32 tick)
+{
+    if (tick % 50)
+        return;
+    beacon.magic = 0x4245434Eu;                 /* 'BECN' */
+    beacon.tick = tick;
+    beacon.uplink_link = net_uplink_mac(beacon.mac);
+    beacon.ip = ipstack_stats;
+    beacon.ws = ws_stats;
+    file_replace("beacon.bin", &beacon, sizeof(beacon));
+}
+#endif
+
 void bench_tick(u32 tick)
 {
     (void)tick;
     PROF_STAMP();
+#if XE_BENCH_DEBUG && XE_STACK
+    beacon_tick(tick);
+#endif
 #if XE_BENCH_HISTORY
     history_tick(tick);
 #endif

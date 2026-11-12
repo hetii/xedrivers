@@ -27,6 +27,9 @@
 #include "net.h"
 #include "bench.h"
 #include "servers.h"
+#if XE_STACK
+#include "winsock.h"
+#endif
 #if XE_AUDIO
 #include "audio.h"
 #endif
@@ -328,6 +331,9 @@ int DllMain(void *instance, u32 reason, void *reserved)
     xe_state.magic = 0x58454452u;               /* 'XEDR' */
     file_set_plugin(instance);
     net_register();
+#if XE_STACK
+    ws_hook();                                  /* every program's sockets are the own stack's */
+#endif
     ExCreateThread(&thread, 0, 0, 0, (void *)worker, 0, 2);
     ExCreateThread(&thread, 0, 0, 0, (void *)pulse_thread, 0, 2);
     return 1;

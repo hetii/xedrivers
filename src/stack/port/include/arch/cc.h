@@ -18,6 +18,9 @@
 #define SZT_F                   "u"
 
 #define LWIP_PROVIDE_ERRNO      1
+/* One errno a thread (winsock/errors.c): lwIP's sockets are used by many at once. */
+int *ipstack_errno(void);
+#define errno                   (*ipstack_errno())
 
 /* The cross compiler's limits.h has SSIZE_MAX, so lwIP expects unistd.h to have the
  * type; there is no unistd.h here. */

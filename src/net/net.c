@@ -186,6 +186,25 @@ static u32 cable_up(void)
     return 0;
 }
 
+/* The uplink's MAC, as it joined (net_join_mac), and 1 while it has a link: the own stack's
+ * address (src/stack). */
+u32 net_uplink_mac(u8 *mac)
+{
+    NET_DEV *nd = uplink();
+    const u8 *m;
+    u32 i;
+
+    if (!nd || !nd->st->ready)
+        return 0;
+    /* a cabled card carries the console's MAC, as xnet sends with it; a Wi-Fi card is
+     * associated with the one it joined with */
+    m = nd->drv->kind == XE_KIND_WIFI || !net_console_mac_known ? net_join_mac(nd)
+                                                                 : net_console_mac;
+    for (i = 0; i < ETH_ALEN; i++)
+        mac[i] = m[i];
+    return nd->st->link;
+}
+
 const u8 *net_join_mac(NET_DEV *nd)
 {
     if (!net_console_mac_known)
@@ -529,13 +548,13 @@ static u32 uplink_tx(const u8 *frame, u32 length)
 }
 
 #if XE_STACK
-/* The own stack's frames: its acknowledgements are thinned as xnet's are (acks.h) -- the
- * host controller does not care whose they are. */
+/* The own stack's frames, as xnet's go: acknowledgements thinned (acks.h), and a frame of a
+ * connection that came in by the second card goes back by it (second.h). */
 u32 net_stack_tx(const u8 *frame, u32 length)
 {
-    if ((net_ack_thin > 1 || net_ack_holding) && acks_tx(frame, length, uplink_tx))
+    if ((net_ack_thin > 1 || net_ack_holding) && acks_tx(frame, length, route_tx))
         return 1;
-    return uplink_tx(frame, length);
+    return route_tx(frame, length);         /* by the second way when its connection came by it */
 }
 #endif
 
@@ -553,7 +572,8 @@ u32 net_tx(const u8 *frame, u32 length)
 {
     if (bench_tx_refused())
         return 0;
-    ipstack_note(frame, length);
+    if (ipstack_takes_tx())
+        return 1;                           /* stack=1: the own stack is the console's, not xnet */
     /* thinned before the second way rewrites the frame: a held acknowledgement is xnet's
      * own, and takes its way out when it goes */
     if (net_win_extra_kb) {

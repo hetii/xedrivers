@@ -56,7 +56,6 @@ static void listener(void *arg)
     at.sin_len = sizeof(at);
     at.sin_family = AF_INET;
     at.sin_port = lwip_htons((u16_t)port);
-    ipstack_port(port, 1);
     if (s < 0 || lwip_bind(s, (struct sockaddr *)&at, sizeof(at)) < 0 || lwip_listen(s, 16) < 0) {
         stacktest_stats.errors++;
         return;

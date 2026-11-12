@@ -46,7 +46,10 @@
 #define LWIP_DHCP_DOES_ACD_CHECK        0
 #define LWIP_ACD                        0
 #define LWIP_AUTOIP                     0
-#define LWIP_DNS                        0
+#define LWIP_DNS                        1       /* XNetDnsLookup (winsock/lookup.c) */
+#define DNS_MAX_SERVERS                 2
+#define LWIP_DHCP_MAX_DNS_SERVERS       2
+#define DNS_TABLE_SIZE                  8
 #define LWIP_IGMP                       0
 #define IP_REASSEMBLY                   0
 #define IP_FRAG                         0
@@ -86,6 +89,7 @@
 #define LWIP_SO_RCVBUF                  1
 #define RECV_BUFSIZE_DEFAULT            TCP_WND
 #define SO_REUSE                        1
+#define LWIP_SO_LINGER                  1       /* XBDM sets it, and fails without */
 #define LWIP_NETIF_API                  0
 #define DEFAULT_TCP_RECVMBOX_SIZE       320     /* a segment each: the window in segments, and some */
 #define DEFAULT_UDP_RECVMBOX_SIZE       32

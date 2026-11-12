@@ -82,7 +82,9 @@ STRUCTS = {
                       "dropped", "held_now", "held_most"],
     "ipstack_stats": ["up", "ip", "rx", "rx_dropped", "rx_no_pbuf", "rx_refused", "rx_most", "tx",
                       "tx_dropped", "tx_most", "tx_starved", "asserts", "assert_text", "pbufs_used",
-                      "pbufs_most", "pbufs_refused"],
+                      "pbufs_most", "pbufs_refused", "gateway", "dns", "dhcp_starts", "xnet_dropped"],
+    "ws_stats": ["hooked", "chained", "refused", "refused_ordinal", "calls", "sockets", "sockets_most",
+                 "not_ours", "unsupported", "waited", "lookups", "lookups_failed"],
     "stacktest_stats": ["recv_hi", "recv_lo", "sent_hi", "sent_lo", "started", "accepts", "active",
                         "errors"],
     "second_stats": ["ip", "xnet_ip", "slot", "arp_replies", "in", "out", "out_refused", "flows",
@@ -816,6 +818,17 @@ def status(sym):
                   k["up"], ip(k["ip"]), k["rx"], k["rx_dropped"], k["rx_no_pbuf"], k["rx_refused"],
                   k["rx_most"], k["tx"], k["tx_dropped"], k["tx_most"], k["tx_starved"],
                   k["pbufs_used"], k["pbufs_most"], k["pbufs_refused"], k["asserts"], text))
+    if "ipstack_stats" in sym:
+        k = read_struct(sym, "ipstack_stats")
+        print("ipstack  gateway=%s dns=%s dhcp_starts=%d xnet_frames_dropped=%d" % (
+            ip(k["gateway"]), ip(k["dns"]), k["dhcp_starts"], k["xnet_dropped"]))
+    if "ws_stats" in sym:
+        k = read_struct(sym, "ws_stats")
+        print("winsock  hooked=%d chained=%d refused=%d (last ordinal %d) calls=%d sockets=%d (most %d) "
+              "not_ours=%d unsupported=%d waited=%d lookups=%d (failed %d)" % (
+                  k["hooked"], k["chained"], k["refused"], k["refused_ordinal"], k["calls"], k["sockets"],
+                  k["sockets_most"], k["not_ours"], k["unsupported"], k["waited"], k["lookups"],
+                  k["lookups_failed"]))
     if "stacktest_stats" in sym:
         k = read_struct(sym, "stacktest_stats")
         print("stacktest started=%d accepts=%d active=%d errors=%d recv=%d MB sent=%d MB" % (

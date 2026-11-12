@@ -704,7 +704,9 @@ u32 xnet_enable(void)
     xnet_stats.user = (u32)(unsigned long)title_user;
     set_buffers();
     set_cwnd();
-    extend_pool();
+#if !XE_STACK
+    extend_pool();                      /* stack=1: no socket of anyone's is xnet's */
+#endif
     more_sockets();
 
     saved_flags = *flags;

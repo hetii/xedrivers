@@ -381,7 +381,7 @@ WIN_FLOW *win_stale(WIN_TABLE *t, u32 now)
 }
 
 /* === the plugin's ============================================================ */
-#if defined(__powerpc__)
+#if defined(__powerpc__) && !XE_STACK      /* stack=1 has a window of its own */
 
 #include "usb.h"
 #include "file.h"

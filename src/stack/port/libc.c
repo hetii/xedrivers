@@ -2,8 +2,6 @@
  * library on a 32-bit PowerPC. The plugin links against nothing. */
 #include <stddef.h>
 
-int errno;
-
 void *memcpy(void *to, const void *from, size_t n)
 {
     unsigned char *d = (unsigned char *)to;
