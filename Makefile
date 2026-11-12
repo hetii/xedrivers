@@ -69,6 +69,15 @@ space      := $(empty) $(empty)
 # and pinned below. Off, the default: none of it is in the build. bench=ipstack (its
 # throughput servers) needs it.
 stack ?= 0
+# The own stack's buffers (src/stack/port/include/lwipopts.h), set here so each value
+# tried is a build of its own, recorded with its results (build/flags): the receive
+# window and send buffer of a connection (KB), how many received frames a connection's
+# holes may hold, received frames in all, and the heap where what is sent waits (KB).
+LWIP_WND_KB  ?= 192
+LWIP_SND_KB  ?= 64
+LWIP_OOSEQ   ?= 64
+LWIP_POOL    ?= 768
+LWIP_HEAP_KB ?= 640
 LWIP_VERSION := 2.2.1
 LWIP_SHA256  := 7b622662dba2383d71f874f2e494b54ae948531559c17acbe75797966d646878
 LWIP_URL     := https://download.savannah.nongnu.org/releases/lwip/lwip-$(LWIP_VERSION).zip
@@ -96,7 +105,9 @@ BENCH_FLAGS := -D XE_BENCH=$(if $(BENCH_LIST),1,0) \
                -D XE_BENCH_DEBUG=$(call bench_on,debug) \
                -D XE_PROF=$(call bench_on,prof) -D XE_TCP=$(call bench_on,tcp) \
                -D XE_BENCH_DISK=$(call bench_on,disk) \
-               -D XE_BENCH_IPSTACK=$(call bench_on,ipstack) -D XE_STACK=$(stack)
+               -D XE_BENCH_IPSTACK=$(call bench_on,ipstack) -D XE_STACK=$(stack) \
+               -D XE_LWIP_WND_KB=$(LWIP_WND_KB) -D XE_LWIP_SND_KB=$(LWIP_SND_KB) \
+               -D XE_LWIP_OOSEQ=$(LWIP_OOSEQ) -D XE_LWIP_POOL=$(LWIP_POOL) -D XE_LWIP_HEAP_KB=$(LWIP_HEAP_KB)
 
 # servers= names the file servers to build in, comma-separated, each a directory of
 # src/servers/ on the platform of src/servers/common/: xenfs (NFSv3 with MOUNT and a
@@ -190,7 +201,7 @@ export FIRMWARE
 GIT_COMMIT := $(or $(shell git rev-parse HEAD 2>/dev/null | cut -c1-8),0)
 # docs/ is left out: results recorded there (xectl bench --record) do not change the build.
 GIT_DIRTY  := $(if $(shell git status --porcelain --untracked-files=no -- . ':!docs' 2>/dev/null),1,0)
-FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) STACK=$(stack) MULTIPATH=$(multipath) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE)/$(NTB_IN_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST)) servers=$(subst $(space),$(comma),$(SERVERS_LIST))
+FLAGS_LINE := COMMIT=$(GIT_COMMIT)/$(GIT_DIRTY) STACK=$(stack) $(if $(filter 1,$(stack)),LWIP_WND_KB=$(LWIP_WND_KB) LWIP_SND_KB=$(LWIP_SND_KB) LWIP_OOSEQ=$(LWIP_OOSEQ) LWIP_POOL=$(LWIP_POOL) LWIP_HEAP_KB=$(LWIP_HEAP_KB) )MULTIPATH=$(multipath) DRIVERS=$(DRIVERS) DEBUG=$(DEBUG) BASE=$(BASE) ORD=$(ORDINALS) MODE=$(MODE_VALUE) ADV=$(ADV_VALUE) IP=$(IP_VALUE) RX=$(RX_COUNT) TX=$(TX_COUNT) NRX=$(NCM_RX_COUNT) NTX=$(NCM_TX_COUNT) NTB=$(NTB_SIZE)/$(NTB_IN_SIZE) T=$(TRANSPORT_VALUE) bench=$(subst $(space),$(comma),$(BENCH_LIST)) servers=$(subst $(space),$(comma),$(SERVERS_LIST))
 
 .PHONY: all firmware tables clean test lint kit push push-fw deploy
 
