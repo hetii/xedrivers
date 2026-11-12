@@ -1,16 +1,23 @@
 # Build the package (build/xedrivers/: the plugin and its firmware), run the unit
 # tests and keep the package as an artifact of the run.
+#
+# Started two ways only, never by a push or a pull request:
+# - by hand (Actions -> build -> Run workflow), from main: the package is kept as an
+#   artifact of the run;
+# - by a release being published (on GitHub: Releases -> Draft a new release, or
+#   `gh release create v1.0 --target main`): the package is built from the release's
+#   tag and attached to it as xedrivers-<tag>.zip, with its SHA-256 beside it.
 
 name: build
 
-# Run by hand only (Actions -> build -> Run workflow), and only from main: no
-# push, tag or pull request starts it.
 on:
   workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -20,12 +27,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gcc-powerpc-linux-gnu zip
 
-      # The firmware is pinned by hash in the Makefile (FIRMWARE); fetch it only
-      # when the pins change.
+      # The firmware and the RTL8822BU's tables are pinned by hash in the Makefile;
+      # fetch them again only when the pins change.
       - uses: actions/cache@v6
         with:
-          path: build/xedrivers/firmware
-          key: firmware-${{ hashFiles('Makefile') }}
+          path: |
+            build/xedrivers/firmware
+            build/rtw88
+          key: firmware-${{ hashFiles('Makefile', 'tools/rtw88_import.py') }}
 
       - name: Build
         run: make
@@ -33,23 +42,30 @@ jobs:
       - name: Unit tests
         run: make test
 
+      # The zip holds xedrivers/ as it goes onto the console: Usb:\plugin\xedrivers\
+      # (or Hdd:\plugin\xedrivers\) with xedrivers.xex and firmware\ in it.
       - name: Package
         id: package
         run: |
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then version="${GITHUB_REF_NAME}"; else version="$(git rev-parse --short=8 HEAD)"; fi
-          echo "name=xedrivers-${version}" >> "$GITHUB_OUTPUT"
-          (cd build && zip -r "../xedrivers-${version}.zip" xedrivers)
+          if [ "${GITHUB_EVENT_NAME}" = release ]; then version="${GITHUB_REF_NAME}"; else version="$(git rev-parse --short=8 HEAD)"; fi
+          name="xedrivers-${version}"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          (cd build && zip -qr "../${name}.zip" xedrivers)
+          sha256sum "${name}.zip" > "${name}.zip.sha256"
+          unzip -l "${name}.zip"
 
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.package.outputs.name }}
           path: build/xedrivers/
 
-      - name: Release
-        if: github.ref_type == 'tag'
+      - name: Attach to the release
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" "${{ steps.package.outputs.name }}.zip" --title "${GITHUB_REF_NAME}" --generate-notes
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" --clobber \
+              "${{ steps.package.outputs.name }}.zip" "${{ steps.package.outputs.name }}.zip.sha256"
 
 permissions:
   contents: write
