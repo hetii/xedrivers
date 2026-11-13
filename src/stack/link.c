@@ -28,8 +28,9 @@ extern volatile u32 ipstack_cpu;
 #if XE_STACK
 
 #define RX_RING     512u                /* received frames waiting for lwIP, a power of two */
-#define TX_QUEUE    256u                /* copies, made by lwIP's thread: references made the USB
-                                         * processor copy, and two cards sent 20% less */
+#define TX_QUEUE    XE_STACK_TXQ        /* make LWIP_TXQ=, 256; copies, made by lwIP's thread:
+                                         * references made the USB processor copy, and two
+                                         * cards sent 20% less; a power of two */
 #define SLOT        1536u
 #define SMALL       384u                /* frames up to this move out of the pool (loop) */
 
