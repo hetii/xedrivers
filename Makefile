@@ -78,7 +78,8 @@ LWIP_SND_KB  ?= 64
 LWIP_OOSEQ   ?= 64
 LWIP_POOL    ?= 768
 LWIP_HEAP_KB ?= 640
-LWIP_TXQ     ?= 256     # frames lwIP has sent waiting for the card (src/stack/link.c)
+# frames lwIP has sent waiting for the card (src/stack/link.c)
+LWIP_TXQ     ?= 256
 LWIP_VERSION := 2.2.1
 LWIP_SHA256  := 7b622662dba2383d71f874f2e494b54ae948531559c17acbe75797966d646878
 LWIP_URL     := https://download.savannah.nongnu.org/releases/lwip/lwip-$(LWIP_VERSION).zip
