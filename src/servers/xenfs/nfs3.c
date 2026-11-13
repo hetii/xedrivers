@@ -104,34 +104,22 @@ static u32 under(const char *path, const char *prefix)
     return k == n && (!path[n] || path[n] == '/');
 }
 
-/* A file is opened for synchronous I/O, and the I/O manager runs one call at a time on
- * one handle: the connections of a mount reading one file (nconnect) waited for one
- * another's disk reads -- 1 x 512 MB out read 4-7% slower than 4 x 128 MB. A read that
- * finds the file's handles all busy opens one more, up to READERS; writes share one. */
-#define READERS 4u
-
 NFS_FILE *nfs3_file(const char *path, u32 write, s32 *e)
 {
-    NFS_FILE *f = 0, *old = 0, *busy = 0;
+    NFS_FILE *f = 0, *old = 0;
     SRV_FILE closing = 0;
-    u32 i, oldest = 0xFFFFFFFFu, same = 0;
+    u32 i, oldest = 0xFFFFFFFFu;
 
     srv_lock();
     for (i = 0; i < FILES_MAX; i++) {
         NFS_FILE *x = &files[i];
 
         if (x->file && !x->doomed && str_eq(x->path, path) && (x->writable || !write)) {
-            if (write || !x->users) {
-                x->users++;
-                x->used = srv_now();
-                srv_unlock();
-                *e = SRV_OK;
-                return x;
-            }
-            if (!busy)
-                busy = x;
-            same++;
-            continue;
+            x->users++;
+            x->used = srv_now();
+            srv_unlock();
+            *e = SRV_OK;
+            return x;
         }
         if (!x->file && !x->users && !f)
             f = x;
@@ -139,13 +127,6 @@ NFS_FILE *nfs3_file(const char *path, u32 write, s32 *e)
             oldest = x->used;
             old = x;
         }
-    }
-    if (busy && (same >= READERS || (!f && !old))) {
-        busy->users++;                      /* enough handles: share the first */
-        busy->used = srv_now();
-        srv_unlock();
-        *e = SRV_OK;
-        return busy;
     }
     if (!f && old) {                        /* the table full: the least used goes */
         f = old;
@@ -181,23 +162,6 @@ NFS_FILE *nfs3_file(const char *path, u32 write, s32 *e)
     f->used = srv_now();
     nfs_stats.opens++;
     return f;
-}
-
-/* Under srv_lock: the other handles of `f`'s file see the size and times a write left. */
-static void share_attrs(const NFS_FILE *f)
-{
-    u32 i;
-
-    for (i = 0; i < FILES_MAX; i++) {
-        NFS_FILE *x = &files[i];
-
-        if (x != f && x->file && !x->doomed && str_eq(x->path, f->path)) {
-            x->st.size_lo = f->st.size_lo;
-            x->st.size_hi = f->st.size_hi;
-            x->st.mtime = f->st.mtime;
-            x->st.ctime = f->st.ctime;
-        }
-    }
 }
 
 void nfs3_file_done(NFS_FILE *f)
@@ -462,7 +426,6 @@ void nfs3_write(NFS3_CALL *q)
             f->st.size_hi = (u32)(end >> 32);
         }
         f->st.mtime = f->st.ctime = srv_now();
-        share_attrs(f);
         nfs_stats.writes++;
         if ((nfs_stats.write_bytes_lo += count) < count)
             nfs_stats.write_bytes_hi++;
