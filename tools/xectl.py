@@ -114,7 +114,7 @@ STRUCTS = {
                   "ntb_in_max", "ntb_out_max", "ntb_out_align", "ntb_out_datagrams",
                   "ntb_formats", "ntb_input_status", "ntb_format_status", "crc_status",
                   "dgram_status", "intr_parked", "rx_parked", "rx_woken"],
-    "rtl_stats": ["chip_version", "advertise_status", "pause_set"],
+    "rtl_stats": ["chip_version", "advertise_status"],
     "ax178_stats": ["product", "eeprom_17", "phy_address", "phy_id", "bmsr", "lpa", "stat1000",
                     "medium", "link_checks", "rx_transfers", "rx_resyncs", "intr_events",
                     "intr_errors", "tx_transfers", "tx_too_big", "mii_errors"],
@@ -754,9 +754,8 @@ def status(sym):
         for i in range(NET_MAX):
             rs = read_struct(sym, "rtl_stats", i)
             if rs["chip_version"]:
-                print("rtl slot %d chip=%04x adv_status=%#x pause=%s" % (
-                    i, rs["chip_version"], rs["advertise_status"],
-                    ("card's own", "off", "on")[min(rs["pause_set"], 2)]))
+                print("rtl slot %d chip=%04x adv_status=%#x" % (
+                    i, rs["chip_version"], rs["advertise_status"]))
     if "ax179_stats" in sym:
         for i in range(2):
             a = read_struct(sym, "ax179_stats", i)

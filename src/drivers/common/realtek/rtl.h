@@ -69,7 +69,6 @@ void rtl_forget_page(USB_DEV *dev);     /* after a reset the window is the card'
 typedef struct {
     u32 chip_version;       /* PLA_TCR0 >> 16, e.g. 0x7710 for an RTL8156B */
     u32 advertise_status;   /* of the last advertisement write */
-    u32 pause_set;          /* rtl_pause from the ini: 0 unset, 1 off, 2 on (rtl8156.c) */
 } RTL_STATS;
 
 extern volatile RTL_STATS rtl_stats[USB_MAX_DEVICES];   /* by device slot */
