@@ -75,6 +75,8 @@ typedef struct {
     u32 crc_status;         /* SET_CRC_MODE off */
     u32 dgram_status;       /* SET_MAX_DATAGRAM_SIZE */
     u32 intr_parked;        /* repeats that parked the interrupt endpoint */
+    u32 rx_parked;          /* receive requests not queued again: the card was not wanted */
+    u32 rx_woken;           /* times its receive ring was started again */
 } CDC_STATS;
 
 extern volatile CDC_STATS cdc_stats[CDC_MAX];

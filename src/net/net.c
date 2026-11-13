@@ -86,6 +86,17 @@ static NET_DEV *uplink(void)
     return a ? &net_devs[a - 1] : 0;
 }
 
+/* A spare card's receive ring kept its bulk endpoint polled: one on the same host
+ * controller as the uplink cost it 215 -> 186 Mbit/s (2026-11-12). */
+volatile u32 net_park_spare = 1;
+
+u32 net_dev_wants_rx(const NET_DEV *nd)
+{
+    NET_DEV *up = uplink();
+
+    return !net_park_spare || !up || up == nd || nd->claim || second_is(nd);
+}
+
 /* --- which device is the uplink -------------------------------------------- */
 
 /* Back sockets before front, a lower port first: the controller's low bit is the

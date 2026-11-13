@@ -113,7 +113,7 @@ STRUCTS = {
                   "last_notify1", "rx_deferred", "rx_ntbs", "rx_ntb_errors", "tx_ntbs",
                   "ntb_in_max", "ntb_out_max", "ntb_out_align", "ntb_out_datagrams",
                   "ntb_formats", "ntb_input_status", "ntb_format_status", "crc_status",
-                  "dgram_status", "intr_parked"],
+                  "dgram_status", "intr_parked", "rx_parked", "rx_woken"],
     "rtl_stats": ["chip_version", "advertise_status", "pause_set"],
     "ax178_stats": ["product", "eeprom_17", "phy_address", "phy_id", "bmsr", "lpa", "stat1000",
                     "medium", "link_checks", "rx_transfers", "rx_resyncs", "intr_events",
@@ -551,9 +551,10 @@ def status(sym):
             cs = read_struct(sym, "cdc_stats", i)
             if not cs["config_value"]:
                 continue
-            print("cdc %d    config=%d transport=%s intr=%d/%d parked=%d" % (
+            print("cdc %d    config=%d transport=%s intr=%d/%d parked=%d rx_parked=%d rx_woken=%d" % (
                 i, cs["config_value"], "ncm" if cs["transport"] else "ecm",
-                cs["intr_events"], cs["intr_errors"], cs["intr_parked"]))
+                cs["intr_events"], cs["intr_errors"], cs["intr_parked"], cs["rx_parked"],
+                cs["rx_woken"]))
     if "rndis_stats" in sym:
         for i in range(2):
             rs = read_struct(sym, "rndis_stats", i)

@@ -124,6 +124,7 @@ typedef struct CDC {
     URB rx_urb[RX_SLOTS];
     u8 *rx_buf[RX_SLOTS];
     u32 rx_count;
+    u32 rx_cancelled;           /* a spare: its receive requests were taken back */
     u32 rx_size;
     u32 rx_consecutive_errors;
     URB tx_urb[TX_SLOTS];
@@ -240,6 +241,11 @@ static void rx_complete_timed(URB *urb, u32 status)
     u32 cpu;
 
     if (!c->running || !c->dev->active) {
+        urb->Busy = 0;
+        return;
+    }
+    if (!net_dev_wants_rx(c->nd)) {     /* a spare card: the request rests (cdc_tick) */
+        c->st->rx_parked++;
         urb->Busy = 0;
         return;
     }
@@ -561,10 +567,36 @@ static void intr_complete(URB *urb, u32 status)
 }
 
 /* From the worker: re-arm a parked interrupt endpoint once it has been quiet. */
+/* A card not wanted (net_dev_wants_rx) has its receive requests taken back, once; wanted
+ * again, those resting are queued. Every worker tick. */
+static void rx_park_tick(CDC *c)
+{
+    u32 i, woke = 0;
+
+    if (!net_dev_wants_rx(c->nd)) {
+        if (!c->rx_cancelled)
+            for (i = 0; i < c->rx_count; i++)
+                if (c->rx_urb[i].Busy)
+                    usb_cancel(&c->rx_urb[i]);
+        c->rx_cancelled = 1;
+        return;
+    }
+    c->rx_cancelled = 0;
+    for (i = 0; i < c->rx_count; i++)
+        if (!c->rx_urb[i].Busy) {
+            rx_queue(&c->rx_urb[i]);
+            woke = 1;
+        }
+    if (woke)
+        c->st->rx_woken++;
+}
+
 void cdc_tick(NET_DEV *nd)
 {
     CDC *c = (CDC *)nd->priv;
 
+    if (c && c->running && c->dev->active && c->rx_consecutive_errors <= RX_ERROR_LIMIT)
+        rx_park_tick(c);
     if (!c->intr_parked || !c->running || !c->dev->active)
         return;
     if (++c->intr_parked_ticks < INTR_QUIET_TICKS)

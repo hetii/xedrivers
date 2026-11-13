@@ -199,6 +199,12 @@ void net_up(const u8 *frame, u32 length);
 u32  net_uplink_mac(u8 *mac);                     /* the uplink's MAC; 1 while it has a link */      /* a frame for xnet: noted, held or handed up */
 u32  net_dev_tx_space(NET_DEV *nd);
 
+/* Whether `nd`'s received frames are wanted: the uplink's, the second way's, a bench
+ * claim's, and every card's while there is no uplink. A driver may stop receiving on a
+ * card that is not wanted (cdc_net.c) and start again when it is. Any IRQL. */
+u32  net_dev_wants_rx(const NET_DEV *nd);
+extern volatile u32 net_park_spare;     /* 0: every card receives (xectl.py set) */
+
 /* DMA memory. The scratch block is allocated once and never moves -- for control
  * and register buffers a driver keeps across bring-ups; each caller takes its
  * share once. A device's ring block is carved again on every bring-up:
