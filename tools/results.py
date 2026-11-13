@@ -47,9 +47,12 @@ def speed(r):
 
 def table(kind):
     rows = {}
-    for r in load(kind):                       # later lines win
-        key = (r["card"], attach_text(r), xnet_text(r["xnet"]), r["test"], r["streams"])
-        rows.setdefault(key, {})[r["direction"]] = r
+    for r in load(kind):                       # the best of each set of conditions
+        key = (r["card"], attach_text(r), xnet_text(r["xnet"]) + ", stack " + r.get("stack", "xnet"),
+               r["test"], r["streams"])
+        d = rows.setdefault(key, {})
+        if r["mbit_s"] >= d.get(r["direction"], {"mbit_s": -1})["mbit_s"]:
+            d[r["direction"]] = r
     head = ("| Card | %s | xnet | Test | Streams | Console -> PC | PC -> console | Date, commit | Note |"
             % ("Band, channel, width" if kind == "wifi" else "Transport, link"))
     out = [head, "|" + "---|" * 9]

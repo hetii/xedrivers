@@ -1290,13 +1290,15 @@ def built_from(sym):
 
 
 CONDITIONS = ("card", "kind", "link_mbps", "transport", "band_ghz", "channel", "width_mhz",
-              "xnet", "radio", "servers", "test", "streams", "direction")
+              "xnet", "radio", "servers", "stack", "test", "streams", "direction")
 SERVERS_DEFAULT = {"windows_kb": 0, "window_kb": 128}   # what server rows kept before it ran
 
 
 def condition(row, k):
     """A row's value for a condition; a Wi-Fi row kept before "radio" was recorded
     ran the defaults."""
+    if k == "stack" and "stack" not in row:
+        return "xnet"                   # rows kept before "stack" was recorded: all xnet's
     if k == "radio" and row.get("kind") == "wifi" and "radio" not in row:
         return dict(RADIO_DEFAULT)
     if k == "servers" and "servers" not in row and row["test"].startswith(("xeftp", "xenfs", "mix")):
@@ -1313,7 +1315,6 @@ def kept_rows(kind):
 
 
 BENCH_SECONDS = 10
-RUNS_LOG = os.path.join(ROOT, "docs", "speedtest-runs.jsonl")   # every result, never committed
 
 
 def shape(test, streams):
@@ -1331,32 +1332,32 @@ def shape(test, streams):
 
 
 def keep(ctx, test, streams, direction, bytes_per_s, a, runs=None):
-    """Set one result against the kept one under the same conditions, say how far
-    apart they are, and with --record keep it: in place of the old when better
-    by more than the tolerance, never when within it (noise), and when worse by
-    more only with --accept-lower REASON -- a drop is a regression until shown
-    otherwise. The file holds the current figure for each set of conditions; git
-    log -p the older ones."""
+    """Set one result against the best one on file under the same conditions and say how
+    far apart they are; with --record append it to docs/speedtest.jsonl, whatever it is,
+    with all it was measured under: the stack, the build's flags, every card with its
+    controller, port, link and role, the PC's flow control, files and their size,
+    connections, every run and the median. A drop beyond the tolerance is a regression
+    until shown otherwise (--accept-lower REASON says why it is not)."""
     if SECOND_HOST and "two addresses" not in test:
         test += ", two addresses"       # another thing measured: never the one-address baseline
     if ctx.get("kind") == "wifi":
         ctx["router"] = router_state(ctx["band_ghz"])  # read now: busy covers this result
-    row = {"date": time.strftime("%Y-%m-%d"), "commit": ctx["commit"],
+    row = {"date": time.strftime("%Y-%m-%d"), "time": time.strftime("%H:%M:%S"),
+           "commit": ctx["commit"],
            **{k: v for k, v in ctx.items() if k not in ("commit", "dirty", "servers")},
            "test": test, "streams": streams, "direction": direction,
            "mbit_s": round(bytes_per_s * 8 / 1e6, 1), "mbyte_s": round(bytes_per_s / 1e6, 2)}
-    full = dict(row, **shape(test, streams), second_host=SECOND_HOST or None,
-                runs_mbit_s=[round(r * 8 / 1e6, 1) for r in (runs or [bytes_per_s])],
-                median_of=len(runs or [bytes_per_s]), time=time.strftime("%H:%M:%S"))
+    row.update(shape(test, streams), second_host=SECOND_HOST or None,
+               runs_mbit_s=[round(r * 8 / 1e6, 1) for r in (runs or [bytes_per_s])],
+               median_of=len(runs or [bytes_per_s]))
     if SECOND_HOST and test.startswith("xeftp"):
-        full["pieces_per_session"] = PIECES
-    for k in ("stack", "build", "cards", "pc_flow_control"):
-        row.pop(k, None)                # kept in the runs log; the table keys stay as they were
+        row["pieces_per_session"] = PIECES
     if test.startswith(("xeftp", "xenfs", "mix")) and ctx.get("servers"):
         row["servers"] = ctx["servers"]
     key = [condition(row, k) for k in CONDITIONS]
     path, rows = kept_rows(ctx["kind"])
-    old = next((r for r in rows if [condition(r, k) for k in CONDITIONS] == key), None)
+    same = [r for r in rows if r["mbit_s"] and [condition(r, k) for k in CONDITIONS] == key]
+    old = max(same, key=lambda r: r["mbit_s"]) if same else None
     if ctx.get("router"):
         rt = ctx["router"]
         print("     router ch %s/%s MHz busy %s%% txpower %s dBm, console signal %s dBm, tx %s / rx %s "
@@ -1365,13 +1366,11 @@ def keep(ctx, test, streams, direction, bytes_per_s, a, runs=None):
                   rt.get("signal_dbm"), rt.get("tx_bitrate"), rt.get("rx_bitrate"),
                   rt.get("tx_retries"), rt.get("tx_failed")))
     if old:
-        # a row of 0 is a run that failed: anything measured takes its place
-        change = (row["mbit_s"] - old["mbit_s"]) / old["mbit_s"] * 100 if old["mbit_s"] else 100.0
+        change = (row["mbit_s"] - old["mbit_s"]) / old["mbit_s"] * 100
         verdict = ("within" if abs(change) <= a.tolerance else
                    "better" if change > 0 else "WORSE")
-        print("     on file %.0f Mbit/s (%s, %s): %+.1f%%, %s +-%.0f%%" % (
-            old["mbit_s"], old["date"], old["commit"], change,
-            verdict, a.tolerance))
+        print("     best on file %.0f Mbit/s (%s, %s): %+.1f%%, %s +-%.0f%%" % (
+            old["mbit_s"], old["date"], old["commit"], change, verdict, a.tolerance))
     else:
         verdict = "new"
     if not a.record:
@@ -1379,28 +1378,16 @@ def keep(ctx, test, streams, direction, bytes_per_s, a, runs=None):
     if ctx["dirty"]:
         raise SystemExit("not kept: the plugin on the console was built from uncommitted "
                          "changes (or by hand); commit, make, push, boot, then --record")
-    if a.note:
-        full["note"] = a.note
-    full["verdict"] = verdict
-    os.makedirs(os.path.dirname(RUNS_LOG), exist_ok=True)
-    with open(RUNS_LOG, "a") as f:
-        f.write(json.dumps(full, ensure_ascii=False) + "\n")
-    print("     logged in %s" % os.path.relpath(RUNS_LOG, ROOT))
-    if verdict == "within":
-        return
-    if verdict == "WORSE":
-        if not a.accept_lower:
-            print("     not kept: possibly a regression (was %.0f at %s, now %.0f at %s); "
-                  "--repeat to be sure, or --accept-lower REASON" % (
-                      old["mbit_s"], old["commit"], row["mbit_s"], row["commit"]))
-            return
-        row["note"] = "lower accepted: " + a.accept_lower
-    elif a.note:
-        row["note"] = a.note
-    rows = [r for r in rows if [condition(r, k) for k in CONDITIONS] != key] + [row]
-    os.makedirs(os.path.dirname(RESULTS), exist_ok=True)
-    with open(path, "w") as f:
-        f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    row["verdict"] = verdict
+    note = ("lower accepted: " + a.accept_lower) if verdict == "WORSE" and a.accept_lower else a.note
+    if note:
+        row["note"] = note
+    if verdict == "WORSE" and not a.accept_lower:
+        print("     possibly a regression (best %.0f at %s, now %.0f at %s): find out why" % (
+            old["mbit_s"], old["commit"], row["mbit_s"], row["commit"]))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
     print("     kept in %s" % os.path.relpath(path, ROOT))
 
 
