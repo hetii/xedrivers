@@ -87,14 +87,13 @@ static NET_DEV *uplink(void)
 }
 
 /* A spare card's receive ring kept its bulk endpoint polled: one on the same host
- * controller as the uplink cost it 215 -> 186 Mbit/s (2026-11-12). */
-volatile u32 net_park_spare = 1;
-
+ * controller as the uplink cost it 11-13% into the console (2026-11-13, RTL8822BU uplink,
+ * RTL8156B spare: TCP x4 185.8 -> 211.3 Mbit/s). */
 u32 net_dev_wants_rx(const NET_DEV *nd)
 {
     NET_DEV *up = uplink();
 
-    return !net_park_spare || !up || up == nd || nd->claim || second_is(nd);
+    return !up || up == nd || nd->claim || second_is(nd);
 }
 
 /* --- which device is the uplink -------------------------------------------- */

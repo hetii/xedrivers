@@ -203,7 +203,6 @@ u32  net_dev_tx_space(NET_DEV *nd);
  * claim's, and every card's while there is no uplink. A driver may stop receiving on a
  * card that is not wanted (cdc_net.c) and start again when it is. Any IRQL. */
 u32  net_dev_wants_rx(const NET_DEV *nd);
-extern volatile u32 net_park_spare;     /* 0: every card receives (xectl.py set) */
 
 /* DMA memory. The scratch block is allocated once and never moves -- for control
  * and register buffers a driver keeps across bring-ups; each caller takes its
