@@ -17,9 +17,37 @@
 #define DEFAULT_THREAD_PRIO             20
 #define LWIP_NETCONN_SEM_PER_THREAD     0
 
+/* --- the buffers' sizes ----------------------------------------------------- */
+/* Here, or for one build `make stack=1 LWIP_SND_KB=...` (Makefile, LWIP_*), which wins.
+ * Two RTL8156B by two addresses, xenfs 4 x 128 MB, median of 5 (2026-11-13): a send
+ * buffer of 64 KB in a heap of 640 KB took 381.9 Mbit/s in (a run stalled at 22.6) and
+ * stalled out; 96 KB in 896 KB took 397.2 in and 318.6 out (282.8 at 64 KB, night
+ * before). Over the RTL8822BU one connection out 131.4 -> 157.5 Mbit/s at 96 KB. 96 KB
+ * in 640 KB filled the heap (eight connections). The 256 KB more cost 4 of the 64 KB
+ * blocks the system had left (25 -> 21, ftpdll loaded). 128 KB hung the boot (3 of 3,
+ * cause not known). */
+#ifndef XE_LWIP_SND_KB
+#define XE_LWIP_SND_KB                  96      /* a connection's send buffer */
+#endif
+#ifndef XE_LWIP_HEAP_KB
+#define XE_LWIP_HEAP_KB                 896     /* where what is sent waits, for all of them */
+#endif
+#ifndef XE_LWIP_WND_KB
+#define XE_LWIP_WND_KB                  192     /* a connection's receive window */
+#endif
+#ifndef XE_LWIP_OOSEQ
+#define XE_LWIP_OOSEQ                   64      /* received frames a connection's holes may hold */
+#endif
+#ifndef XE_LWIP_POOL
+#define XE_LWIP_POOL                    768     /* received frames in all; 1024 left the servers no memory */
+#endif
+#ifndef XE_STACK_TXQ
+#define XE_STACK_TXQ                    256u    /* frames sent waiting for the card (link.c), a power of two */
+#endif
+
 /* --- memory: all of it the plugin's own image, none taken at run time ------- */
 #define MEM_ALIGNMENT                   8       /* the semaphores inside lwIP's objects */
-#define MEM_SIZE                        (XE_LWIP_HEAP_KB * 1024)   /* make LWIP_HEAP_KB=, 640 */    /* what is being sent lives here: 8 connections' TCP_SND_BUF and some */
+#define MEM_SIZE                        (XE_LWIP_HEAP_KB * 1024)    /* what is being sent lives here: 8 connections' TCP_SND_BUF and some */
 #define MEMP_NUM_PBUF                   64
 #define MEMP_NUM_UDP_PCB                8
 #define MEMP_NUM_TCP_PCB                48      /* TIME_WAIT ones are taken back when short */
@@ -30,7 +58,7 @@
 #define MEMP_NUM_TCPIP_MSG_API          16
 #define MEMP_NUM_TCPIP_MSG_INPKT        64
 #define MEMP_NUM_SYS_TIMEOUT            16
-#define PBUF_POOL_SIZE                  XE_LWIP_POOL   /* make LWIP_POOL=, 768 */    /* a received frame each: 1.2 MB; 512 ran dry by two cards, 1024 left no system memory for xenfs */
+#define PBUF_POOL_SIZE                  XE_LWIP_POOL    /* a received frame each: 1.2 MB; 512 ran dry by two cards, 1024 left no system memory for xenfs */
 #define PBUF_POOL_BUFSIZE               1536
 
 /* --- protocols -------------------------------------------------------------- */
@@ -63,12 +91,12 @@
 #define TCP_MSS                         1460
 #define LWIP_WND_SCALE                  1
 #define TCP_RCV_SCALE                   3
-#define TCP_WND                         (XE_LWIP_WND_KB * 1024)   /* make LWIP_WND_KB=, 192 */   /* eight of them nearly fit the pool */
-#define TCP_SND_BUF                     (XE_LWIP_SND_KB * 1024)   /* make LWIP_SND_KB=, 64 */    /* four senders of 128 KB ran a 256 KB heap dry and timed out; 128 KB with a heap of 1 MB left xenfs no system memory */
+#define TCP_WND                         (XE_LWIP_WND_KB * 1024)   /* eight of them nearly fit the pool */
+#define TCP_SND_BUF                     (XE_LWIP_SND_KB * 1024)    /* four senders of 128 KB ran a 256 KB heap dry and timed out; 128 KB with a heap of 1 MB left xenfs no system memory */
 #define TCP_SND_QUEUELEN                ((4 * TCP_SND_BUF) / TCP_MSS)
 #define TCP_SNDLOWAT                    32768   /* a 16-bit field in lwIP */
 #define TCP_QUEUE_OOSEQ                 1
-#define TCP_OOSEQ_MAX_PBUFS             XE_LWIP_OOSEQ   /* make LWIP_OOSEQ=, 64 */     /* a connection's holes may not hold the pool */
+#define TCP_OOSEQ_MAX_PBUFS             XE_LWIP_OOSEQ     /* a connection's holes may not hold the pool */
 #define LWIP_TCP_SACK_OUT               1
 #define LWIP_TCP_MAX_SACK_NUM           4
 #define LWIP_TCP_TIMESTAMPS             0
